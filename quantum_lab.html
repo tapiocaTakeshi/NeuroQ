@@ -1,0 +1,646 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>量子ラボ | Quantum Lab</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            background: linear-gradient(135deg, #0a0a1a, #1a0a2e, #0a1a1a);
+            min-height: 100vh;
+            font-family: 'Courier New', monospace;
+            color: #fff;
+        }
+        .header {
+            text-align: center;
+            padding: 15px;
+            background: rgba(0,0,0,0.5);
+            border-bottom: 2px solid #00d4ff;
+        }
+        h1 {
+            font-size: 1.8rem;
+            background: linear-gradient(90deg, #00d4ff, #8b5cf6, #ec4899);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+        .tabs {
+            display: flex;
+            justify-content: center;
+            gap: 10px;
+            padding: 15px;
+            background: rgba(0,0,0,0.3);
+        }
+        .tab {
+            padding: 10px 25px;
+            border: 2px solid #333;
+            border-radius: 25px;
+            cursor: pointer;
+            background: rgba(0,0,0,0.5);
+            color: #888;
+            transition: all 0.3s;
+        }
+        .tab:hover { border-color: #00d4ff; color: #fff; }
+        .tab.active {
+            background: linear-gradient(135deg, #00d4ff, #8b5cf6);
+            color: #fff;
+            border-color: transparent;
+        }
+        .container {
+            display: grid;
+            grid-template-columns: 280px 1fr;
+            gap: 20px;
+            padding: 20px;
+            max-width: 1400px;
+            margin: 0 auto;
+        }
+        .panel {
+            background: rgba(0,0,0,0.6);
+            border: 2px solid #00d4ff;
+            border-radius: 15px;
+            padding: 20px;
+        }
+        .panel h3 {
+            color: #00d4ff;
+            margin-bottom: 15px;
+            padding-bottom: 10px;
+            border-bottom: 1px solid #333;
+        }
+        .control { margin-bottom: 15px; }
+        .control label {
+            display: block;
+            color: #888;
+            font-size: 0.85rem;
+            margin-bottom: 5px;
+        }
+        input[type="range"] {
+            width: 100%;
+            height: 8px;
+            border-radius: 4px;
+            background: #1a1a2e;
+            -webkit-appearance: none;
+        }
+        input[type="range"]::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            width: 16px;
+            height: 16px;
+            border-radius: 50%;
+            background: #00d4ff;
+            cursor: pointer;
+            box-shadow: 0 0 10px #00d4ff;
+        }
+        .value {
+            text-align: right;
+            color: #00d4ff;
+            font-size: 1rem;
+        }
+        select {
+            width: 100%;
+            padding: 8px;
+            background: #1a1a2e;
+            border: 1px solid #333;
+            border-radius: 8px;
+            color: #fff;
+        }
+        .btn {
+            width: 100%;
+            padding: 12px;
+            border: none;
+            border-radius: 25px;
+            font-size: 1rem;
+            cursor: pointer;
+            margin-bottom: 8px;
+            transition: transform 0.2s;
+        }
+        .btn:hover { transform: scale(1.02); }
+        .btn-start { background: linear-gradient(135deg, #10b981, #059669); color: #fff; }
+        .btn-stop { background: linear-gradient(135deg, #ec4899, #be185d); color: #fff; }
+        .btn-reset { background: linear-gradient(135deg, #8b5cf6, #6366f1); color: #fff; }
+        .stats {
+            background: rgba(139,92,246,0.1);
+            border: 1px solid #8b5cf6;
+            border-radius: 10px;
+            padding: 12px;
+            margin-top: 15px;
+        }
+        .stats h4 { color: #8b5cf6; margin-bottom: 10px; }
+        .stat-row {
+            display: flex;
+            justify-content: space-between;
+            font-size: 0.85rem;
+            margin: 5px 0;
+        }
+        .stat-label { color: #888; }
+        .stat-value { color: #00d4ff; font-weight: bold; }
+        canvas { width: 100%; border-radius: 10px; background: rgba(0,0,0,0.5); }
+        .qubit-display {
+            text-align: center;
+            padding: 15px;
+            background: rgba(0,0,0,0.3);
+            border-radius: 10px;
+            margin-bottom: 15px;
+        }
+        .qubit-value {
+            font-size: 3rem;
+            font-weight: bold;
+            text-shadow: 0 0 20px currentColor;
+        }
+        .q0 { color: #00d4ff; }
+        .q1 { color: #ec4899; }
+        .qS { color: #8b5cf6; }
+        .r-bar {
+            height: 20px;
+            background: linear-gradient(90deg, #ec4899, #1a1a2e 50%, #00d4ff);
+            border-radius: 10px;
+            position: relative;
+            margin: 10px 0;
+        }
+        .r-marker {
+            position: absolute;
+            top: -3px;
+            width: 4px;
+            height: 26px;
+            background: #fff;
+            border-radius: 2px;
+            transition: left 0.1s;
+            box-shadow: 0 0 10px #fff;
+        }
+        .r-labels {
+            display: flex;
+            justify-content: space-between;
+            font-size: 0.75rem;
+            color: #666;
+        }
+        .history {
+            display: flex;
+            gap: 2px;
+            flex-wrap: wrap;
+            max-height: 50px;
+            overflow: hidden;
+        }
+        .dot {
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+        }
+        .d0 { background: #00d4ff; }
+        .d1 { background: #ec4899; }
+        .sim-view { display: none; }
+        .sim-view.active { display: block; }
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+        .running .qubit-value { animation: pulse 0.3s infinite; }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>⚛️ 量子ラボ - Quantum Lab</h1>
+    </div>
+    
+    <div class="tabs">
+        <div class="tab active" onclick="switchTab('basic')">基本量子ビット</div>
+        <div class="tab" onclick="switchTab('recursive')">再帰的量子ビット</div>
+        <div class="tab" onclick="switchTab('walk')">量子ウォーク</div>
+        <div class="tab" onclick="switchTab('multi')">多量子ビット</div>
+    </div>
+    
+    <div class="container">
+        <div class="panel">
+            <h3>🎛️ パラメータ</h3>
+            
+            <!-- 共通コントロール -->
+            <div class="control">
+                <label>反復回数 N</label>
+                <input type="range" id="nSlider" min="10" max="500" value="100" oninput="updateParams()">
+                <div class="value">N = <span id="nVal">100</span></div>
+            </div>
+            
+            <div class="control">
+                <label>初期相関係数 r₀</label>
+                <input type="range" id="r0Slider" min="-100" max="100" value="0" oninput="updateParams()">
+                <div class="value">r₀ = <span id="r0Val">0.00</span></div>
+            </div>
+            
+            <div class="control" id="alphaControl">
+                <label>依存強度 α</label>
+                <input type="range" id="alphaSlider" min="5" max="50" value="20" oninput="updateParams()">
+                <div class="value">α = <span id="alphaVal">0.20</span></div>
+            </div>
+            
+            <div class="control">
+                <label>速度 (ms/step)</label>
+                <input type="range" id="speedSlider" min="10" max="200" value="50" oninput="updateParams()">
+                <div class="value"><span id="speedVal">50</span> ms</div>
+            </div>
+            
+            <div class="control" id="depControl">
+                <label>依存関数</label>
+                <select id="depSelect">
+                    <option value="linear">Linear</option>
+                    <option value="feedback">Feedback</option>
+                    <option value="chaotic">Chaotic</option>
+                    <option value="quantum">Quantum</option>
+                    <option value="oscillate">Oscillate</option>
+                </select>
+            </div>
+            
+            <div class="control" id="qubitsControl" style="display:none;">
+                <label>量子ビット数</label>
+                <input type="range" id="qubitsSlider" min="2" max="8" value="3" oninput="updateParams()">
+                <div class="value"><span id="qubitsVal">3</span> qubits</div>
+            </div>
+            
+            <button class="btn btn-start" id="startBtn" onclick="start()">▶ スタート</button>
+            <button class="btn btn-stop" id="stopBtn" onclick="stop()" style="display:none;">⏹ ストップ</button>
+            <button class="btn btn-reset" onclick="reset()">🔄 リセット</button>
+            
+            <div class="stats">
+                <h4>📊 統計</h4>
+                <div class="stat-row"><span class="stat-label">ステップ:</span><span class="stat-value" id="stepStat">0</span></div>
+                <div class="stat-row"><span class="stat-label">現在の r:</span><span class="stat-value" id="rStat">0.00</span></div>
+                <div class="stat-row"><span class="stat-label">P(|0⟩):</span><span class="stat-value" id="p0Stat">50%</span></div>
+                <div class="stat-row"><span class="stat-label">|0⟩回数:</span><span class="stat-value" id="c0Stat">0</span></div>
+                <div class="stat-row"><span class="stat-label">|1⟩回数:</span><span class="stat-value" id="c1Stat">0</span></div>
+                <div class="stat-row"><span class="stat-label">平均 r:</span><span class="stat-value" id="avgStat">0.00</span></div>
+            </div>
+        </div>
+        
+        <div class="panel">
+            <div class="qubit-display" id="qDisp">
+                <div class="qubit-value qS" id="qVal">|ψ⟩</div>
+                <div class="r-bar"><div class="r-marker" id="rMark" style="left:50%"></div></div>
+                <div class="r-labels"><span>-1</span><span>0</span><span>+1</span></div>
+            </div>
+            
+            <div style="margin-bottom:10px;">
+                <label style="color:#888;font-size:0.8rem;">測定履歴:</label>
+                <div class="history" id="hist"></div>
+            </div>
+            
+            <canvas id="mainCanvas" height="280"></canvas>
+            <canvas id="subCanvas" height="180" style="margin-top:15px;"></canvas>
+        </div>
+    </div>
+
+<script>
+// 擬似量子ビット
+class Qubit {
+    constructor(r=0) { this.setR(r); }
+    setR(r) {
+        this.r = Math.max(-1, Math.min(1, r));
+        const t = Math.acos(this.r);
+        this.a = Math.cos(t/2);
+        this.b = Math.sin(t/2);
+        this.p0 = this.a**2;
+    }
+    measure() { return Math.random() < this.p0 ? 0 : 1; }
+}
+
+// 依存関数
+const deps = {
+    linear: (m,r,a) => r + a*(m===0?1:-1),
+    feedback: (m,r,a) => (1-a)*r + a*(m===0?1:-1),
+    chaotic: (m,r,a) => { let x=(r+1)/2; x=3.9*x*(1-x); return (m===0?1:-1)*(2*x-1); },
+    quantum: (m,r,a) => { let t=Math.acos(r)+a*Math.PI/2*(m===0?-1:1); return Math.cos(Math.max(0,Math.min(Math.PI,t))); },
+    oscillate: (m,r,a) => (m===0?1:-1)*Math.cos(Math.acos(r)+a*Math.PI)
+};
+
+// 状態
+let mode = 'basic';
+let running = false;
+let timer = null;
+let step = 0;
+let curR = 0;
+let hist = [];
+let c0=0, c1=0;
+
+// 多量子ビット用
+let multiQubits = [];
+
+// キャンバス
+const mainC = document.getElementById('mainCanvas');
+const subC = document.getElementById('subCanvas');
+const mainCtx = mainC.getContext('2d');
+const subCtx = subC.getContext('2d');
+
+function setupCanvas() {
+    const dpr = window.devicePixelRatio || 1;
+    mainC.width = mainC.offsetWidth * dpr;
+    mainC.height = 280 * dpr;
+    mainCtx.scale(dpr, dpr);
+    subC.width = subC.offsetWidth * dpr;
+    subC.height = 180 * dpr;
+    subCtx.scale(dpr, dpr);
+}
+
+function switchTab(m) {
+    mode = m;
+    document.querySelectorAll('.tab').forEach((t,i) => {
+        t.classList.toggle('active', ['basic','recursive','walk','multi'][i]===m);
+    });
+    document.getElementById('alphaControl').style.display = m==='basic'?'none':'block';
+    document.getElementById('depControl').style.display = m==='recursive'?'block':'none';
+    document.getElementById('qubitsControl').style.display = m==='multi'?'block':'none';
+    reset();
+}
+
+function updateParams() {
+    document.getElementById('nVal').textContent = document.getElementById('nSlider').value;
+    document.getElementById('r0Val').textContent = (document.getElementById('r0Slider').value/100).toFixed(2);
+    document.getElementById('alphaVal').textContent = (document.getElementById('alphaSlider').value/100).toFixed(2);
+    document.getElementById('speedVal').textContent = document.getElementById('speedSlider').value;
+    document.getElementById('qubitsVal').textContent = document.getElementById('qubitsSlider').value;
+}
+
+function start() {
+    if (running) return;
+    running = true;
+    document.getElementById('startBtn').style.display = 'none';
+    document.getElementById('stopBtn').style.display = 'block';
+    document.getElementById('qDisp').classList.add('running');
+    
+    const N = +document.getElementById('nSlider').value;
+    const r0 = +document.getElementById('r0Slider').value/100;
+    const alpha = +document.getElementById('alphaSlider').value/100;
+    const speed = +document.getElementById('speedSlider').value;
+    const dep = document.getElementById('depSelect').value;
+    const nQubits = +document.getElementById('qubitsSlider').value;
+    
+    curR = r0;
+    step = 0;
+    hist = [];
+    c0 = c1 = 0;
+    document.getElementById('hist').innerHTML = '';
+    
+    if (mode === 'multi') {
+        multiQubits = [];
+        for (let i = 0; i < nQubits; i++) {
+            multiQubits.push({ r: r0, hist: [] });
+        }
+    }
+    
+    function tick() {
+        if (!running || step >= N) { stop(); return; }
+        
+        if (mode === 'basic') {
+            // 基本: 相関係数固定で測定
+            const q = new Qubit(curR);
+            const m = q.measure();
+            hist.push({step, r:curR, p0:q.p0, m});
+            if(m===0) c0++; else c1++;
+            updateDisplay(curR, m, q.p0);
+        } else if (mode === 'recursive') {
+            // 再帰: 測定結果が次のrに影響
+            const q = new Qubit(curR);
+            const m = q.measure();
+            hist.push({step, r:curR, p0:q.p0, m});
+            if(m===0) c0++; else c1++;
+            updateDisplay(curR, m, q.p0);
+            curR = Math.max(-1, Math.min(1, deps[dep](m, curR, alpha)));
+        } else if (mode === 'walk') {
+            // 量子ウォーク: 位置が確率的に変動
+            const q = new Qubit(curR);
+            const m = q.measure();
+            hist.push({step, r:curR, p0:q.p0, m});
+            if(m===0) c0++; else c1++;
+            updateDisplay(curR, m, q.p0);
+            // ウォーク: 左右に移動
+            curR = Math.max(-1, Math.min(1, curR + alpha * (m===0?1:-1) * (0.5+Math.random()*0.5)));
+        } else if (mode === 'multi') {
+            // 多量子ビット: 各ビットを独立に測定
+            let totalM = 0;
+            for (let i = 0; i < multiQubits.length; i++) {
+                const q = new Qubit(multiQubits[i].r);
+                const m = q.measure();
+                multiQubits[i].hist.push({r:multiQubits[i].r, m});
+                // もつれ効果: 隣のビットと相関
+                if (i > 0) {
+                    const prevM = multiQubits[i-1].hist[multiQubits[i-1].hist.length-1].m;
+                    multiQubits[i].r = Math.max(-1, Math.min(1, 
+                        multiQubits[i].r + alpha * 0.3 * (prevM === m ? 1 : -1)));
+                }
+                multiQubits[i].r = Math.max(-1, Math.min(1, 
+                    multiQubits[i].r + alpha * (m===0?0.1:-0.1)));
+                totalM += m;
+            }
+            curR = 1 - 2*totalM/multiQubits.length;
+            hist.push({step, r:curR, m:totalM});
+            if(totalM < multiQubits.length/2) c0++; else c1++;
+            updateDisplay(curR, totalM < multiQubits.length/2 ? 0 : 1, 0.5);
+        }
+        
+        updateStats();
+        drawMain();
+        drawSub();
+        step++;
+        timer = setTimeout(tick, speed);
+    }
+    tick();
+}
+
+function stop() {
+    running = false;
+    if (timer) clearTimeout(timer);
+    document.getElementById('startBtn').style.display = 'block';
+    document.getElementById('stopBtn').style.display = 'none';
+    document.getElementById('qDisp').classList.remove('running');
+}
+
+function reset() {
+    stop();
+    curR = +document.getElementById('r0Slider').value/100;
+    step = 0;
+    hist = [];
+    c0 = c1 = 0;
+    multiQubits = [];
+    document.getElementById('hist').innerHTML = '';
+    updateDisplay(curR, -1, 0.5);
+    updateStats();
+    drawMain();
+    drawSub();
+}
+
+function updateDisplay(r, m, p0) {
+    const qv = document.getElementById('qVal');
+    if (m === 0) { qv.textContent = '|0⟩'; qv.className = 'qubit-value q0'; }
+    else if (m === 1) { qv.textContent = '|1⟩'; qv.className = 'qubit-value q1'; }
+    else { qv.textContent = '|ψ⟩'; qv.className = 'qubit-value qS'; }
+    
+    document.getElementById('rMark').style.left = ((r+1)/2*100)+'%';
+    
+    if (m >= 0) {
+        const h = document.getElementById('hist');
+        const d = document.createElement('div');
+        d.className = 'dot d' + m;
+        h.appendChild(d);
+        while (h.children.length > 60) h.removeChild(h.firstChild);
+    }
+}
+
+function updateStats() {
+    document.getElementById('stepStat').textContent = step;
+    document.getElementById('rStat').textContent = curR.toFixed(4);
+    const q = new Qubit(curR);
+    document.getElementById('p0Stat').textContent = (q.p0*100).toFixed(1)+'%';
+    document.getElementById('c0Stat').textContent = c0;
+    document.getElementById('c1Stat').textContent = c1;
+    const avg = hist.length ? hist.reduce((s,h)=>s+h.r,0)/hist.length : 0;
+    document.getElementById('avgStat').textContent = avg.toFixed(4);
+}
+
+function drawMain() {
+    const w = mainC.offsetWidth, h = 280;
+    mainCtx.fillStyle = 'rgba(10,10,15,0.3)';
+    mainCtx.fillRect(0,0,w,h);
+    
+    // グリッド
+    mainCtx.strokeStyle = 'rgba(255,255,255,0.1)';
+    mainCtx.lineWidth = 1;
+    [0.25,0.5,0.75].forEach(y => {
+        mainCtx.beginPath();
+        mainCtx.moveTo(0, h*y);
+        mainCtx.lineTo(w, h*y);
+        mainCtx.stroke();
+    });
+    
+    // 中央線
+    mainCtx.strokeStyle = 'rgba(255,255,255,0.3)';
+    mainCtx.beginPath();
+    mainCtx.moveTo(0, h/2);
+    mainCtx.lineTo(w, h/2);
+    mainCtx.stroke();
+    
+    // ラベル
+    mainCtx.fillStyle = '#666';
+    mainCtx.font = '11px monospace';
+    mainCtx.fillText('r=+1', 5, 15);
+    mainCtx.fillText('r=0', 5, h/2-5);
+    mainCtx.fillText('r=-1', 5, h-5);
+    
+    if (hist.length < 2) return;
+    
+    const N = +document.getElementById('nSlider').value;
+    const xs = w/N, ys = (h-30)/2, yc = h/2;
+    
+    // 波形
+    mainCtx.strokeStyle = '#00d4ff';
+    mainCtx.lineWidth = 2;
+    mainCtx.beginPath();
+    hist.forEach((d,i) => {
+        const x = i*xs, y = yc - d.r*ys;
+        i===0 ? mainCtx.moveTo(x,y) : mainCtx.lineTo(x,y);
+    });
+    mainCtx.stroke();
+    
+    // ドット
+    hist.forEach((d,i) => {
+        mainCtx.beginPath();
+        mainCtx.arc(i*xs, yc-d.r*ys, 3, 0, Math.PI*2);
+        mainCtx.fillStyle = d.m===0 ? '#00d4ff' : '#ec4899';
+        mainCtx.fill();
+    });
+    
+    // 現在位置
+    if (hist.length > 0) {
+        const last = hist[hist.length-1];
+        mainCtx.beginPath();
+        mainCtx.arc((hist.length-1)*xs, yc-last.r*ys, 8, 0, Math.PI*2);
+        mainCtx.fillStyle = 'rgba(0,212,255,0.3)';
+        mainCtx.fill();
+        mainCtx.strokeStyle = '#00d4ff';
+        mainCtx.lineWidth = 2;
+        mainCtx.stroke();
+    }
+}
+
+function drawSub() {
+    const w = subC.offsetWidth, h = 180;
+    subCtx.fillStyle = 'rgba(10,10,15,0.3)';
+    subCtx.fillRect(0,0,w,h);
+    
+    if (mode === 'multi' && multiQubits.length > 0) {
+        // 多量子ビット表示
+        const qh = (h-40) / multiQubits.length;
+        multiQubits.forEach((qb, qi) => {
+            const y = 20 + qi * qh;
+            subCtx.fillStyle = '#666';
+            subCtx.font = '10px monospace';
+            subCtx.fillText(`Q${qi}`, 5, y+qh/2+3);
+            
+            // 各ビットの履歴
+            if (qb.hist.length > 0) {
+                const xs = (w-40) / Math.max(qb.hist.length, 50);
+                qb.hist.slice(-50).forEach((d, i) => {
+                    subCtx.fillStyle = d.m===0 ? '#00d4ff' : '#ec4899';
+                    subCtx.fillRect(30+i*xs, y+2, xs-1, qh-4);
+                });
+            }
+        });
+        return;
+    }
+    
+    // ヒストグラム
+    if (hist.length < 10) {
+        subCtx.fillStyle = '#666';
+        subCtx.font = '12px monospace';
+        subCtx.fillText('ヒストグラム (データ収集中...)', 10, h/2);
+        return;
+    }
+    
+    const bins = 30;
+    const bw = 2/bins;
+    const histo = new Array(bins).fill(0);
+    hist.forEach(d => {
+        const bi = Math.min(bins-1, Math.floor((d.r+1)/bw));
+        histo[bi]++;
+    });
+    
+    const maxC = Math.max(...histo, 1);
+    const barW = (w-50)/bins;
+    
+    histo.forEach((c, i) => {
+        const bh = (c/maxC)*(h-40);
+        const x = 35 + i*barW;
+        const r = -1 + (i+0.5)*bw;
+        let col;
+        if (r < 0) col = `rgb(${Math.floor(236*(1-(r+1)))},72,153)`;
+        else col = `rgb(0,${Math.floor(212*r)},255)`;
+        subCtx.fillStyle = col;
+        subCtx.fillRect(x, h-25-bh, barW-1, bh);
+    });
+    
+    // 軸
+    subCtx.strokeStyle = '#fff';
+    subCtx.beginPath();
+    subCtx.moveTo(35, h-25);
+    subCtx.lineTo(w-15, h-25);
+    subCtx.stroke();
+    
+    subCtx.fillStyle = '#666';
+    subCtx.font = '10px monospace';
+    subCtx.fillText('-1', 30, h-10);
+    subCtx.fillText('0', w/2-5, h-10);
+    subCtx.fillText('+1', w-25, h-10);
+    
+    const mean = hist.reduce((s,d)=>s+d.r,0)/hist.length;
+    const std = Math.sqrt(hist.reduce((s,d)=>s+(d.r-mean)**2,0)/hist.length);
+    subCtx.fillStyle = '#00d4ff';
+    subCtx.fillText(`μ=${mean.toFixed(3)} σ=${std.toFixed(3)}`, w-130, 15);
+}
+
+window.onload = () => {
+    setupCanvas();
+    updateParams();
+    reset();
+};
+window.onresize = () => {
+    setupCanvas();
+    drawMain();
+    drawSub();
+};
+</script>
+</body>
+</html>
+

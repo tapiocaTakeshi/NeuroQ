@@ -1,0 +1,1607 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>E-QBNN シミュレーション</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: 'Helvetica Neue', Arial, sans-serif;
+            background: linear-gradient(135deg, #0a0a1a 0%, #1a1a3a 50%, #0a0a2a 100%);
+            color: #e0e0ff;
+            min-height: 100vh;
+            overflow-x: hidden;
+        }
+        
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        
+        header {
+            text-align: center;
+            padding: 30px 0;
+            background: linear-gradient(180deg, rgba(100,100,255,0.1) 0%, transparent 100%);
+            border-bottom: 1px solid rgba(100,100,255,0.3);
+            margin-bottom: 30px;
+        }
+        
+        h1 {
+            font-size: 2.5em;
+            background: linear-gradient(90deg, #6af, #f6a, #6af);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            margin-bottom: 10px;
+        }
+        
+        .subtitle {
+            color: #8888cc;
+            font-size: 1.1em;
+        }
+        
+        .main-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 20px;
+        }
+        
+        @media (max-width: 1000px) {
+            .main-grid {
+                grid-template-columns: 1fr;
+            }
+        }
+        
+        .panel {
+            background: rgba(30, 30, 60, 0.8);
+            border-radius: 15px;
+            padding: 20px;
+            border: 1px solid rgba(100,100,255,0.2);
+            box-shadow: 0 10px 30px rgba(0,0,0,0.3);
+        }
+        
+        .panel-title {
+            font-size: 1.3em;
+            color: #aaf;
+            margin-bottom: 15px;
+            padding-bottom: 10px;
+            border-bottom: 1px solid rgba(100,100,255,0.2);
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        
+        .panel-title::before {
+            content: '⚛️';
+        }
+        
+        /* ネットワーク可視化 */
+        #network-canvas {
+            width: 100%;
+            height: 300px;
+            background: rgba(0,0,20,0.5);
+            border-radius: 10px;
+        }
+        
+        /* Bloch球 */
+        #bloch-canvas {
+            width: 100%;
+            height: 300px;
+            background: rgba(0,0,20,0.5);
+            border-radius: 10px;
+        }
+        
+        /* r-T平面 */
+        #rt-canvas {
+            width: 100%;
+            height: 250px;
+            background: rgba(0,0,20,0.5);
+            border-radius: 10px;
+        }
+        
+        /* コントロール */
+        .controls {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 15px;
+            margin-top: 15px;
+        }
+        
+        .control-group {
+            background: rgba(0,0,30,0.5);
+            padding: 12px;
+            border-radius: 8px;
+        }
+        
+        .control-group label {
+            display: block;
+            font-size: 0.9em;
+            color: #88a;
+            margin-bottom: 5px;
+        }
+        
+        .control-group input[type="range"] {
+            width: 100%;
+            margin-top: 5px;
+        }
+        
+        .control-group .value {
+            text-align: right;
+            color: #6af;
+            font-family: monospace;
+        }
+        
+        /* 統計パネル */
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 10px;
+            margin-top: 15px;
+        }
+        
+        .stat-box {
+            background: rgba(0,0,40,0.5);
+            padding: 15px;
+            border-radius: 8px;
+            text-align: center;
+        }
+        
+        .stat-box .label {
+            font-size: 0.8em;
+            color: #88a;
+        }
+        
+        .stat-box .value {
+            font-size: 1.5em;
+            font-family: monospace;
+            color: #6f6;
+        }
+        
+        /* レイヤー情報 */
+        .layer-info {
+            margin-top: 15px;
+        }
+        
+        .layer-row {
+            display: grid;
+            grid-template-columns: 80px 1fr 1fr 1fr 1fr;
+            gap: 10px;
+            padding: 8px;
+            background: rgba(0,0,40,0.3);
+            border-radius: 5px;
+            margin-bottom: 5px;
+            font-family: monospace;
+            font-size: 0.9em;
+        }
+        
+        .layer-row.header {
+            color: #88a;
+            font-weight: bold;
+        }
+        
+        /* 生成パネル */
+        .generate-section {
+            margin-top: 20px;
+        }
+        
+        .input-group {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 15px;
+        }
+        
+        .input-group input {
+            flex: 1;
+            padding: 12px 15px;
+            border: none;
+            border-radius: 8px;
+            background: rgba(0,0,40,0.8);
+            color: #fff;
+            font-size: 1em;
+        }
+        
+        .input-group input:focus {
+            outline: 2px solid #6af;
+        }
+        
+        button {
+            padding: 12px 25px;
+            border: none;
+            border-radius: 8px;
+            background: linear-gradient(135deg, #4466ff, #6644ff);
+            color: white;
+            font-size: 1em;
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+        
+        button:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 5px 20px rgba(100,100,255,0.4);
+        }
+        
+        .output-box {
+            background: rgba(0,0,40,0.5);
+            padding: 15px;
+            border-radius: 8px;
+            min-height: 100px;
+            font-family: monospace;
+            line-height: 1.6;
+            white-space: pre-wrap;
+        }
+        
+        /* アニメーション */
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+        
+        .quantum-active {
+            animation: pulse 1s infinite;
+        }
+        
+        /* エンベディング表示 */
+        .embedding-section {
+            margin-top: 15px;
+        }
+        
+        .embedding-display {
+            background: rgba(0,0,40,0.5);
+            padding: 15px;
+            border-radius: 8px;
+            margin-top: 15px;
+        }
+        
+        .embedding-info {
+            margin-bottom: 15px;
+            font-size: 1.1em;
+        }
+        
+        .highlight-text {
+            color: #f6a;
+            font-weight: bold;
+        }
+        
+        .embedding-vector-title {
+            color: #88a;
+            font-size: 0.9em;
+            margin-bottom: 10px;
+        }
+        
+        #embedding-canvas {
+            width: 100%;
+            height: 80px;
+            background: rgba(0,0,20,0.5);
+            border-radius: 5px;
+        }
+        
+        .embedding-values {
+            font-family: monospace;
+            color: #6af;
+            font-size: 0.85em;
+            margin-top: 10px;
+            word-break: break-all;
+        }
+        
+        .token-display {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+            margin-top: 15px;
+        }
+        
+        .token-chip {
+            background: linear-gradient(135deg, #335, #446);
+            padding: 8px 12px;
+            border-radius: 20px;
+            font-size: 0.9em;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            border: 1px solid rgba(100,100,255,0.3);
+        }
+        
+        .token-chip .char {
+            color: #fff;
+            font-weight: bold;
+        }
+        
+        .token-chip .id {
+            color: #6af;
+            font-size: 0.8em;
+        }
+        
+        .token-chip .vec {
+            color: #6f6;
+            font-size: 0.7em;
+        }
+        
+        /* 数式表示 */
+        .formula {
+            background: rgba(0,0,40,0.5);
+            padding: 15px;
+            border-radius: 8px;
+            font-family: monospace;
+            text-align: center;
+            margin: 10px 0;
+            color: #aaf;
+        }
+        
+        .formula .highlight {
+            color: #6f6;
+            font-size: 1.2em;
+        }
+        
+        /* 量子状態表示 */
+        .quantum-state {
+            display: flex;
+            justify-content: center;
+            gap: 20px;
+            margin: 15px 0;
+        }
+        
+        .state-component {
+            text-align: center;
+            padding: 15px;
+            background: rgba(0,0,40,0.5);
+            border-radius: 8px;
+            min-width: 100px;
+        }
+        
+        .state-component .ket {
+            font-size: 1.5em;
+            color: #f6a;
+        }
+        
+        .state-component .amplitude {
+            font-family: monospace;
+            color: #6af;
+            margin-top: 5px;
+        }
+    </style>
+</head>
+<body>
+    <header>
+        <h1>🧠⚛️ E-QBNN シミュレーション</h1>
+        <p class="subtitle">Entangled Quantum Bit Neural Network - 層間エンタングルメントを持つ量子ニューラルネットワーク</p>
+    </header>
+    
+    <div class="container">
+        <div class="main-grid">
+            <!-- 左カラム -->
+            <div>
+                <!-- ネットワーク構造 -->
+                <div class="panel">
+                    <div class="panel-title">ネットワーク構造</div>
+                    <canvas id="network-canvas"></canvas>
+                    
+                    <div class="controls">
+                        <div class="control-group">
+                            <label>隠れ層の数</label>
+                            <input type="range" id="num-layers" min="1" max="5" value="3">
+                            <div class="value" id="num-layers-val">3</div>
+                        </div>
+                        <div class="control-group">
+                            <label>エンタングルメント強度 (λ)</label>
+                            <input type="range" id="entangle-strength" min="0" max="100" value="50">
+                            <div class="value" id="entangle-val">0.50</div>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- r-T平面 -->
+                <div class="panel" style="margin-top: 20px;">
+                    <div class="panel-title">r-T 平面 (幾何学的制約)</div>
+                    <canvas id="rt-canvas"></canvas>
+                    
+                    <div class="formula">
+                        制約条件: <span class="highlight">r² + T² = 1</span>
+                        <br>
+                        r = cos(2θ), T = |sin(2θ)|
+                    </div>
+                </div>
+            </div>
+            
+            <!-- 右カラム -->
+            <div>
+                <!-- Bloch球 -->
+                <div class="panel">
+                    <div class="panel-title">Bloch球 (量子状態)</div>
+                    <canvas id="bloch-canvas"></canvas>
+                    
+                    <div class="quantum-state">
+                        <div class="state-component">
+                            <div class="ket">|0⟩</div>
+                            <div class="amplitude" id="amp-0">cos(θ) = 0.707</div>
+                        </div>
+                        <div class="state-component">
+                            <div class="ket">|ψ⟩ =</div>
+                            <div class="amplitude">cos(θ)|0⟩ + sin(θ)|1⟩</div>
+                        </div>
+                        <div class="state-component">
+                            <div class="ket">|1⟩</div>
+                            <div class="amplitude" id="amp-1">sin(θ) = 0.707</div>
+                        </div>
+                    </div>
+                    
+                    <div class="control-group">
+                        <label>選択レイヤー</label>
+                        <input type="range" id="selected-layer" min="0" max="2" value="0">
+                        <div class="value" id="selected-layer-val">Layer 0</div>
+                    </div>
+                </div>
+                
+                <!-- 層ごとの統計 -->
+                <div class="panel" style="margin-top: 20px;">
+                    <div class="panel-title">レイヤー統計</div>
+                    
+                    <div class="stats-grid">
+                        <div class="stat-box">
+                            <div class="label">総制約誤差</div>
+                            <div class="value" id="total-constraint">0.0000</div>
+                        </div>
+                        <div class="stat-box">
+                            <div class="label">平均 r</div>
+                            <div class="value" id="avg-r">0.000</div>
+                        </div>
+                        <div class="stat-box">
+                            <div class="label">平均 T</div>
+                            <div class="value" id="avg-T">0.000</div>
+                        </div>
+                    </div>
+                    
+                    <div class="layer-info">
+                        <div class="layer-row header">
+                            <span>Layer</span>
+                            <span>θ</span>
+                            <span>r</span>
+                            <span>T</span>
+                            <span>r²+T²</span>
+                        </div>
+                        <div id="layer-rows"></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <!-- テキストエンベディング -->
+        <div class="panel" style="margin-top: 20px;">
+            <div class="panel-title">テキストエンベディング入力</div>
+            
+            <div class="embedding-section">
+                <div class="input-group">
+                    <input type="text" id="embedding-input" placeholder="テキストを入力 (例: 量子)" value="量子">
+                    <button onclick="computeEmbedding()">エンベディング計算</button>
+                </div>
+                
+                <div class="embedding-display">
+                    <div class="embedding-info">
+                        <span>入力テキスト: </span>
+                        <span id="input-text-display" class="highlight-text">量子</span>
+                        <span> → </span>
+                        <span id="token-count">2</span>
+                        <span> トークン</span>
+                    </div>
+                    
+                    <div class="embedding-vector-title">エンベディングベクトル (8次元)</div>
+                    <canvas id="embedding-canvas"></canvas>
+                    
+                    <div class="embedding-values" id="embedding-values">
+                        [0.000, 0.000, 0.000, 0.000, 0.000, 0.000, 0.000, 0.000]
+                    </div>
+                </div>
+                
+                <div class="token-display" id="token-display">
+                    <!-- トークンがここに表示される -->
+                </div>
+            </div>
+        </div>
+        
+        <!-- テキスト生成 -->
+        <div class="panel" style="margin-top: 20px;">
+            <div class="panel-title">量子テキスト生成</div>
+            
+            <div class="generate-section">
+                <div class="input-group">
+                    <input type="text" id="prompt-input" placeholder="プロンプトを入力 (例: 量子コンピュータは)">
+                    <button onclick="generateText()">生成</button>
+                </div>
+                
+                <div class="controls" style="margin-bottom: 15px;">
+                    <div class="control-group">
+                        <label>温度 (Temperature)</label>
+                        <input type="range" id="temperature" min="10" max="200" value="100">
+                        <div class="value" id="temp-val">1.00</div>
+                    </div>
+                    <div class="control-group">
+                        <label>生成長さ</label>
+                        <input type="range" id="gen-length" min="10" max="100" value="40">
+                        <div class="value" id="len-val">40</div>
+                    </div>
+                </div>
+                
+                <div class="output-box" id="output-box">生成結果がここに表示されます...</div>
+            </div>
+        </div>
+    </div>
+    
+    <script>
+        // ========================================
+        // グローバル定数
+        // ========================================
+        const EMBED_DIM = 8;  // エンベディング次元
+        let currentEmbedding = new Array(EMBED_DIM).fill(0);
+        
+        // ========================================
+        // APQB コア関数
+        // ========================================
+        
+        class APQB {
+            static thetaToR(theta) {
+                return Math.cos(2 * theta);
+            }
+            
+            static thetaToT(theta) {
+                return Math.abs(Math.sin(2 * theta));
+            }
+            
+            static constraint(theta) {
+                const r = this.thetaToR(theta);
+                const T = this.thetaToT(theta);
+                return r * r + T * T;
+            }
+            
+            static measure(theta) {
+                const p1 = Math.sin(theta) ** 2;
+                return Math.random() < p1 ? 1 : 0;
+            }
+        }
+        
+        // ========================================
+        // E-QBNN シミュレーション
+        // ========================================
+        
+        // ========================================
+        // QBNN 数式モデル実装
+        // ========================================
+        
+        class QBNNLayer {
+            /**
+             * QBNN Layer
+             * 
+             * 数式モデル:
+             * 1. s^(l) = normalize(h^(l)) ∈ [-1,1]  (正規化)
+             * 2. θ^(l)_i = arccos(s^(l)_i)          (Bloch角)
+             * 3. Δ^(l+1)_j = Σ_i J_{ij} s^(l)_i s^(l+1)_{raw,j}  (もつれ補正)
+             * 4. ĥ^(l+1) = h̃^(l+1) + λ Δ^(l+1)    (有効入力)
+             * 5. h^(l+1) = σ(ĥ^(l+1))              (活性化)
+             */
+            constructor(inputDim, outputDim, lambda = 0.5) {
+                this.inputDim = inputDim;
+                this.outputDim = outputDim;
+                this.lambda = lambda;  // もつれ強さ
+                
+                // 重み W^(l)
+                this.W = this.initWeight(inputDim, outputDim);
+                // バイアス b^(l)
+                this.b = new Array(outputDim).fill(0).map(() => (Math.random() - 0.5) * 0.1);
+                // もつれテンソル J^(l)
+                this.J = this.initWeight(inputDim, outputDim);
+                
+                // 状態保持
+                this.s = null;      // 正規化された状態 [-1,1]
+                this.theta = null;  // Bloch角
+                this.h = null;      // 出力
+            }
+            
+            initWeight(rows, cols) {
+                const scale = Math.sqrt(2 / (rows + cols));
+                return Array(rows).fill(0).map(() => 
+                    Array(cols).fill(0).map(() => (Math.random() - 0.5) * scale * 2)
+                );
+            }
+            
+            normalize(h) {
+                // h を [-1, 1] に正規化（tanh的）
+                return h.map(v => Math.tanh(v));
+            }
+            
+            forward(h_prev) {
+                // Step 1: 前の層の正規化 s^(l)
+                const s_prev = this.normalize(h_prev);
+                
+                // Step 2: Bloch角 θ^(l)
+                const theta_prev = s_prev.map(s => Math.acos(Math.max(-1, Math.min(1, s))));
+                
+                // Step 3: 線形変換 h̃^(l+1) = W h^(l) + b
+                const h_tilde = new Array(this.outputDim).fill(0);
+                for (let j = 0; j < this.outputDim; j++) {
+                    let sum = this.b[j];
+                    for (let i = 0; i < this.inputDim; i++) {
+                        sum += this.W[i][j] * h_prev[i];
+                    }
+                    h_tilde[j] = sum;
+                }
+                
+                // Step 4: 正規化（生の候補）s^(l+1)_raw
+                const s_raw = this.normalize(h_tilde);
+                
+                // Step 5: もつれ補正 Δ^(l+1)
+                const delta = new Array(this.outputDim).fill(0);
+                for (let j = 0; j < this.outputDim; j++) {
+                    let sum = 0;
+                    for (let i = 0; i < this.inputDim; i++) {
+                        // Δ_j = Σ_i J_{ij} s^(l)_i s^(l+1)_{raw,j}
+                        sum += this.J[i][j] * s_prev[i] * s_raw[j];
+                    }
+                    delta[j] = sum;
+                }
+                
+                // Step 6: 有効入力 ĥ^(l+1) = h̃^(l+1) + λ Δ^(l+1)
+                const h_hat = h_tilde.map((v, j) => v + this.lambda * delta[j]);
+                
+                // Step 7: 活性化 h^(l+1) = σ(ĥ^(l+1))
+                this.h = h_hat.map(v => Math.tanh(v));
+                
+                // 状態保存
+                this.s = this.normalize(this.h);
+                this.theta = this.s.map(s => Math.acos(Math.max(-1, Math.min(1, s))));
+                
+                return this.h;
+            }
+            
+            // 量子測定
+            measure() {
+                if (!this.theta) return [];
+                return this.theta.map(t => {
+                    const p1 = Math.sin(t / 2) ** 2;
+                    return Math.random() < p1 ? 1 : 0;
+                });
+            }
+        }
+        
+        class QBNN {
+            /**
+             * Quantum-Bit Neural Network
+             * 
+             * 各層・各ビットが分子のようにもつれ合ったネットワーク
+             */
+            constructor(layerDims, lambda = 0.5) {
+                this.layerDims = layerDims;  // [input, hidden1, hidden2, ..., output]
+                this.lambda = lambda;
+                this.layers = [];
+                
+                // レイヤー作成
+                for (let i = 0; i < layerDims.length - 1; i++) {
+                    this.layers.push(new QBNNLayer(
+                        layerDims[i], 
+                        layerDims[i + 1],
+                        lambda * (1 - i * 0.1)  // 深い層ほど弱く
+                    ));
+                }
+                
+                // 互換性のため
+                this.numLayers = this.layers.length;
+                this.entangleStrength = lambda;
+            }
+            
+            forward(input) {
+                let h = input;
+                for (const layer of this.layers) {
+                    h = layer.forward(h);
+                }
+                return h;
+            }
+            
+            // 全層の測定結果
+            measureAll() {
+                return this.layers.map(layer => layer.measure());
+            }
+            
+            getStats() {
+                let totalConstraint = 0;
+                let avgR = 0;
+                let avgT = 0;
+                let count = 0;
+                
+                for (const layer of this.layers) {
+                    if (layer.s) {
+                        for (const s of layer.s) {
+                            const theta = Math.acos(Math.max(-1, Math.min(1, s)));
+                            const r = APQB.thetaToR(theta);
+                            const T = APQB.thetaToT(theta);
+                            avgR += r;
+                            avgT += T;
+                            totalConstraint += Math.abs(r*r + T*T - 1);
+                            count++;
+                        }
+                    }
+                }
+                
+                return {
+                    totalConstraint: count > 0 ? totalConstraint / count : 0,
+                    avgR: count > 0 ? avgR / count : 0,
+                    avgT: count > 0 ? avgT / count : 0
+                };
+            }
+        }
+        
+        // 古いEQBNNとの互換性ラッパー
+        class EQBNN {
+            constructor(numLayers = 3, entangleStrength = 0.5) {
+                this.numLayers = numLayers;
+                this.entangleStrength = entangleStrength;
+                
+                // QBNN を内部で使用
+                const embedDim = typeof EMBED_DIM !== 'undefined' ? EMBED_DIM : 8;
+                const dims = [embedDim];
+                for (let i = 0; i < numLayers; i++) {
+                    dims.push(4);  // 各隠れ層4ユニット
+                }
+                dims.push(2);  // 出力2ユニット
+                
+                this.qbnn = new QBNN(dims, entangleStrength);
+                this.layers = [];
+                this.initializeLayers();
+            }
+            
+            initializeLayers() {
+                this.layers = [];
+                const thetaMin = Math.PI / 8;
+                const thetaMax = 3 * Math.PI / 8;
+                
+                for (let i = 0; i < this.numLayers; i++) {
+                    const theta = thetaMin + Math.random() * (thetaMax - thetaMin);
+                    this.layers.push({
+                        theta: theta,
+                        r: APQB.thetaToR(theta),
+                        T: APQB.thetaToT(theta),
+                        entangleStrength: this.entangleStrength * (1 - i * 0.05),
+                        s: null,
+                        measurements: null
+                    });
+                }
+            }
+            
+            forward(input) {
+                // 入力がない場合はエンベディングを使用
+                if (!input) {
+                    input = currentEmbedding;
+                }
+                
+                // QBNN でフォワード
+                this.qbnn.forward(input);
+                
+                // 各層の状態を更新
+                const thetaMin = Math.PI / 8;
+                const thetaMax = 3 * Math.PI / 8;
+                
+                for (let i = 0; i < this.numLayers && i < this.qbnn.layers.length; i++) {
+                    const qbnnLayer = this.qbnn.layers[i];
+                    if (qbnnLayer.s && qbnnLayer.s.length > 0) {
+                        // 平均θを計算
+                        const avgS = qbnnLayer.s.reduce((a, b) => a + b, 0) / qbnnLayer.s.length;
+                        const theta = Math.acos(Math.max(-1, Math.min(1, avgS)));
+                        
+                        this.layers[i].theta = Math.max(thetaMin, Math.min(thetaMax, theta));
+                        this.layers[i].r = APQB.thetaToR(this.layers[i].theta);
+                        this.layers[i].T = APQB.thetaToT(this.layers[i].theta);
+                        this.layers[i].s = qbnnLayer.s;
+                        this.layers[i].measurements = qbnnLayer.measure();
+                    }
+                }
+            }
+            
+            getStats() {
+                return this.qbnn.getStats();
+            }
+        }
+        
+        // ========================================
+        // グローバル変数
+        // ========================================
+        
+        let qbnn = new EQBNN(3, 0.5);
+        let selectedLayerIndex = 0;
+        let animationId = null;
+        
+        // ========================================
+        // テキストエンベディング
+        // ========================================
+        
+        class TextEmbedding {
+            constructor(dim = 8) {
+                this.dim = dim;
+                this.charToId = {};
+                this.idToChar = {};
+                this.embeddings = {};
+                this.nextId = 0;
+                
+                // 基本文字のエンベディングを初期化
+                this.initializeBaseEmbeddings();
+            }
+            
+            initializeBaseEmbeddings() {
+                // よく使う文字に固定エンベディングを割り当て
+                const baseChars = '量子コンピュータはニューラルネットワーク機械学習人工知能深層自然言語処理abcdefghijklmnopqrstuvwxyz0123456789';
+                
+                for (const char of baseChars) {
+                    this.getOrCreateEmbedding(char);
+                }
+            }
+            
+            getOrCreateEmbedding(char) {
+                if (!(char in this.charToId)) {
+                    this.charToId[char] = this.nextId;
+                    this.idToChar[this.nextId] = char;
+                    
+                    // 文字のUnicodeを使って擬似ランダムなエンベディングを生成
+                    const code = char.charCodeAt(0);
+                    const embedding = [];
+                    
+                    for (let i = 0; i < this.dim; i++) {
+                        // シード付き疑似乱数（再現可能）
+                        const seed = code * 31 + i * 17;
+                        const val = Math.sin(seed) * Math.cos(seed * 0.7);
+                        embedding.push(val);
+                    }
+                    
+                    // 正規化
+                    const norm = Math.sqrt(embedding.reduce((s, v) => s + v * v, 0));
+                    this.embeddings[char] = embedding.map(v => v / (norm + 0.001));
+                    
+                    this.nextId++;
+                }
+                
+                return {
+                    id: this.charToId[char],
+                    embedding: this.embeddings[char]
+                };
+            }
+            
+            encode(text) {
+                const tokens = [];
+                for (const char of text) {
+                    tokens.push(this.getOrCreateEmbedding(char));
+                }
+                return tokens;
+            }
+            
+            // テキスト全体のエンベディング（平均）
+            getTextEmbedding(text) {
+                const tokens = this.encode(text);
+                if (tokens.length === 0) {
+                    return new Array(this.dim).fill(0);
+                }
+                
+                const sumEmbedding = new Array(this.dim).fill(0);
+                
+                for (const token of tokens) {
+                    for (let i = 0; i < this.dim; i++) {
+                        sumEmbedding[i] += token.embedding[i];
+                    }
+                }
+                
+                // 平均
+                return sumEmbedding.map(v => v / tokens.length);
+            }
+            
+            // 位置エンコーディング付きエンベディング
+            getPositionalEmbedding(text) {
+                const tokens = this.encode(text);
+                const embeddings = [];
+                
+                for (let pos = 0; pos < tokens.length; pos++) {
+                    const baseEmbed = [...tokens[pos].embedding];
+                    
+                    // 位置エンコーディングを追加
+                    for (let i = 0; i < this.dim; i++) {
+                        const angle = pos / Math.pow(10000, 2 * i / this.dim);
+                        if (i % 2 === 0) {
+                            baseEmbed[i] += Math.sin(angle) * 0.1;
+                        } else {
+                            baseEmbed[i] += Math.cos(angle) * 0.1;
+                        }
+                    }
+                    
+                    embeddings.push({
+                        char: tokens[pos].embedding,
+                        id: tokens[pos].id,
+                        position: pos,
+                        embedding: baseEmbed
+                    });
+                }
+                
+                return embeddings;
+            }
+        }
+        
+        const textEmbedder = new TextEmbedding(EMBED_DIM);
+        
+        function computeEmbedding() {
+            const input = document.getElementById('embedding-input').value || '量子';
+            
+            // トークン化とエンベディング
+            const tokens = textEmbedder.encode(input);
+            const textEmbedding = textEmbedder.getTextEmbedding(input);
+            
+            currentEmbedding = textEmbedding;
+            
+            // 表示更新
+            document.getElementById('input-text-display').textContent = input;
+            document.getElementById('token-count').textContent = tokens.length;
+            
+            // エンベディング値表示
+            const embStr = textEmbedding.map(v => v.toFixed(3)).join(', ');
+            document.getElementById('embedding-values').textContent = `[${embStr}]`;
+            
+            // トークン表示
+            const tokenDisplay = document.getElementById('token-display');
+            tokenDisplay.innerHTML = '';
+            
+            tokens.forEach((token, i) => {
+                const chip = document.createElement('div');
+                chip.className = 'token-chip';
+                
+                const char = input[i];
+                const vecPreview = token.embedding.slice(0, 3).map(v => v.toFixed(2)).join(',');
+                
+                chip.innerHTML = `
+                    <span class="char">${char}</span>
+                    <span class="id">ID:${token.id}</span>
+                    <span class="vec">[${vecPreview}...]</span>
+                `;
+                tokenDisplay.appendChild(chip);
+            });
+            
+            // エンベディングを可視化
+            drawEmbedding(textEmbedding);
+            
+            // QBNNにエンベディングを入力
+            feedEmbeddingToQBNN(textEmbedding);
+        }
+        
+        function drawEmbedding(embedding) {
+            const canvas = document.getElementById('embedding-canvas');
+            const ctx = canvas.getContext('2d');
+            
+            const rect = canvas.getBoundingClientRect();
+            canvas.width = rect.width * 2;
+            canvas.height = rect.height * 2;
+            ctx.scale(2, 2);
+            
+            const width = rect.width;
+            const height = rect.height;
+            
+            // 背景
+            ctx.fillStyle = 'rgba(0, 0, 20, 0.5)';
+            ctx.fillRect(0, 0, width, height);
+            
+            const barWidth = width / (embedding.length + 1);
+            const centerY = height / 2;
+            const maxHeight = height / 2 - 10;
+            
+            // 中央線
+            ctx.strokeStyle = 'rgba(100, 100, 150, 0.3)';
+            ctx.beginPath();
+            ctx.moveTo(0, centerY);
+            ctx.lineTo(width, centerY);
+            ctx.stroke();
+            
+            // 各次元のバー
+            embedding.forEach((val, i) => {
+                const x = barWidth * (i + 0.5);
+                const barHeight = val * maxHeight;
+                
+                // 色（正:緑、負:赤）
+                const color = val >= 0 ? 
+                    `rgba(100, 255, 150, ${0.5 + Math.abs(val) * 0.5})` :
+                    `rgba(255, 100, 100, ${0.5 + Math.abs(val) * 0.5})`;
+                
+                ctx.fillStyle = color;
+                
+                if (val >= 0) {
+                    ctx.fillRect(x - barWidth * 0.3, centerY - barHeight, barWidth * 0.6, barHeight);
+                } else {
+                    ctx.fillRect(x - barWidth * 0.3, centerY, barWidth * 0.6, -barHeight);
+                }
+                
+                // 次元ラベル
+                ctx.fillStyle = '#888';
+                ctx.font = '10px sans-serif';
+                ctx.textAlign = 'center';
+                ctx.fillText(`d${i}`, x, height - 5);
+            });
+        }
+        
+        function feedEmbeddingToQBNN(embedding) {
+            // エンベディングをQBNNに入力してフォワードパス実行
+            qbnn.forward(embedding);
+            
+            // 測定結果を更新
+            measureAllNeurons();
+            
+            // UI更新
+            updateUI();
+            drawNetwork();
+            drawBlochSphere();
+            drawRTPlane();
+        }
+        
+        // 学習データ（簡易版）
+        const vocabulary = [
+            '量子', 'コンピュータ', 'は', '、', '量子力学', 'の', '原理', 'を', '利用', 'して',
+            '情報', '処理', 'する', '革新的', 'な', '計算機', 'です', '。',
+            'ニューラルネットワーク', '人間', '脳', '神経回路', '模倣', 'した', '計算システム',
+            '機械学習', '明示的', 'プログラム', 'データ', 'から', '学習', '改善',
+            '人工知能', '深層学習', '多層', '特徴', '自動的', '画像認識', '音声認識',
+            '成功', '収めて', 'います', '技術', '未来', '可能性', '無限', '大きな',
+            '注意機構', '入力', '重要', '部分', '焦点', '当てる', '品質', '向上'
+        ];
+        
+        // ========================================
+        // Canvas 描画
+        // ========================================
+        
+        // ニューロンの測定結果を保持
+        let neuronMeasurements = [];
+        
+        function measureAllNeurons() {
+            neuronMeasurements = [];
+            const numLayers = qbnn.numLayers + 2;
+            const embedDim = typeof EMBED_DIM !== 'undefined' ? EMBED_DIM : 8;
+            const neuronsPerLayer = [embedDim, ...Array(qbnn.numLayers).fill(4), 2];
+            
+            // 入力層：エンベディングから測定
+            const inputMeasurements = [];
+            for (let i = 0; i < neuronsPerLayer[0]; i++) {
+                const embedVal = currentEmbedding[i] || 0;
+                const theta = Math.PI / 4 + embedVal * Math.PI / 8;
+                inputMeasurements.push(APQB.measure(theta));
+            }
+            neuronMeasurements.push(inputMeasurements);
+            
+            // 隠れ層：QBNNの測定結果を使用
+            for (let l = 0; l < qbnn.numLayers; l++) {
+                const layer = qbnn.layers[l];
+                if (layer.measurements && layer.measurements.length > 0) {
+                    neuronMeasurements.push([...layer.measurements]);
+                } else {
+                    // フォールバック
+                    const measurements = [];
+                    for (let i = 0; i < neuronsPerLayer[l + 1]; i++) {
+                        const theta = layer.theta || Math.PI / 4;
+                        measurements.push(APQB.measure(theta));
+                    }
+                    neuronMeasurements.push(measurements);
+                }
+            }
+            
+            // 出力層
+            const outputMeasurements = [];
+            const lastLayer = qbnn.layers[qbnn.numLayers - 1];
+            for (let i = 0; i < neuronsPerLayer[numLayers - 1]; i++) {
+                const theta = lastLayer ? lastLayer.theta : Math.PI / 4;
+                outputMeasurements.push(APQB.measure(theta));
+            }
+            neuronMeasurements.push(outputMeasurements);
+        }
+        
+        function drawNetwork() {
+            const canvas = document.getElementById('network-canvas');
+            const ctx = canvas.getContext('2d');
+            
+            // Retina対応
+            const rect = canvas.getBoundingClientRect();
+            canvas.width = rect.width * 2;
+            canvas.height = rect.height * 2;
+            ctx.scale(2, 2);
+            
+            const width = rect.width;
+            const height = rect.height;
+            
+            // 背景クリア
+            ctx.fillStyle = 'rgba(0, 0, 20, 0.5)';
+            ctx.fillRect(0, 0, width, height);
+            
+            const numLayers = qbnn.numLayers + 2; // 入力 + 隠れ層 + 出力
+            const layerSpacing = width / (numLayers + 1);
+            const embedDim = typeof EMBED_DIM !== 'undefined' ? EMBED_DIM : 8;
+            const neuronsPerLayer = [embedDim, ...Array(qbnn.numLayers).fill(4), 2];
+            
+            // 測定結果がない場合は初期化
+            if (neuronMeasurements.length === 0) {
+                measureAllNeurons();
+            }
+            
+            // 接続を描画（エンタングルメント = 白色の濃さ）
+            for (let l = 0; l < numLayers - 1; l++) {
+                const x1 = layerSpacing * (l + 1);
+                const x2 = layerSpacing * (l + 2);
+                
+                for (let i = 0; i < neuronsPerLayer[l]; i++) {
+                    const y1 = height / (neuronsPerLayer[l] + 1) * (i + 1);
+                    
+                    for (let j = 0; j < neuronsPerLayer[l + 1]; j++) {
+                        const y2 = height / (neuronsPerLayer[l + 1] + 1) * (j + 1);
+                        
+                        // エンタングルメント強度を計算
+                        let entangleStrength = 0.1;
+                        if (l > 0 && l <= qbnn.numLayers) {
+                            entangleStrength = qbnn.layers[l - 1].entangleStrength;
+                        } else if (l === 0 && qbnn.layers.length > 0) {
+                            entangleStrength = qbnn.layers[0].entangleStrength * 0.5;
+                        }
+                        
+                        // もつれの強さに応じて白色の濃さを変える
+                        const whiteIntensity = Math.floor(100 + entangleStrength * 155);
+                        const alpha = 0.3 + entangleStrength * 0.7;
+                        
+                        ctx.strokeStyle = `rgba(${whiteIntensity}, ${whiteIntensity}, ${whiteIntensity + 50}, ${alpha})`;
+                        ctx.lineWidth = 1 + entangleStrength * 2;
+                        ctx.beginPath();
+                        ctx.moveTo(x1, y1);
+                        ctx.lineTo(x2, y2);
+                        ctx.stroke();
+                    }
+                }
+            }
+            
+            // ニューロンを描画（測定結果 0/1 表示）
+            for (let l = 0; l < numLayers; l++) {
+                const x = layerSpacing * (l + 1);
+                
+                for (let i = 0; i < neuronsPerLayer[l]; i++) {
+                    const y = height / (neuronsPerLayer[l] + 1) * (i + 1);
+                    
+                    // 測定結果
+                    const measurement = neuronMeasurements[l] ? neuronMeasurements[l][i] : 0;
+                    
+                    // 測定結果に応じた色（1=明るい、0=暗い）
+                    let bgColor, textColor;
+                    if (measurement === 1) {
+                        bgColor = 'rgba(100, 200, 255, 0.9)';  // 明るい青
+                        textColor = '#000';
+                    } else {
+                        bgColor = 'rgba(40, 40, 80, 0.9)';  // 暗い
+                        textColor = '#aaa';
+                    }
+                    
+                    // ニューロン円
+                    ctx.fillStyle = bgColor;
+                    ctx.beginPath();
+                    ctx.arc(x, y, 18, 0, Math.PI * 2);
+                    ctx.fill();
+                    
+                    // 枠線
+                    ctx.strokeStyle = measurement === 1 ? 
+                        'rgba(150, 220, 255, 1)' : 'rgba(80, 80, 120, 0.8)';
+                    ctx.lineWidth = measurement === 1 ? 3 : 2;
+                    ctx.stroke();
+                    
+                    // 測定結果テキスト（0 or 1）
+                    ctx.fillStyle = textColor;
+                    ctx.font = 'bold 14px monospace';
+                    ctx.textAlign = 'center';
+                    ctx.textBaseline = 'middle';
+                    ctx.fillText(measurement.toString(), x, y);
+                }
+                
+                // レイヤーラベル
+                ctx.fillStyle = '#888';
+                ctx.font = '12px sans-serif';
+                ctx.textAlign = 'center';
+                ctx.textBaseline = 'alphabetic';
+                
+                let label;
+                if (l === 0) label = 'Input';
+                else if (l === numLayers - 1) label = 'Output';
+                else label = `Layer ${l - 1}`;
+                
+                ctx.fillText(label, layerSpacing * (l + 1), height - 10);
+            }
+            
+            // エンタングルメント強度の凡例
+            ctx.fillStyle = '#666';
+            ctx.font = '10px sans-serif';
+            ctx.textAlign = 'left';
+            ctx.fillText('エンタングルメント: 濃い線 = 強いもつれ', 10, 15);
+        }
+        
+        function drawBlochSphere() {
+            const canvas = document.getElementById('bloch-canvas');
+            const ctx = canvas.getContext('2d');
+            
+            const rect = canvas.getBoundingClientRect();
+            canvas.width = rect.width * 2;
+            canvas.height = rect.height * 2;
+            ctx.scale(2, 2);
+            
+            const width = rect.width;
+            const height = rect.height;
+            const cx = width / 2;
+            const cy = height / 2;
+            const radius = Math.min(width, height) / 2 - 40;
+            
+            // 背景クリア
+            ctx.fillStyle = 'rgba(0, 0, 20, 0.5)';
+            ctx.fillRect(0, 0, width, height);
+            
+            // 球体を描画（ワイヤーフレーム）
+            ctx.strokeStyle = 'rgba(100, 100, 150, 0.3)';
+            ctx.lineWidth = 1;
+            
+            // 水平円
+            for (let lat = -60; lat <= 60; lat += 30) {
+                const r = radius * Math.cos(lat * Math.PI / 180);
+                const y = cy + radius * Math.sin(lat * Math.PI / 180) * 0.3;
+                
+                ctx.beginPath();
+                ctx.ellipse(cx, y, r, r * 0.3, 0, 0, Math.PI * 2);
+                ctx.stroke();
+            }
+            
+            // 垂直円
+            ctx.beginPath();
+            ctx.ellipse(cx, cy, radius, radius, 0, 0, Math.PI * 2);
+            ctx.stroke();
+            
+            ctx.beginPath();
+            ctx.ellipse(cx, cy, radius * 0.3, radius, 0, 0, Math.PI * 2);
+            ctx.stroke();
+            
+            // 軸
+            ctx.strokeStyle = 'rgba(150, 150, 200, 0.5)';
+            ctx.setLineDash([5, 5]);
+            
+            // Z軸
+            ctx.beginPath();
+            ctx.moveTo(cx, cy - radius);
+            ctx.lineTo(cx, cy + radius);
+            ctx.stroke();
+            
+            // X軸
+            ctx.beginPath();
+            ctx.moveTo(cx - radius, cy);
+            ctx.lineTo(cx + radius, cy);
+            ctx.stroke();
+            
+            ctx.setLineDash([]);
+            
+            // 選択されたレイヤーの状態ベクトル
+            if (qbnn.layers[selectedLayerIndex]) {
+                const layer = qbnn.layers[selectedLayerIndex];
+                const theta = layer.theta;
+                
+                // Bloch球上の座標
+                const bx = Math.sin(2 * theta);
+                const bz = Math.cos(2 * theta);
+                
+                const px = cx + bx * radius;
+                const py = cy - bz * radius;
+                
+                // ベクトル
+                ctx.strokeStyle = '#ff6666';
+                ctx.lineWidth = 3;
+                ctx.beginPath();
+                ctx.moveTo(cx, cy);
+                ctx.lineTo(px, py);
+                ctx.stroke();
+                
+                // 矢印の先端
+                ctx.fillStyle = '#ff6666';
+                ctx.beginPath();
+                ctx.arc(px, py, 8, 0, Math.PI * 2);
+                ctx.fill();
+                
+                // |0⟩, |1⟩ ラベル
+                ctx.fillStyle = '#6af';
+                ctx.font = '14px sans-serif';
+                ctx.textAlign = 'center';
+                ctx.fillText('|0⟩', cx, cy - radius - 15);
+                ctx.fillText('|1⟩', cx, cy + radius + 20);
+                ctx.fillText('x', cx + radius + 15, cy + 5);
+            }
+        }
+        
+        function drawRTPlane() {
+            const canvas = document.getElementById('rt-canvas');
+            const ctx = canvas.getContext('2d');
+            
+            const rect = canvas.getBoundingClientRect();
+            canvas.width = rect.width * 2;
+            canvas.height = rect.height * 2;
+            ctx.scale(2, 2);
+            
+            const width = rect.width;
+            const height = rect.height;
+            const cx = width / 2;
+            const cy = height - 30;
+            const scale = Math.min(width / 2.5, height - 50);
+            
+            // 背景クリア
+            ctx.fillStyle = 'rgba(0, 0, 20, 0.5)';
+            ctx.fillRect(0, 0, width, height);
+            
+            // グリッド
+            ctx.strokeStyle = 'rgba(100, 100, 150, 0.2)';
+            ctx.lineWidth = 1;
+            
+            for (let i = -1; i <= 1; i += 0.5) {
+                ctx.beginPath();
+                ctx.moveTo(cx + i * scale, 20);
+                ctx.lineTo(cx + i * scale, cy);
+                ctx.stroke();
+            }
+            
+            for (let i = 0; i <= 1; i += 0.25) {
+                ctx.beginPath();
+                ctx.moveTo(cx - scale, cy - i * scale);
+                ctx.lineTo(cx + scale, cy - i * scale);
+                ctx.stroke();
+            }
+            
+            // 制約曲線 r² + T² = 1
+            ctx.strokeStyle = '#6af';
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            
+            for (let theta = 0; theta <= Math.PI / 2; theta += 0.01) {
+                const r = Math.cos(2 * theta);
+                const T = Math.abs(Math.sin(2 * theta));
+                const x = cx + r * scale;
+                const y = cy - T * scale;
+                
+                if (theta === 0) ctx.moveTo(x, y);
+                else ctx.lineTo(x, y);
+            }
+            ctx.stroke();
+            
+            // 各レイヤーの点
+            const colors = ['#ff6666', '#66ff66', '#6666ff', '#ffff66', '#ff66ff'];
+            
+            qbnn.layers.forEach((layer, i) => {
+                const x = cx + layer.r * scale;
+                const y = cy - layer.T * scale;
+                
+                ctx.fillStyle = colors[i % colors.length];
+                ctx.beginPath();
+                ctx.arc(x, y, 10, 0, Math.PI * 2);
+                ctx.fill();
+                
+                ctx.fillStyle = '#fff';
+                ctx.font = '10px sans-serif';
+                ctx.textAlign = 'center';
+                ctx.fillText(i.toString(), x, y + 4);
+            });
+            
+            // 軸ラベル
+            ctx.fillStyle = '#888';
+            ctx.font = '12px sans-serif';
+            ctx.textAlign = 'center';
+            ctx.fillText('r (correlation)', cx, cy + 25);
+            
+            ctx.save();
+            ctx.translate(15, cy / 2);
+            ctx.rotate(-Math.PI / 2);
+            ctx.fillText('T (temperature)', 0, 0);
+            ctx.restore();
+        }
+        
+        // ========================================
+        // UI更新
+        // ========================================
+        
+        function updateUI() {
+            const stats = qbnn.getStats();
+            
+            // 統計更新
+            document.getElementById('total-constraint').textContent = 
+                stats.totalConstraint.toFixed(4);
+            document.getElementById('avg-r').textContent = 
+                stats.avgR.toFixed(3);
+            document.getElementById('avg-T').textContent = 
+                stats.avgT.toFixed(3);
+            
+            // レイヤー行更新
+            const rowsContainer = document.getElementById('layer-rows');
+            rowsContainer.innerHTML = '';
+            
+            qbnn.layers.forEach((layer, i) => {
+                const constraint = APQB.constraint(layer.theta);
+                const row = document.createElement('div');
+                row.className = 'layer-row';
+                row.innerHTML = `
+                    <span>Layer ${i}</span>
+                    <span>${layer.theta.toFixed(3)}</span>
+                    <span style="color: ${layer.r > 0 ? '#6af' : '#f66'}">${layer.r.toFixed(3)}</span>
+                    <span>${layer.T.toFixed(3)}</span>
+                    <span style="color: ${Math.abs(constraint - 1) < 0.01 ? '#6f6' : '#f66'}">${constraint.toFixed(4)}</span>
+                `;
+                rowsContainer.appendChild(row);
+            });
+            
+            // 量子状態表示
+            if (qbnn.layers[selectedLayerIndex]) {
+                const layer = qbnn.layers[selectedLayerIndex];
+                document.getElementById('amp-0').textContent = 
+                    `cos(θ) = ${Math.cos(layer.theta).toFixed(3)}`;
+                document.getElementById('amp-1').textContent = 
+                    `sin(θ) = ${Math.sin(layer.theta).toFixed(3)}`;
+            }
+        }
+        
+        function updateLayerSelector() {
+            const slider = document.getElementById('selected-layer');
+            slider.max = qbnn.numLayers - 1;
+            if (selectedLayerIndex >= qbnn.numLayers) {
+                selectedLayerIndex = qbnn.numLayers - 1;
+                slider.value = selectedLayerIndex;
+            }
+            document.getElementById('selected-layer-val').textContent = 
+                `Layer ${selectedLayerIndex}`;
+        }
+        
+        // ========================================
+        // テキスト生成
+        // ========================================
+        
+        function generateText() {
+            const prompt = document.getElementById('prompt-input').value || '量子';
+            const temperature = document.getElementById('temperature').value / 100;
+            const length = parseInt(document.getElementById('gen-length').value);
+            
+            let output = prompt;
+            const outputBox = document.getElementById('output-box');
+            outputBox.textContent = '生成中...';
+            outputBox.classList.add('quantum-active');
+            
+            // 非同期で生成
+            setTimeout(() => {
+                for (let i = 0; i < length; i++) {
+                    // QBNNを通過
+                    qbnn.forward();
+                    
+                    // 量子測定で次の単語を選択
+                    const lastLayer = qbnn.layers[qbnn.layers.length - 1];
+                    const p = (1 + lastLayer.r) / 2;
+                    
+                    // 温度に応じたサンプリング
+                    let idx = Math.floor(Math.random() * vocabulary.length);
+                    
+                    // 量子効果を追加
+                    const quantum_noise = APQB.measure(lastLayer.theta) * 0.1;
+                    idx = Math.floor((idx + quantum_noise * vocabulary.length) % vocabulary.length);
+                    
+                    output += vocabulary[idx];
+                    
+                    // 層を少し変化させる
+                    qbnn.layers.forEach(layer => {
+                        layer.theta += (Math.random() - 0.5) * 0.1 * temperature;
+                        layer.theta = Math.max(0, Math.min(Math.PI / 2, layer.theta));
+                        layer.r = APQB.thetaToR(layer.theta);
+                        layer.T = APQB.thetaToT(layer.theta);
+                    });
+                }
+                
+                outputBox.textContent = output;
+                outputBox.classList.remove('quantum-active');
+                
+                updateUI();
+                drawNetwork();
+                drawBlochSphere();
+                drawRTPlane();
+            }, 100);
+        }
+        
+        // ========================================
+        // イベントリスナー
+        // ========================================
+        
+        document.getElementById('num-layers').addEventListener('input', (e) => {
+            const val = parseInt(e.target.value);
+            document.getElementById('num-layers-val').textContent = val;
+            qbnn = new EQBNN(val, qbnn.entangleStrength);
+            updateLayerSelector();
+            updateUI();
+            drawNetwork();
+            drawBlochSphere();
+            drawRTPlane();
+        });
+        
+        document.getElementById('entangle-strength').addEventListener('input', (e) => {
+            const val = e.target.value / 100;
+            document.getElementById('entangle-val').textContent = val.toFixed(2);
+            qbnn.entangleStrength = val;
+            qbnn.layers.forEach((layer, i) => {
+                layer.entangleStrength = val * (1 - i * 0.1);
+            });
+            updateUI();
+            drawNetwork();
+        });
+        
+        document.getElementById('selected-layer').addEventListener('input', (e) => {
+            selectedLayerIndex = parseInt(e.target.value);
+            document.getElementById('selected-layer-val').textContent = 
+                `Layer ${selectedLayerIndex}`;
+            updateUI();
+            drawBlochSphere();
+        });
+        
+        document.getElementById('temperature').addEventListener('input', (e) => {
+            document.getElementById('temp-val').textContent = 
+                (e.target.value / 100).toFixed(2);
+        });
+        
+        document.getElementById('gen-length').addEventListener('input', (e) => {
+            document.getElementById('len-val').textContent = e.target.value;
+        });
+        
+        // ========================================
+        // アニメーションループ
+        // ========================================
+        
+        function animate() {
+            // 2θ が 45°〜135° の範囲 → θ は π/8〜3π/8 の範囲
+            const thetaMin = Math.PI / 8;   // 22.5°
+            const thetaMax = 3 * Math.PI / 8; // 67.5°
+            const thetaCenter = Math.PI / 4;  // 45° (中央)
+            
+            qbnn.layers.forEach(layer => {
+                // 量子揺らぎ
+                const fluctuation = (Math.random() - 0.5) * 0.008;
+                layer.theta += fluctuation;
+                
+                // 中央値に向かう弱い復元力
+                const restoring = (thetaCenter - layer.theta) * 0.005;
+                layer.theta += restoring;
+                
+                // 範囲を 2θ = 45°〜135° に制限
+                layer.theta = Math.max(thetaMin, Math.min(thetaMax, layer.theta));
+                layer.r = APQB.thetaToR(layer.theta);
+                layer.T = APQB.thetaToT(layer.theta);
+            });
+            
+            qbnn.forward();
+            
+            updateUI();
+            drawNetwork();
+            drawBlochSphere();
+            drawRTPlane();
+            
+            animationId = requestAnimationFrame(animate);
+        }
+        
+        // ========================================
+        // 初期化
+        // ========================================
+        
+        window.addEventListener('load', () => {
+            updateLayerSelector();
+            updateUI();
+            drawNetwork();
+            drawBlochSphere();
+            drawRTPlane();
+            
+            // 初期エンベディング計算
+            computeEmbedding();
+            
+            // アニメーション開始
+            animate();
+        });
+        
+        window.addEventListener('resize', () => {
+            drawNetwork();
+            drawBlochSphere();
+            drawRTPlane();
+        });
+    </script>
+</body>
+</html>
+

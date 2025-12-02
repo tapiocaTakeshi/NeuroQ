@@ -1,0 +1,708 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Pseudo-Qubit Visualizer</title>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&family=JetBrains+Mono:wght@300;400;500&display=swap');
+        
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: 'JetBrains Mono', monospace;
+            background: linear-gradient(135deg, #0a0a1a 0%, #1a1a3e 50%, #0f0f2a 100%);
+            min-height: 100vh;
+            color: #e0e0e0;
+            overflow-x: hidden;
+        }
+        
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        
+        header {
+            text-align: center;
+            padding: 30px 0;
+            position: relative;
+        }
+        
+        h1 {
+            font-family: 'Orbitron', sans-serif;
+            font-size: 2.5rem;
+            font-weight: 900;
+            background: linear-gradient(90deg, #00ffff, #ff00ff, #00ffff);
+            background-size: 200% auto;
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            animation: gradient 3s ease infinite;
+            text-shadow: 0 0 30px rgba(0, 255, 255, 0.3);
+        }
+        
+        @keyframes gradient {
+            0%, 100% { background-position: 0% center; }
+            50% { background-position: 100% center; }
+        }
+        
+        .subtitle {
+            margin-top: 10px;
+            color: #888;
+            font-size: 0.9rem;
+        }
+        
+        .main-content {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 30px;
+            margin-top: 20px;
+        }
+        
+        .panel {
+            background: rgba(20, 20, 50, 0.8);
+            border-radius: 20px;
+            padding: 25px;
+            border: 1px solid rgba(100, 100, 200, 0.2);
+            box-shadow: 0 10px 40px rgba(0, 0, 0, 0.4),
+                        inset 0 1px 0 rgba(255, 255, 255, 0.05);
+            backdrop-filter: blur(10px);
+        }
+        
+        .panel-title {
+            font-family: 'Orbitron', sans-serif;
+            font-size: 1.2rem;
+            color: #00ffff;
+            margin-bottom: 20px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        
+        .panel-title::before {
+            content: '';
+            display: inline-block;
+            width: 8px;
+            height: 8px;
+            background: #00ffff;
+            border-radius: 50%;
+            animation: pulse 2s ease-in-out infinite;
+        }
+        
+        @keyframes pulse {
+            0%, 100% { opacity: 1; transform: scale(1); }
+            50% { opacity: 0.5; transform: scale(1.2); }
+        }
+        
+        /* Bloch Sphere Canvas */
+        #blochCanvas {
+            width: 100%;
+            aspect-ratio: 1;
+            background: radial-gradient(circle at 30% 30%, #1a1a4a, #0a0a2a);
+            border-radius: 15px;
+            border: 1px solid rgba(0, 255, 255, 0.2);
+        }
+        
+        /* Probability Bars */
+        .prob-container {
+            display: flex;
+            flex-direction: column;
+            gap: 25px;
+            margin-top: 20px;
+        }
+        
+        .prob-item {
+            position: relative;
+        }
+        
+        .prob-label {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 8px;
+            font-size: 1.1rem;
+        }
+        
+        .state-label {
+            font-family: 'Orbitron', sans-serif;
+            font-weight: 700;
+        }
+        
+        .state-0 { color: #00ff88; }
+        .state-1 { color: #ff6b6b; }
+        
+        .prob-bar-bg {
+            height: 40px;
+            background: rgba(0, 0, 0, 0.4);
+            border-radius: 10px;
+            overflow: hidden;
+            position: relative;
+        }
+        
+        .prob-bar {
+            height: 100%;
+            border-radius: 10px;
+            transition: width 0.3s ease-out;
+            position: relative;
+            overflow: hidden;
+        }
+        
+        .prob-bar::after {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: linear-gradient(90deg, 
+                transparent 0%, 
+                rgba(255, 255, 255, 0.2) 50%, 
+                transparent 100%);
+            animation: shimmer 2s infinite;
+        }
+        
+        @keyframes shimmer {
+            0% { transform: translateX(-100%); }
+            100% { transform: translateX(100%); }
+        }
+        
+        .prob-bar-0 {
+            background: linear-gradient(90deg, #00ff88, #00cc66);
+            box-shadow: 0 0 20px rgba(0, 255, 136, 0.4);
+        }
+        
+        .prob-bar-1 {
+            background: linear-gradient(90deg, #ff6b6b, #ff4757);
+            box-shadow: 0 0 20px rgba(255, 107, 107, 0.4);
+        }
+        
+        /* Controls */
+        .controls {
+            grid-column: 1 / -1;
+        }
+        
+        .slider-container {
+            margin: 20px 0;
+        }
+        
+        .slider-label {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 15px;
+            font-size: 1rem;
+        }
+        
+        .correlation-value {
+            font-family: 'Orbitron', sans-serif;
+            font-size: 2rem;
+            font-weight: 900;
+            color: #ff00ff;
+            text-shadow: 0 0 20px rgba(255, 0, 255, 0.5);
+        }
+        
+        input[type="range"] {
+            -webkit-appearance: none;
+            width: 100%;
+            height: 12px;
+            background: linear-gradient(90deg, #ff6b6b, #ffff00, #00ff88);
+            border-radius: 6px;
+            outline: none;
+            cursor: pointer;
+        }
+        
+        input[type="range"]::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            width: 30px;
+            height: 30px;
+            background: #fff;
+            border-radius: 50%;
+            cursor: pointer;
+            box-shadow: 0 0 15px rgba(255, 255, 255, 0.5);
+            transition: transform 0.2s;
+        }
+        
+        input[type="range"]::-webkit-slider-thumb:hover {
+            transform: scale(1.2);
+        }
+        
+        .buttons {
+            display: flex;
+            gap: 15px;
+            justify-content: center;
+            margin-top: 25px;
+        }
+        
+        button {
+            font-family: 'Orbitron', sans-serif;
+            padding: 15px 35px;
+            font-size: 1rem;
+            border: none;
+            border-radius: 10px;
+            cursor: pointer;
+            transition: all 0.3s;
+            text-transform: uppercase;
+            letter-spacing: 2px;
+        }
+        
+        .btn-measure {
+            background: linear-gradient(135deg, #ff00ff, #00ffff);
+            color: #000;
+            font-weight: 700;
+        }
+        
+        .btn-measure:hover {
+            transform: translateY(-3px);
+            box-shadow: 0 10px 30px rgba(255, 0, 255, 0.4);
+        }
+        
+        .btn-reset {
+            background: transparent;
+            border: 2px solid #666;
+            color: #888;
+        }
+        
+        .btn-reset:hover {
+            border-color: #fff;
+            color: #fff;
+        }
+        
+        /* Quantum State Display */
+        .state-display {
+            background: rgba(0, 0, 0, 0.4);
+            border-radius: 15px;
+            padding: 20px;
+            margin-top: 20px;
+            text-align: center;
+            border: 1px solid rgba(100, 100, 200, 0.2);
+        }
+        
+        .quantum-state {
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 1.4rem;
+            color: #fff;
+            margin: 10px 0;
+        }
+        
+        .quantum-state .alpha { color: #00ff88; }
+        .quantum-state .beta { color: #ff6b6b; }
+        
+        .measurement-result {
+            font-family: 'Orbitron', sans-serif;
+            font-size: 1.8rem;
+            font-weight: 900;
+            margin-top: 20px;
+            min-height: 50px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 10px;
+        }
+        
+        .result-0 {
+            color: #00ff88;
+            text-shadow: 0 0 30px rgba(0, 255, 136, 0.8);
+            animation: resultPulse 0.5s ease-out;
+        }
+        
+        .result-1 {
+            color: #ff6b6b;
+            text-shadow: 0 0 30px rgba(255, 107, 107, 0.8);
+            animation: resultPulse 0.5s ease-out;
+        }
+        
+        @keyframes resultPulse {
+            0% { transform: scale(1.5); opacity: 0; }
+            100% { transform: scale(1); opacity: 1; }
+        }
+        
+        /* Info Panel */
+        .info-grid {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 15px;
+            margin-top: 20px;
+        }
+        
+        .info-item {
+            background: rgba(0, 0, 0, 0.3);
+            padding: 15px;
+            border-radius: 10px;
+            text-align: center;
+        }
+        
+        .info-label {
+            font-size: 0.8rem;
+            color: #888;
+            margin-bottom: 5px;
+        }
+        
+        .info-value {
+            font-family: 'Orbitron', sans-serif;
+            font-size: 1.2rem;
+            color: #00ffff;
+        }
+        
+        /* Responsive */
+        @media (max-width: 900px) {
+            .main-content {
+                grid-template-columns: 1fr;
+            }
+            
+            h1 {
+                font-size: 1.8rem;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>PSEUDO-QUBIT VISUALIZER</h1>
+            <p class="subtitle">Correlation Coefficient → Quantum State Mapping</p>
+        </header>
+        
+        <div class="main-content">
+            <!-- Bloch Sphere -->
+            <div class="panel">
+                <div class="panel-title">Bloch Sphere</div>
+                <canvas id="blochCanvas" width="400" height="400"></canvas>
+                
+                <div class="info-grid">
+                    <div class="info-item">
+                        <div class="info-label">θ (degrees)</div>
+                        <div class="info-value" id="thetaValue">90.0°</div>
+                    </div>
+                    <div class="info-item">
+                        <div class="info-label">X coord</div>
+                        <div class="info-value" id="xCoord">1.000</div>
+                    </div>
+                    <div class="info-item">
+                        <div class="info-label">Z coord</div>
+                        <div class="info-value" id="zCoord">0.000</div>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Probability -->
+            <div class="panel">
+                <div class="panel-title">Measurement Probability</div>
+                
+                <div class="prob-container">
+                    <div class="prob-item">
+                        <div class="prob-label">
+                            <span class="state-label state-0">|0⟩</span>
+                            <span class="state-0" id="prob0">50.00%</span>
+                        </div>
+                        <div class="prob-bar-bg">
+                            <div class="prob-bar prob-bar-0" id="bar0" style="width: 50%"></div>
+                        </div>
+                    </div>
+                    
+                    <div class="prob-item">
+                        <div class="prob-label">
+                            <span class="state-label state-1">|1⟩</span>
+                            <span class="state-1" id="prob1">50.00%</span>
+                        </div>
+                        <div class="prob-bar-bg">
+                            <div class="prob-bar prob-bar-1" id="bar1" style="width: 50%"></div>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="state-display">
+                    <div style="color: #888; font-size: 0.9rem;">Quantum State</div>
+                    <div class="quantum-state">
+                        |ψ⟩ = <span class="alpha" id="alphaVal">0.707</span>|0⟩ + <span class="beta" id="betaVal">0.707</span>|1⟩
+                    </div>
+                    
+                    <div class="measurement-result" id="measureResult"></div>
+                </div>
+            </div>
+            
+            <!-- Controls -->
+            <div class="panel controls">
+                <div class="panel-title">Correlation Control</div>
+                
+                <div class="slider-container">
+                    <div class="slider-label">
+                        <span>r = -1 (|1⟩)</span>
+                        <span class="correlation-value" id="rValue">r = 0.00</span>
+                        <span>r = +1 (|0⟩)</span>
+                    </div>
+                    <input type="range" id="correlationSlider" min="-100" max="100" value="0">
+                </div>
+                
+                <div class="buttons">
+                    <button class="btn-measure" id="measureBtn">⚡ Measure</button>
+                    <button class="btn-reset" id="resetBtn">↺ Reset</button>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <script>
+        // 擬似量子ビットクラス
+        class PseudoQubit {
+            constructor(correlation = 0) {
+                this.setCorrelation(correlation);
+            }
+            
+            setCorrelation(r) {
+                this.correlation = Math.max(-1, Math.min(1, r));
+                this.theta = Math.PI * (1 - this.correlation) / 2;
+                this.alpha = Math.cos(this.theta / 2);
+                this.beta = Math.sin(this.theta / 2);
+                this.prob0 = this.alpha ** 2;
+                this.prob1 = this.beta ** 2;
+            }
+            
+            getBlochCoords() {
+                return {
+                    x: Math.sin(this.theta),
+                    y: 0,
+                    z: Math.cos(this.theta)
+                };
+            }
+            
+            measure() {
+                return Math.random() < this.prob0 ? 0 : 1;
+            }
+        }
+        
+        // ブロッホ球描画クラス
+        class BlochSphereRenderer {
+            constructor(canvas) {
+                this.canvas = canvas;
+                this.ctx = canvas.getContext('2d');
+                this.centerX = canvas.width / 2;
+                this.centerY = canvas.height / 2;
+                this.radius = canvas.width * 0.35;
+                this.rotation = 0;
+            }
+            
+            project(x, y, z) {
+                // 簡単な3D投影
+                const cosR = Math.cos(this.rotation);
+                const sinR = Math.sin(this.rotation);
+                const x2 = x * cosR - y * sinR;
+                const y2 = x * sinR + y * cosR;
+                
+                const scale = 1 / (1 - y2 * 0.3);
+                return {
+                    x: this.centerX + x2 * this.radius * scale,
+                    y: this.centerY - z * this.radius * scale,
+                    scale: scale
+                };
+            }
+            
+            draw(qubit) {
+                const ctx = this.ctx;
+                ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
+                
+                // 球体のグラデーション背景
+                const gradient = ctx.createRadialGradient(
+                    this.centerX - 50, this.centerY - 50, 10,
+                    this.centerX, this.centerY, this.radius * 1.5
+                );
+                gradient.addColorStop(0, 'rgba(30, 60, 100, 0.3)');
+                gradient.addColorStop(1, 'rgba(10, 20, 40, 0)');
+                ctx.fillStyle = gradient;
+                ctx.beginPath();
+                ctx.arc(this.centerX, this.centerY, this.radius * 1.2, 0, Math.PI * 2);
+                ctx.fill();
+                
+                // 緯度線
+                ctx.strokeStyle = 'rgba(0, 255, 255, 0.1)';
+                ctx.lineWidth = 1;
+                for (let lat = -60; lat <= 60; lat += 30) {
+                    ctx.beginPath();
+                    const latRad = lat * Math.PI / 180;
+                    const r = Math.cos(latRad) * this.radius;
+                    const y = Math.sin(latRad);
+                    for (let lon = 0; lon <= 360; lon += 5) {
+                        const lonRad = lon * Math.PI / 180;
+                        const x = Math.cos(lonRad) * Math.cos(latRad);
+                        const z = Math.sin(lonRad) * Math.cos(latRad);
+                        const p = this.project(x, z, y);
+                        if (lon === 0) ctx.moveTo(p.x, p.y);
+                        else ctx.lineTo(p.x, p.y);
+                    }
+                    ctx.stroke();
+                }
+                
+                // 経度線
+                for (let lon = 0; lon < 180; lon += 30) {
+                    ctx.beginPath();
+                    const lonRad = lon * Math.PI / 180;
+                    for (let lat = -90; lat <= 90; lat += 5) {
+                        const latRad = lat * Math.PI / 180;
+                        const x = Math.cos(latRad) * Math.cos(lonRad);
+                        const y = Math.cos(latRad) * Math.sin(lonRad);
+                        const z = Math.sin(latRad);
+                        const p = this.project(x, y, z);
+                        if (lat === -90) ctx.moveTo(p.x, p.y);
+                        else ctx.lineTo(p.x, p.y);
+                    }
+                    ctx.stroke();
+                }
+                
+                // 赤道
+                ctx.strokeStyle = 'rgba(255, 255, 0, 0.3)';
+                ctx.lineWidth = 2;
+                ctx.beginPath();
+                for (let lon = 0; lon <= 360; lon += 5) {
+                    const lonRad = lon * Math.PI / 180;
+                    const p = this.project(Math.cos(lonRad), Math.sin(lonRad), 0);
+                    if (lon === 0) ctx.moveTo(p.x, p.y);
+                    else ctx.lineTo(p.x, p.y);
+                }
+                ctx.stroke();
+                
+                // Z軸
+                ctx.strokeStyle = 'rgba(255, 255, 255, 0.4)';
+                ctx.lineWidth = 2;
+                ctx.setLineDash([5, 5]);
+                ctx.beginPath();
+                const top = this.project(0, 0, 1.2);
+                const bottom = this.project(0, 0, -1.2);
+                ctx.moveTo(top.x, top.y);
+                ctx.lineTo(bottom.x, bottom.y);
+                ctx.stroke();
+                ctx.setLineDash([]);
+                
+                // |0⟩ ラベル
+                ctx.font = 'bold 18px Orbitron';
+                ctx.fillStyle = '#00ff88';
+                ctx.textAlign = 'center';
+                const p0 = this.project(0, 0, 1.35);
+                ctx.fillText('|0⟩', p0.x, p0.y);
+                
+                // |1⟩ ラベル
+                ctx.fillStyle = '#ff6b6b';
+                const p1 = this.project(0, 0, -1.35);
+                ctx.fillText('|1⟩', p1.x, p1.y);
+                
+                // 状態ベクトル
+                const coords = qubit.getBlochCoords();
+                const statePoint = this.project(coords.x, coords.y, coords.z);
+                const origin = this.project(0, 0, 0);
+                
+                // ベクトル線
+                ctx.strokeStyle = '#ff00ff';
+                ctx.lineWidth = 4;
+                ctx.lineCap = 'round';
+                ctx.beginPath();
+                ctx.moveTo(origin.x, origin.y);
+                ctx.lineTo(statePoint.x, statePoint.y);
+                ctx.stroke();
+                
+                // 状態点（グロー効果）
+                const glowGradient = ctx.createRadialGradient(
+                    statePoint.x, statePoint.y, 0,
+                    statePoint.x, statePoint.y, 25
+                );
+                glowGradient.addColorStop(0, 'rgba(255, 0, 255, 1)');
+                glowGradient.addColorStop(0.5, 'rgba(255, 0, 255, 0.3)');
+                glowGradient.addColorStop(1, 'rgba(255, 0, 255, 0)');
+                ctx.fillStyle = glowGradient;
+                ctx.beginPath();
+                ctx.arc(statePoint.x, statePoint.y, 25, 0, Math.PI * 2);
+                ctx.fill();
+                
+                // 状態点
+                ctx.fillStyle = '#fff';
+                ctx.beginPath();
+                ctx.arc(statePoint.x, statePoint.y, 10, 0, Math.PI * 2);
+                ctx.fill();
+                
+                ctx.strokeStyle = '#ff00ff';
+                ctx.lineWidth = 3;
+                ctx.stroke();
+            }
+        }
+        
+        // メインアプリケーション
+        const canvas = document.getElementById('blochCanvas');
+        const qubit = new PseudoQubit(0);
+        const renderer = new BlochSphereRenderer(canvas);
+        
+        // UI要素
+        const slider = document.getElementById('correlationSlider');
+        const rValue = document.getElementById('rValue');
+        const prob0 = document.getElementById('prob0');
+        const prob1 = document.getElementById('prob1');
+        const bar0 = document.getElementById('bar0');
+        const bar1 = document.getElementById('bar1');
+        const alphaVal = document.getElementById('alphaVal');
+        const betaVal = document.getElementById('betaVal');
+        const thetaValue = document.getElementById('thetaValue');
+        const xCoord = document.getElementById('xCoord');
+        const zCoord = document.getElementById('zCoord');
+        const measureResult = document.getElementById('measureResult');
+        const measureBtn = document.getElementById('measureBtn');
+        const resetBtn = document.getElementById('resetBtn');
+        
+        function updateDisplay() {
+            const r = qubit.correlation;
+            rValue.textContent = `r = ${r.toFixed(2)}`;
+            
+            prob0.textContent = `${(qubit.prob0 * 100).toFixed(2)}%`;
+            prob1.textContent = `${(qubit.prob1 * 100).toFixed(2)}%`;
+            bar0.style.width = `${qubit.prob0 * 100}%`;
+            bar1.style.width = `${qubit.prob1 * 100}%`;
+            
+            alphaVal.textContent = qubit.alpha.toFixed(4);
+            betaVal.textContent = qubit.beta.toFixed(4);
+            
+            const theta = qubit.theta * 180 / Math.PI;
+            thetaValue.textContent = `${theta.toFixed(1)}°`;
+            
+            const coords = qubit.getBlochCoords();
+            xCoord.textContent = coords.x.toFixed(3);
+            zCoord.textContent = coords.z.toFixed(3);
+            
+            renderer.draw(qubit);
+        }
+        
+        // スライダーイベント
+        slider.addEventListener('input', (e) => {
+            const r = parseInt(e.target.value) / 100;
+            qubit.setCorrelation(r);
+            measureResult.innerHTML = '';
+            updateDisplay();
+        });
+        
+        // 測定ボタン
+        measureBtn.addEventListener('click', () => {
+            const result = qubit.measure();
+            const stateStr = result === 0 ? '|0⟩' : '|1⟩';
+            const className = result === 0 ? 'result-0' : 'result-1';
+            measureResult.innerHTML = `<span class="${className}">⚡ ${stateStr}</span>`;
+        });
+        
+        // リセットボタン
+        resetBtn.addEventListener('click', () => {
+            slider.value = 0;
+            qubit.setCorrelation(0);
+            measureResult.innerHTML = '';
+            updateDisplay();
+        });
+        
+        // アニメーション（球体の回転）
+        let animating = true;
+        function animate() {
+            renderer.rotation += 0.005;
+            renderer.draw(qubit);
+            if (animating) requestAnimationFrame(animate);
+        }
+        
+        // 初期化
+        updateDisplay();
+        animate();
+    </script>
+</body>
+</html>
+

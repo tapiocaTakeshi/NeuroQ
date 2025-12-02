@@ -1,0 +1,830 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>再帰的量子ビット シミュレーター</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            background: linear-gradient(135deg, #0a0a1a 0%, #1a0a2e 50%, #0a1a1a 100%);
+            min-height: 100vh;
+            font-family: 'Courier New', monospace;
+            color: #fff;
+            padding: 20px;
+        }
+        
+        h1 {
+            text-align: center;
+            font-size: 2rem;
+            background: linear-gradient(90deg, #00d4ff, #8b5cf6, #ec4899);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            margin-bottom: 10px;
+        }
+        
+        .subtitle {
+            text-align: center;
+            color: #8b5cf6;
+            margin-bottom: 20px;
+            font-size: 0.9rem;
+        }
+        
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+            display: grid;
+            grid-template-columns: 300px 1fr;
+            gap: 20px;
+        }
+        
+        .panel {
+            background: rgba(0, 0, 0, 0.6);
+            border: 2px solid #00d4ff;
+            border-radius: 15px;
+            padding: 20px;
+            box-shadow: 0 0 30px rgba(0, 212, 255, 0.2);
+        }
+        
+        .control-panel h3 {
+            color: #00d4ff;
+            margin-bottom: 15px;
+            font-size: 1.1rem;
+            border-bottom: 1px solid #333;
+            padding-bottom: 10px;
+        }
+        
+        .control-group {
+            margin-bottom: 20px;
+        }
+        
+        .control-group label {
+            display: block;
+            color: #aaa;
+            margin-bottom: 5px;
+            font-size: 0.85rem;
+        }
+        
+        .control-group input[type="range"] {
+            width: 100%;
+            height: 8px;
+            border-radius: 4px;
+            background: #1a1a2e;
+            outline: none;
+            -webkit-appearance: none;
+        }
+        
+        .control-group input[type="range"]::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            width: 18px;
+            height: 18px;
+            border-radius: 50%;
+            background: #00d4ff;
+            cursor: pointer;
+            box-shadow: 0 0 10px #00d4ff;
+        }
+        
+        .control-value {
+            text-align: right;
+            color: #00d4ff;
+            font-size: 1.1rem;
+            margin-top: 5px;
+        }
+        
+        .dependency-select {
+            width: 100%;
+            padding: 10px;
+            background: #1a1a2e;
+            border: 1px solid #333;
+            border-radius: 8px;
+            color: #fff;
+            font-size: 0.9rem;
+            cursor: pointer;
+        }
+        
+        .dependency-select:focus {
+            outline: none;
+            border-color: #00d4ff;
+        }
+        
+        .btn {
+            width: 100%;
+            padding: 12px;
+            border: none;
+            border-radius: 25px;
+            font-size: 1rem;
+            cursor: pointer;
+            margin-bottom: 10px;
+            transition: transform 0.2s, box-shadow 0.2s;
+        }
+        
+        .btn:hover {
+            transform: scale(1.02);
+        }
+        
+        .btn-start {
+            background: linear-gradient(135deg, #10b981, #059669);
+            color: white;
+        }
+        
+        .btn-stop {
+            background: linear-gradient(135deg, #ec4899, #be185d);
+            color: white;
+        }
+        
+        .btn-reset {
+            background: linear-gradient(135deg, #8b5cf6, #6366f1);
+            color: white;
+        }
+        
+        .stats-panel {
+            margin-top: 20px;
+            background: rgba(139, 92, 246, 0.1);
+            border: 1px solid #8b5cf6;
+            border-radius: 10px;
+            padding: 15px;
+        }
+        
+        .stats-panel h4 {
+            color: #8b5cf6;
+            margin-bottom: 10px;
+        }
+        
+        .stat-row {
+            display: flex;
+            justify-content: space-between;
+            margin: 8px 0;
+            font-size: 0.85rem;
+        }
+        
+        .stat-label {
+            color: #888;
+        }
+        
+        .stat-value {
+            color: #00d4ff;
+            font-weight: bold;
+        }
+        
+        .canvas-container {
+            display: grid;
+            grid-template-rows: 1fr 1fr;
+            gap: 20px;
+        }
+        
+        canvas {
+            width: 100%;
+            border-radius: 10px;
+            background: rgba(0, 0, 0, 0.5);
+        }
+        
+        .current-state {
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            background: rgba(0, 0, 0, 0.8);
+            padding: 10px 15px;
+            border-radius: 10px;
+            border: 1px solid #00d4ff;
+        }
+        
+        .qubit-display {
+            text-align: center;
+            padding: 20px;
+            background: rgba(0, 0, 0, 0.3);
+            border-radius: 10px;
+            margin-bottom: 20px;
+        }
+        
+        .qubit-value {
+            font-size: 3rem;
+            font-weight: bold;
+            text-shadow: 0 0 20px currentColor;
+            transition: color 0.3s;
+        }
+        
+        .qubit-0 { color: #00d4ff; }
+        .qubit-1 { color: #ec4899; }
+        .qubit-super { color: #8b5cf6; }
+        
+        .correlation-bar {
+            height: 30px;
+            background: linear-gradient(90deg, #ec4899, #1a1a2e 50%, #00d4ff);
+            border-radius: 15px;
+            position: relative;
+            margin-top: 10px;
+        }
+        
+        .correlation-marker {
+            position: absolute;
+            top: -5px;
+            width: 4px;
+            height: 40px;
+            background: #fff;
+            border-radius: 2px;
+            transition: left 0.1s;
+            box-shadow: 0 0 10px #fff;
+        }
+        
+        .correlation-labels {
+            display: flex;
+            justify-content: space-between;
+            font-size: 0.8rem;
+            color: #888;
+            margin-top: 5px;
+        }
+        
+        .measurement-history {
+            display: flex;
+            gap: 3px;
+            flex-wrap: wrap;
+            max-height: 60px;
+            overflow: hidden;
+        }
+        
+        .measurement-dot {
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            transition: transform 0.2s;
+        }
+        
+        .measurement-dot:hover {
+            transform: scale(1.5);
+        }
+        
+        .dot-0 { background: #00d4ff; }
+        .dot-1 { background: #ec4899; }
+        
+        .formula-display {
+            background: rgba(0, 0, 0, 0.5);
+            padding: 15px;
+            border-radius: 10px;
+            margin-top: 15px;
+            font-family: 'Times New Roman', serif;
+            font-size: 1.1rem;
+            text-align: center;
+        }
+        
+        .formula-display .math {
+            color: #00d4ff;
+        }
+        
+        @keyframes pulse {
+            0%, 100% { opacity: 1; transform: scale(1); }
+            50% { opacity: 0.7; transform: scale(1.1); }
+        }
+        
+        .running .qubit-value {
+            animation: pulse 0.5s infinite;
+        }
+    </style>
+</head>
+<body>
+    <h1>⚛️ 再帰的量子ビット シミュレーター</h1>
+    <p class="subtitle">Recursive Pseudo-Qubit Simulator - リアルタイム波形可視化</p>
+    
+    <div class="container">
+        <div class="panel control-panel">
+            <h3>🎛️ パラメータ設定</h3>
+            
+            <div class="control-group">
+                <label>反復回数 N</label>
+                <input type="range" id="nSlider" min="10" max="500" value="100">
+                <div class="control-value">N = <span id="nValue">100</span></div>
+            </div>
+            
+            <div class="control-group">
+                <label>初期相関係数 r₀</label>
+                <input type="range" id="r0Slider" min="-100" max="100" value="0">
+                <div class="control-value">r₀ = <span id="r0Value">0.00</span></div>
+            </div>
+            
+            <div class="control-group">
+                <label>依存強度 α</label>
+                <input type="range" id="alphaSlider" min="1" max="50" value="20">
+                <div class="control-value">α = <span id="alphaValue">0.20</span></div>
+            </div>
+            
+            <div class="control-group">
+                <label>シミュレーション速度</label>
+                <input type="range" id="speedSlider" min="1" max="100" value="50">
+                <div class="control-value"><span id="speedValue">50</span> ms/step</div>
+            </div>
+            
+            <div class="control-group">
+                <label>依存関数</label>
+                <select class="dependency-select" id="dependencySelect">
+                    <option value="linear">Linear (線形)</option>
+                    <option value="feedback">Feedback (フィードバック)</option>
+                    <option value="chaotic">Chaotic (カオス)</option>
+                    <option value="quantum">Quantum-Inspired (量子風)</option>
+                    <option value="entangle">Entanglement (もつれ)</option>
+                    <option value="oscillate">Oscillating (振動)</option>
+                </select>
+            </div>
+            
+            <button class="btn btn-start" id="startBtn" onclick="startSimulation()">▶ スタート</button>
+            <button class="btn btn-stop" id="stopBtn" onclick="stopSimulation()" style="display: none;">⏹ ストップ</button>
+            <button class="btn btn-reset" onclick="resetSimulation()">🔄 リセット</button>
+            
+            <div class="formula-display">
+                <div>Q<sub>n</sub> → 測定 m<sub>n</sub></div>
+                <div class="math">r<sub>n+1</sub> = f(m<sub>n</sub>, r<sub>n</sub>)</div>
+            </div>
+            
+            <div class="stats-panel">
+                <h4>📊 統計</h4>
+                <div class="stat-row">
+                    <span class="stat-label">現在のステップ:</span>
+                    <span class="stat-value" id="currentStep">0</span>
+                </div>
+                <div class="stat-row">
+                    <span class="stat-label">現在の r:</span>
+                    <span class="stat-value" id="currentR">0.00</span>
+                </div>
+                <div class="stat-row">
+                    <span class="stat-label">P(|0⟩):</span>
+                    <span class="stat-value" id="prob0">50.0%</span>
+                </div>
+                <div class="stat-row">
+                    <span class="stat-label">|0⟩ 回数:</span>
+                    <span class="stat-value" id="count0">0</span>
+                </div>
+                <div class="stat-row">
+                    <span class="stat-label">|1⟩ 回数:</span>
+                    <span class="stat-value" id="count1">0</span>
+                </div>
+                <div class="stat-row">
+                    <span class="stat-label">平均 r:</span>
+                    <span class="stat-value" id="avgR">0.00</span>
+                </div>
+            </div>
+        </div>
+        
+        <div class="panel">
+            <div class="qubit-display" id="qubitDisplay">
+                <div class="qubit-value qubit-super" id="qubitValue">|ψ⟩</div>
+                <div class="correlation-bar">
+                    <div class="correlation-marker" id="correlationMarker" style="left: 50%;"></div>
+                </div>
+                <div class="correlation-labels">
+                    <span>r = -1 (|1⟩)</span>
+                    <span>r = 0</span>
+                    <span>r = +1 (|0⟩)</span>
+                </div>
+            </div>
+            
+            <div style="margin-bottom: 15px;">
+                <label style="color: #888; font-size: 0.85rem;">測定履歴（最新50回）:</label>
+                <div class="measurement-history" id="measurementHistory"></div>
+            </div>
+            
+            <div class="canvas-container">
+                <div>
+                    <canvas id="waveformCanvas" height="250"></canvas>
+                </div>
+                <div>
+                    <canvas id="distributionCanvas" height="200"></canvas>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // ============================================================
+        // 擬似量子ビット
+        // ============================================================
+        class PseudoQubit {
+            constructor(correlation = 0) {
+                this.setCorrelation(correlation);
+            }
+            
+            setCorrelation(r) {
+                this.correlation = Math.max(-1, Math.min(1, r));
+                const theta = Math.acos(this.correlation);
+                this.alpha = Math.cos(theta / 2);
+                this.beta = Math.sin(theta / 2);
+                this.prob0 = this.alpha ** 2;
+                this.prob1 = this.beta ** 2;
+            }
+            
+            measure() {
+                return Math.random() < this.prob0 ? 0 : 1;
+            }
+        }
+        
+        // ============================================================
+        // 依存関数
+        // ============================================================
+        const dependencyFunctions = {
+            linear: (m, r, alpha) => r + alpha * (m === 0 ? 1 : -1),
+            feedback: (m, r, alpha) => (1 - alpha) * r + alpha * (m === 0 ? 1 : -1),
+            chaotic: (m, r, alpha) => {
+                const x = (r + 1) / 2;
+                const mu = 3.7 + alpha * 0.4;
+                const xNew = mu * x * (1 - x);
+                return (m === 0 ? 1 : -1) * (2 * xNew - 1);
+            },
+            quantum: (m, r, alpha) => {
+                const theta = Math.acos(r);
+                const deltaTheta = alpha * Math.PI / 2 * (m === 0 ? -1 : 1);
+                const newTheta = Math.max(0, Math.min(Math.PI, theta + deltaTheta));
+                return Math.cos(newTheta);
+            },
+            entangle: (m, r, alpha) => {
+                return m === 0 ? Math.max(-1, r - alpha) : Math.min(1, r + alpha);
+            },
+            oscillate: (m, r, alpha) => {
+                const phase = Math.acos(r) + alpha * Math.PI;
+                return (m === 0 ? 1 : -1) * Math.cos(phase);
+            }
+        };
+        
+        // ============================================================
+        // シミュレーション状態
+        // ============================================================
+        let isRunning = false;
+        let animationId = null;
+        let currentStep = 0;
+        let currentR = 0;
+        let history = [];
+        let measurements = [];
+        let count0 = 0;
+        let count1 = 0;
+        
+        // キャンバス
+        const waveformCanvas = document.getElementById('waveformCanvas');
+        const distributionCanvas = document.getElementById('distributionCanvas');
+        const waveformCtx = waveformCanvas.getContext('2d');
+        const distributionCtx = distributionCanvas.getContext('2d');
+        
+        // 解像度設定
+        function setupCanvas() {
+            const dpr = window.devicePixelRatio || 1;
+            
+            waveformCanvas.width = waveformCanvas.offsetWidth * dpr;
+            waveformCanvas.height = 250 * dpr;
+            waveformCtx.scale(dpr, dpr);
+            
+            distributionCanvas.width = distributionCanvas.offsetWidth * dpr;
+            distributionCanvas.height = 200 * dpr;
+            distributionCtx.scale(dpr, dpr);
+        }
+        
+        // ============================================================
+        // UI更新
+        // ============================================================
+        function updateSliderDisplays() {
+            document.getElementById('nValue').textContent = document.getElementById('nSlider').value;
+            document.getElementById('r0Value').textContent = (document.getElementById('r0Slider').value / 100).toFixed(2);
+            document.getElementById('alphaValue').textContent = (document.getElementById('alphaSlider').value / 100).toFixed(2);
+            document.getElementById('speedValue').textContent = 110 - document.getElementById('speedSlider').value;
+        }
+        
+        document.querySelectorAll('input[type="range"]').forEach(slider => {
+            slider.addEventListener('input', updateSliderDisplays);
+        });
+        
+        // ============================================================
+        // シミュレーション
+        // ============================================================
+        function startSimulation() {
+            if (isRunning) return;
+            
+            isRunning = true;
+            document.getElementById('startBtn').style.display = 'none';
+            document.getElementById('stopBtn').style.display = 'block';
+            document.getElementById('qubitDisplay').classList.add('running');
+            
+            const N = parseInt(document.getElementById('nSlider').value);
+            const r0 = parseFloat(document.getElementById('r0Slider').value) / 100;
+            const alpha = parseFloat(document.getElementById('alphaSlider').value) / 100;
+            const speed = 110 - parseInt(document.getElementById('speedSlider').value);
+            const depFunc = document.getElementById('dependencySelect').value;
+            
+            currentR = r0;
+            currentStep = 0;
+            history = [];
+            measurements = [];
+            count0 = 0;
+            count1 = 0;
+            
+            function step() {
+                if (!isRunning || currentStep >= N) {
+                    stopSimulation();
+                    return;
+                }
+                
+                // 量子ビット生成と測定
+                const qubit = new PseudoQubit(currentR);
+                const measurement = qubit.measure();
+                
+                // 記録
+                history.push({
+                    step: currentStep,
+                    r: currentR,
+                    prob0: qubit.prob0,
+                    measurement: measurement
+                });
+                measurements.push(measurement);
+                
+                if (measurement === 0) count0++;
+                else count1++;
+                
+                // UI更新
+                updateQubitDisplay(currentR, measurement, qubit.prob0);
+                updateStats();
+                drawWaveform();
+                drawDistribution();
+                
+                // 次の相関係数を計算
+                currentR = dependencyFunctions[depFunc](measurement, currentR, alpha);
+                currentR = Math.max(-1, Math.min(1, currentR));
+                
+                currentStep++;
+                
+                animationId = setTimeout(step, speed);
+            }
+            
+            step();
+        }
+        
+        function stopSimulation() {
+            isRunning = false;
+            if (animationId) {
+                clearTimeout(animationId);
+                animationId = null;
+            }
+            document.getElementById('startBtn').style.display = 'block';
+            document.getElementById('stopBtn').style.display = 'none';
+            document.getElementById('qubitDisplay').classList.remove('running');
+        }
+        
+        function resetSimulation() {
+            stopSimulation();
+            currentStep = 0;
+            currentR = parseFloat(document.getElementById('r0Slider').value) / 100;
+            history = [];
+            measurements = [];
+            count0 = 0;
+            count1 = 0;
+            
+            updateQubitDisplay(currentR, -1, 0.5);
+            updateStats();
+            drawWaveform();
+            drawDistribution();
+            document.getElementById('measurementHistory').innerHTML = '';
+        }
+        
+        function updateQubitDisplay(r, measurement, prob0) {
+            const qubitValue = document.getElementById('qubitValue');
+            const marker = document.getElementById('correlationMarker');
+            
+            if (measurement === 0) {
+                qubitValue.textContent = '|0⟩';
+                qubitValue.className = 'qubit-value qubit-0';
+            } else if (measurement === 1) {
+                qubitValue.textContent = '|1⟩';
+                qubitValue.className = 'qubit-value qubit-1';
+            } else {
+                qubitValue.textContent = '|ψ⟩';
+                qubitValue.className = 'qubit-value qubit-super';
+            }
+            
+            marker.style.left = ((r + 1) / 2 * 100) + '%';
+            
+            // 測定履歴
+            if (measurement >= 0) {
+                const historyEl = document.getElementById('measurementHistory');
+                const dot = document.createElement('div');
+                dot.className = `measurement-dot dot-${measurement}`;
+                dot.title = `Step ${currentStep}: ${measurement === 0 ? '|0⟩' : '|1⟩'} (r=${r.toFixed(3)})`;
+                historyEl.appendChild(dot);
+                
+                // 最新50個だけ表示
+                while (historyEl.children.length > 50) {
+                    historyEl.removeChild(historyEl.firstChild);
+                }
+            }
+        }
+        
+        function updateStats() {
+            document.getElementById('currentStep').textContent = currentStep;
+            document.getElementById('currentR').textContent = currentR.toFixed(4);
+            
+            const qubit = new PseudoQubit(currentR);
+            document.getElementById('prob0').textContent = (qubit.prob0 * 100).toFixed(1) + '%';
+            
+            document.getElementById('count0').textContent = count0;
+            document.getElementById('count1').textContent = count1;
+            
+            const avgR = history.length > 0 
+                ? (history.reduce((sum, h) => sum + h.r, 0) / history.length).toFixed(4)
+                : '0.00';
+            document.getElementById('avgR').textContent = avgR;
+        }
+        
+        // ============================================================
+        // 波形描画
+        // ============================================================
+        function drawWaveform() {
+            const width = waveformCanvas.offsetWidth;
+            const height = 250;
+            
+            waveformCtx.fillStyle = 'rgba(10, 10, 15, 0.3)';
+            waveformCtx.fillRect(0, 0, width, height);
+            
+            // グリッド
+            waveformCtx.strokeStyle = 'rgba(255, 255, 255, 0.1)';
+            waveformCtx.lineWidth = 1;
+            
+            // 水平線
+            for (let y = 0; y <= 1; y += 0.25) {
+                const py = height / 2 - y * height / 2;
+                waveformCtx.beginPath();
+                waveformCtx.moveTo(0, py);
+                waveformCtx.lineTo(width, py);
+                waveformCtx.stroke();
+                
+                const ny = height / 2 + y * height / 2;
+                waveformCtx.beginPath();
+                waveformCtx.moveTo(0, ny);
+                waveformCtx.lineTo(width, ny);
+                waveformCtx.stroke();
+            }
+            
+            // 中央線
+            waveformCtx.strokeStyle = 'rgba(255, 255, 255, 0.3)';
+            waveformCtx.beginPath();
+            waveformCtx.moveTo(0, height / 2);
+            waveformCtx.lineTo(width, height / 2);
+            waveformCtx.stroke();
+            
+            // ラベル
+            waveformCtx.fillStyle = '#888';
+            waveformCtx.font = '12px monospace';
+            waveformCtx.fillText('r = +1', 5, 15);
+            waveformCtx.fillText('r = 0', 5, height / 2 - 5);
+            waveformCtx.fillText('r = -1', 5, height - 5);
+            
+            if (history.length < 2) return;
+            
+            const N = parseInt(document.getElementById('nSlider').value);
+            const xScale = width / N;
+            const yScale = (height - 40) / 2;
+            const yCenter = height / 2;
+            
+            // 相関係数の波形
+            waveformCtx.strokeStyle = '#00d4ff';
+            waveformCtx.lineWidth = 2;
+            waveformCtx.beginPath();
+            
+            for (let i = 0; i < history.length; i++) {
+                const x = i * xScale;
+                const y = yCenter - history[i].r * yScale;
+                
+                if (i === 0) waveformCtx.moveTo(x, y);
+                else waveformCtx.lineTo(x, y);
+            }
+            waveformCtx.stroke();
+            
+            // 測定結果のドット
+            for (let i = 0; i < history.length; i++) {
+                const x = i * xScale;
+                const y = yCenter - history[i].r * yScale;
+                
+                waveformCtx.beginPath();
+                waveformCtx.arc(x, y, 3, 0, Math.PI * 2);
+                waveformCtx.fillStyle = history[i].measurement === 0 ? '#00d4ff' : '#ec4899';
+                waveformCtx.fill();
+            }
+            
+            // P(|0⟩) の波形
+            waveformCtx.strokeStyle = 'rgba(139, 92, 246, 0.5)';
+            waveformCtx.lineWidth = 1;
+            waveformCtx.setLineDash([5, 5]);
+            waveformCtx.beginPath();
+            
+            for (let i = 0; i < history.length; i++) {
+                const x = i * xScale;
+                const y = height - 20 - history[i].prob0 * (height - 40);
+                
+                if (i === 0) waveformCtx.moveTo(x, y);
+                else waveformCtx.lineTo(x, y);
+            }
+            waveformCtx.stroke();
+            waveformCtx.setLineDash([]);
+            
+            // 現在位置
+            if (history.length > 0) {
+                const lastX = (history.length - 1) * xScale;
+                const lastY = yCenter - history[history.length - 1].r * yScale;
+                
+                waveformCtx.beginPath();
+                waveformCtx.arc(lastX, lastY, 8, 0, Math.PI * 2);
+                waveformCtx.fillStyle = 'rgba(0, 212, 255, 0.3)';
+                waveformCtx.fill();
+                waveformCtx.strokeStyle = '#00d4ff';
+                waveformCtx.lineWidth = 2;
+                waveformCtx.stroke();
+            }
+        }
+        
+        function drawDistribution() {
+            const width = distributionCanvas.offsetWidth;
+            const height = 200;
+            
+            distributionCtx.fillStyle = 'rgba(10, 10, 15, 0.3)';
+            distributionCtx.fillRect(0, 0, width, height);
+            
+            if (history.length < 10) {
+                distributionCtx.fillStyle = '#888';
+                distributionCtx.font = '14px monospace';
+                distributionCtx.fillText('ヒストグラム (データ収集中...)', 10, height / 2);
+                return;
+            }
+            
+            // ヒストグラム
+            const bins = 40;
+            const binWidth = 2 / bins;
+            const histogram = new Array(bins).fill(0);
+            
+            for (const h of history) {
+                const binIdx = Math.min(bins - 1, Math.floor((h.r + 1) / binWidth));
+                histogram[binIdx]++;
+            }
+            
+            const maxCount = Math.max(...histogram, 1);
+            const barWidth = (width - 60) / bins;
+            
+            // バー描画
+            for (let i = 0; i < bins; i++) {
+                const barHeight = (histogram[i] / maxCount) * (height - 50);
+                const x = 40 + i * barWidth;
+                const y = height - 30 - barHeight;
+                
+                // グラデーション
+                const r = -1 + (i + 0.5) * binWidth;
+                let color;
+                if (r < 0) {
+                    const t = (r + 1);
+                    color = `rgb(${Math.floor(236 * (1 - t) + 26 * t)}, ${Math.floor(72 * (1 - t) + 26 * t)}, ${Math.floor(153 * (1 - t) + 46 * t)})`;
+                } else {
+                    const t = r;
+                    color = `rgb(${Math.floor(26 * (1 - t) + 0 * t)}, ${Math.floor(26 * (1 - t) + 212 * t)}, ${Math.floor(46 * (1 - t) + 255 * t)})`;
+                }
+                
+                distributionCtx.fillStyle = color;
+                distributionCtx.fillRect(x, y, barWidth - 1, barHeight);
+            }
+            
+            // 軸
+            distributionCtx.strokeStyle = '#fff';
+            distributionCtx.lineWidth = 1;
+            distributionCtx.beginPath();
+            distributionCtx.moveTo(40, height - 30);
+            distributionCtx.lineTo(width - 20, height - 30);
+            distributionCtx.stroke();
+            
+            // ラベル
+            distributionCtx.fillStyle = '#888';
+            distributionCtx.font = '11px monospace';
+            distributionCtx.fillText('-1', 35, height - 15);
+            distributionCtx.fillText('0', width / 2 - 5, height - 15);
+            distributionCtx.fillText('+1', width - 30, height - 15);
+            distributionCtx.fillText('相関係数 r の分布', width / 2 - 50, 15);
+            
+            // 統計情報
+            const mean = history.reduce((sum, h) => sum + h.r, 0) / history.length;
+            const variance = history.reduce((sum, h) => sum + (h.r - mean) ** 2, 0) / history.length;
+            const std = Math.sqrt(variance);
+            
+            distributionCtx.fillStyle = '#00d4ff';
+            distributionCtx.font = '12px monospace';
+            distributionCtx.fillText(`μ=${mean.toFixed(3)} σ=${std.toFixed(3)}`, width - 150, 15);
+        }
+        
+        // ============================================================
+        // 初期化
+        // ============================================================
+        window.addEventListener('load', () => {
+            setupCanvas();
+            updateSliderDisplays();
+            resetSimulation();
+        });
+        
+        window.addEventListener('resize', () => {
+            setupCanvas();
+            drawWaveform();
+            drawDistribution();
+        });
+    </script>
+</body>
+</html>
+

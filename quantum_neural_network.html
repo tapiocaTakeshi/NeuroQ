@@ -1,0 +1,730 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>量子依存ニューラルネットワーク AI</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            background: linear-gradient(135deg, #0a0a1a, #1a0a2e, #0a1a2e);
+            min-height: 100vh;
+            font-family: monospace;
+            color: #fff;
+            padding: 15px;
+            overflow-x: hidden;
+        }
+        h1 { text-align: center; font-size: 1.5rem; color: #00d4ff; margin-bottom: 5px; }
+        .subtitle { text-align: center; color: #888; font-size: 0.75rem; margin-bottom: 15px; }
+        .container { display: flex; gap: 15px; max-width: 1600px; margin: 0 auto; flex-wrap: wrap; }
+        .panel { background: rgba(0,0,0,0.6); border: 2px solid #00d4ff; border-radius: 10px; padding: 15px; }
+        .controls { width: 280px; }
+        .viz-panel { flex: 1; min-width: 500px; }
+        .output-panel { width: 320px; }
+        h3 { color: #00d4ff; margin-bottom: 10px; font-size: 0.9rem; }
+        .control { margin-bottom: 10px; }
+        .control label { display: block; color: #888; font-size: 0.7rem; margin-bottom: 3px; }
+        input[type="range"] { width: 100%; -webkit-appearance: none; height: 5px; background: #1a1a2e; border-radius: 3px; }
+        input[type="range"]::-webkit-slider-thumb { -webkit-appearance: none; width: 12px; height: 12px; background: #00d4ff; border-radius: 50%; cursor: pointer; }
+        .value { text-align: right; color: #00d4ff; font-size: 0.8rem; }
+        .btn { width: 100%; padding: 8px; margin-bottom: 5px; border: none; border-radius: 15px; font-size: 0.8rem; cursor: pointer; color: #fff; }
+        .btn:active { transform: scale(0.98); }
+        .btn-run { background: linear-gradient(135deg, #10b981, #059669); }
+        .btn-train { background: linear-gradient(135deg, #8b5cf6, #6366f1); }
+        .btn-reset { background: linear-gradient(135deg, #ec4899, #be185d); }
+        .btn-sample { background: linear-gradient(135deg, #f59e0b, #d97706); }
+        canvas { display: block; margin: 0 auto; border-radius: 8px; }
+        .stat-row { display: flex; justify-content: space-between; font-size: 0.75rem; margin: 3px 0; }
+        .stat-label { color: #888; }
+        .stat-value { color: #00d4ff; }
+        .matrix-box { background: rgba(0,0,0,0.4); border-radius: 8px; padding: 10px; margin-bottom: 10px; overflow: hidden; }
+        .matrix-title { color: #8b5cf6; font-size: 0.75rem; margin-bottom: 5px; }
+        .matrix-grid { display: grid; gap: 2px; font-size: 0.6rem; }
+        .matrix-cell { padding: 2px; text-align: center; border-radius: 2px; min-width: 28px; }
+        .cell-pos { background: rgba(0,212,255,0.3); color: #00d4ff; }
+        .cell-neg { background: rgba(236,72,153,0.3); color: #ec4899; }
+        .cell-zero { background: rgba(100,100,100,0.2); color: #666; }
+        .cell-inactive { background: rgba(50,50,50,0.3); color: #333; }
+        .input-box { display: flex; gap: 5px; flex-wrap: wrap; margin-bottom: 10px; }
+        .input-val { width: 40px; padding: 3px; background: #1a1a2e; border: 1px solid #333; border-radius: 4px; color: #fff; font-size: 0.75rem; text-align: center; }
+        .output-box { background: rgba(16,185,129,0.1); border: 1px solid #10b981; border-radius: 8px; padding: 10px; margin-bottom: 10px; }
+        .output-title { color: #10b981; font-size: 0.8rem; margin-bottom: 5px; }
+        .output-vals { display: flex; gap: 8px; flex-wrap: wrap; }
+        .output-item { padding: 5px 10px; background: rgba(0,212,255,0.2); border-radius: 5px; font-size: 0.8rem; }
+        .quantum-state { background: rgba(139,92,246,0.1); border-radius: 6px; padding: 8px; font-size: 0.65rem; line-height: 1.5; margin-bottom: 10px; max-height: 100px; overflow-y: auto; }
+        .info { font-size: 0.7rem; color: #888; padding: 8px; background: rgba(255,255,255,0.05); border-radius: 6px; margin-top: 10px; line-height: 1.4; }
+        .task-select { display: flex; gap: 5px; flex-wrap: wrap; margin-bottom: 10px; }
+        .task-btn { padding: 4px 8px; font-size: 0.7rem; border: 1px solid #333; border-radius: 8px; background: #1a1a2e; color: #888; cursor: pointer; }
+        .task-btn.active { border-color: #10b981; color: #10b981; background: rgba(16,185,129,0.1); }
+        .layer-info { display: flex; gap: 5px; align-items: center; font-size: 0.7rem; color: #aaa; margin-bottom: 5px; }
+        .layer-badge { padding: 2px 6px; border-radius: 10px; font-size: 0.65rem; }
+        .badge-input { background: #10b981; color: #fff; }
+        .badge-hidden { background: #8b5cf6; color: #fff; }
+        .badge-output { background: #ec4899; color: #fff; }
+    </style>
+</head>
+<body>
+    <h1>🧠⚛️ 量子依存ニューラルネットワーク AI</h1>
+    <p class="subtitle">重み・バイアス・行列サイズが全て擬似量子ビットに依存</p>
+    
+    <div class="container">
+        <div class="panel controls">
+            <h3>量子パラメータ</h3>
+            
+            <div class="control">
+                <label>再帰深度 N（量子写像回数）</label>
+                <input type="range" id="nSlider" min="1" max="20" value="5">
+                <div class="value">N = <span id="nVal">5</span></div>
+            </div>
+            
+            <div class="control">
+                <label>量子揺らぎ強度</label>
+                <input type="range" id="noiseSlider" min="0" max="100" value="30">
+                <div class="value"><span id="noiseVal">30</span>%</div>
+            </div>
+            
+            <div class="control">
+                <label>基底相関係数 r₀</label>
+                <input type="range" id="r0Slider" min="-100" max="100" value="50">
+                <div class="value">r₀ = <span id="r0Val">0.50</span></div>
+            </div>
+            
+            <h3 style="margin-top:15px">ネットワーク構造</h3>
+            
+            <div class="control">
+                <label>入力層サイズ</label>
+                <input type="range" id="inputSlider" min="2" max="8" value="4">
+                <div class="value"><span id="inputVal">4</span></div>
+            </div>
+            
+            <div class="control">
+                <label>隠れ層サイズ（最大）</label>
+                <input type="range" id="hiddenSlider" min="2" max="12" value="6">
+                <div class="value"><span id="hiddenVal">6</span></div>
+            </div>
+            
+            <div class="control">
+                <label>出力層サイズ</label>
+                <input type="range" id="outputSlider" min="1" max="6" value="2">
+                <div class="value"><span id="outputVal">2</span></div>
+            </div>
+            
+            <h3 style="margin-top:15px">タスク</h3>
+            <div class="task-select">
+                <button class="task-btn active" data-task="xor">XOR</button>
+                <button class="task-btn" data-task="and">AND</button>
+                <button class="task-btn" data-task="classify">分類</button>
+                <button class="task-btn" data-task="predict">予測</button>
+            </div>
+            
+            <button class="btn btn-sample" id="sampleBtn">🎲 サンプル入力</button>
+            <button class="btn btn-run" id="runBtn">▶ 量子推論実行</button>
+            <button class="btn btn-train" id="trainBtn">🔄 量子学習</button>
+            <button class="btn btn-reset" id="resetBtn">🗑 リセット</button>
+            
+            <div class="info">
+                💡 各重み・バイアスは擬似量子ビットQ(r)から生成<br>
+                📐 アクティブニューロン数も量子測定で決定<br>
+                🔁 N回の再帰写像で重みが進化
+            </div>
+        </div>
+        
+        <div class="panel viz-panel">
+            <canvas id="nnCanvas" width="520" height="400"></canvas>
+            <div style="display:flex;gap:10px;margin-top:10px">
+                <canvas id="weightChart" width="255" height="120"></canvas>
+                <canvas id="activationChart" width="255" height="120"></canvas>
+            </div>
+        </div>
+        
+        <div class="panel output-panel">
+            <h3>入力値</h3>
+            <div class="input-box" id="inputBox"></div>
+            
+            <h3>量子重み行列 W₁ (入力→隠れ)</h3>
+            <div class="matrix-box">
+                <div class="layer-info">
+                    <span class="layer-badge badge-input">入力</span>→
+                    <span class="layer-badge badge-hidden">隠れ</span>
+                    <span id="w1Size">4×6</span>
+                </div>
+                <div class="matrix-grid" id="w1Matrix"></div>
+            </div>
+            
+            <h3>量子重み行列 W₂ (隠れ→出力)</h3>
+            <div class="matrix-box">
+                <div class="layer-info">
+                    <span class="layer-badge badge-hidden">隠れ</span>→
+                    <span class="layer-badge badge-output">出力</span>
+                    <span id="w2Size">6×2</span>
+                </div>
+                <div class="matrix-grid" id="w2Matrix"></div>
+            </div>
+            
+            <h3>量子状態ログ</h3>
+            <div class="quantum-state" id="quantumLog">推論実行で表示...</div>
+            
+            <div class="output-box">
+                <div class="output-title">🎯 出力</div>
+                <div class="output-vals" id="outputVals">-</div>
+            </div>
+            
+            <div class="stat-row"><span class="stat-label">アクティブ入力:</span><span class="stat-value" id="activeInput">-</span></div>
+            <div class="stat-row"><span class="stat-label">アクティブ隠れ:</span><span class="stat-value" id="activeHidden">-</span></div>
+            <div class="stat-row"><span class="stat-label">量子測定回数:</span><span class="stat-value" id="measureCount">0</span></div>
+            <div class="stat-row"><span class="stat-label">平均相関係数:</span><span class="stat-value" id="avgCorr">-</span></div>
+        </div>
+    </div>
+
+<script>
+(function() {
+    // 擬似量子ビット
+    function Qubit(r) {
+        this.r = Math.max(-1, Math.min(1, r));
+        var theta = Math.PI * (1 - this.r) / 2;
+        this.p0 = Math.pow(Math.cos(theta/2), 2);
+        this.alpha = Math.cos(theta/2);
+        this.beta = Math.sin(theta/2);
+    }
+    Qubit.prototype.measure = function() {
+        return Math.random() < this.p0 ? 0 : 1;
+    };
+    Qubit.prototype.getBlochZ = function() {
+        return Math.cos(Math.PI * (1 - this.r) / 2);
+    };
+
+    // 再帰的量子写像
+    function quantumMap(r) {
+        return Math.cos(Math.PI * (1 - r) / 2);
+    }
+
+    function applyQuantumN(r0, N) {
+        var r = r0;
+        for (var i = 0; i < N; i++) {
+            r = quantumMap(r);
+        }
+        return r;
+    }
+
+    // 量子依存の重み生成
+    function generateQuantumWeight(baseR, N, noise) {
+        // 基底相関係数から始める
+        var r = baseR + (Math.random() - 0.5) * noise * 2;
+        r = Math.max(-0.99, Math.min(0.99, r));
+        
+        // N回の量子写像を適用
+        var rN = applyQuantumN(r, N);
+        
+        // 量子ビットを作成して測定も考慮
+        var qubit = new Qubit(rN);
+        var measured = qubit.measure();
+        
+        // 重みは rN と測定結果の組み合わせ
+        var weight = rN * (measured === 0 ? 1 : -1) * (0.5 + Math.random() * 0.5);
+        
+        return { weight: weight, r: r, rN: rN, measured: measured };
+    }
+
+    // アクティブニューロン数を量子的に決定
+    function quantumActiveCount(maxCount, r, N) {
+        var rN = applyQuantumN(r, N);
+        var qubit = new Qubit(rN);
+        
+        // 各ニューロンの存在確率を量子測定
+        var active = 0;
+        for (var i = 0; i < maxCount; i++) {
+            var ni = new Qubit(rN * (1 - i * 0.1));
+            if (ni.measure() === 0) active++;
+        }
+        return Math.max(1, active);
+    }
+
+    // 状態
+    var currentTask = 'xor';
+    var inputSize = 4;
+    var hiddenSize = 6;
+    var outputSize = 2;
+    var inputValues = [];
+    var W1 = [], B1 = [], W2 = [], B2 = [];
+    var activeInputs = [], activeHidden = [];
+    var hiddenActivations = [], outputActivations = [];
+    var quantumLogs = [];
+    var measureCount = 0;
+    var totalCorr = 0;
+
+    var nnCanvas = document.getElementById('nnCanvas');
+    var nnCtx = nnCanvas.getContext('2d');
+    var weightChart = document.getElementById('weightChart');
+    var weightCtx = weightChart.getContext('2d');
+    var activationChart = document.getElementById('activationChart');
+    var actCtx = activationChart.getContext('2d');
+
+    function updateSliders() {
+        document.getElementById('nVal').textContent = document.getElementById('nSlider').value;
+        document.getElementById('noiseVal').textContent = document.getElementById('noiseSlider').value;
+        document.getElementById('r0Val').textContent = (document.getElementById('r0Slider').value / 100).toFixed(2);
+        document.getElementById('inputVal').textContent = document.getElementById('inputSlider').value;
+        document.getElementById('hiddenVal').textContent = document.getElementById('hiddenSlider').value;
+        document.getElementById('outputVal').textContent = document.getElementById('outputSlider').value;
+        
+        inputSize = parseInt(document.getElementById('inputSlider').value);
+        hiddenSize = parseInt(document.getElementById('hiddenSlider').value);
+        outputSize = parseInt(document.getElementById('outputSlider').value);
+        
+        initInputs();
+        drawNN();
+    }
+
+    function initInputs() {
+        var box = document.getElementById('inputBox');
+        box.innerHTML = '';
+        inputValues = [];
+        for (var i = 0; i < inputSize; i++) {
+            var inp = document.createElement('input');
+            inp.type = 'number';
+            inp.className = 'input-val';
+            inp.value = (Math.random() > 0.5 ? 1 : 0).toFixed(1);
+            inp.step = '0.1';
+            inp.min = '-1';
+            inp.max = '1';
+            inp.dataset.idx = i;
+            box.appendChild(inp);
+            inputValues.push(parseFloat(inp.value));
+        }
+    }
+
+    function readInputs() {
+        var inputs = document.querySelectorAll('.input-val');
+        inputValues = [];
+        inputs.forEach(function(inp) {
+            inputValues.push(parseFloat(inp.value) || 0);
+        });
+    }
+
+    function sampleInput() {
+        var inputs = document.querySelectorAll('.input-val');
+        if (currentTask === 'xor') {
+            inputs.forEach(function(inp, i) {
+                inp.value = (Math.random() > 0.5 ? 1 : 0);
+            });
+        } else if (currentTask === 'and') {
+            inputs.forEach(function(inp) {
+                inp.value = (Math.random() > 0.5 ? 1 : 0);
+            });
+        } else {
+            inputs.forEach(function(inp) {
+                inp.value = (Math.random() * 2 - 1).toFixed(2);
+            });
+        }
+        readInputs();
+    }
+
+    // タスク選択
+    document.querySelectorAll('.task-btn').forEach(function(btn) {
+        btn.onclick = function() {
+            document.querySelectorAll('.task-btn').forEach(function(b) { b.classList.remove('active'); });
+            btn.classList.add('active');
+            currentTask = btn.dataset.task;
+        };
+    });
+
+    // 量子ニューラルネットワーク推論
+    function quantumInference() {
+        readInputs();
+        
+        var N = parseInt(document.getElementById('nSlider').value);
+        var noise = parseInt(document.getElementById('noiseSlider').value) / 100;
+        var baseR = parseInt(document.getElementById('r0Slider').value) / 100;
+        
+        quantumLogs = [];
+        measureCount = 0;
+        totalCorr = 0;
+        
+        // 量子的にアクティブニューロン数を決定
+        var activeInputCount = quantumActiveCount(inputSize, baseR, N);
+        var activeHiddenCount = quantumActiveCount(hiddenSize, baseR * 0.8, N);
+        measureCount += inputSize + hiddenSize;
+        
+        activeInputs = [];
+        activeHidden = [];
+        for (var i = 0; i < inputSize; i++) {
+            activeInputs.push(i < activeInputCount);
+        }
+        for (var i = 0; i < hiddenSize; i++) {
+            activeHidden.push(i < activeHiddenCount);
+        }
+        
+        quantumLogs.push('🎲 アクティブ入力: ' + activeInputCount + '/' + inputSize);
+        quantumLogs.push('🎲 アクティブ隠れ: ' + activeHiddenCount + '/' + hiddenSize);
+        
+        // W1: 入力→隠れ の量子重み生成
+        W1 = [];
+        B1 = [];
+        for (var j = 0; j < hiddenSize; j++) {
+            W1[j] = [];
+            var biasResult = generateQuantumWeight(baseR * 0.5, N, noise);
+            B1[j] = activeHidden[j] ? biasResult.weight * 0.1 : 0;
+            measureCount++;
+            totalCorr += Math.abs(biasResult.rN);
+            
+            for (var i = 0; i < inputSize; i++) {
+                if (activeInputs[i] && activeHidden[j]) {
+                    var result = generateQuantumWeight(baseR, N, noise);
+                    W1[j][i] = result.weight;
+                    measureCount++;
+                    totalCorr += Math.abs(result.rN);
+                } else {
+                    W1[j][i] = 0;
+                }
+            }
+        }
+        
+        // W2: 隠れ→出力 の量子重み生成
+        W2 = [];
+        B2 = [];
+        for (var k = 0; k < outputSize; k++) {
+            W2[k] = [];
+            var biasResult2 = generateQuantumWeight(baseR * 0.3, N, noise);
+            B2[k] = biasResult2.weight * 0.1;
+            measureCount++;
+            totalCorr += Math.abs(biasResult2.rN);
+            
+            for (var j = 0; j < hiddenSize; j++) {
+                if (activeHidden[j]) {
+                    var result2 = generateQuantumWeight(baseR * 0.9, N, noise);
+                    W2[k][j] = result2.weight;
+                    measureCount++;
+                    totalCorr += Math.abs(result2.rN);
+                } else {
+                    W2[k][j] = 0;
+                }
+            }
+        }
+        
+        // 順伝播
+        // 隠れ層
+        hiddenActivations = [];
+        for (var j = 0; j < hiddenSize; j++) {
+            var sum = B1[j];
+            for (var i = 0; i < inputSize; i++) {
+                if (activeInputs[i]) {
+                    sum += inputValues[i] * W1[j][i];
+                }
+            }
+            // 量子活性化関数（tanh的だが量子揺らぎ付き）
+            var act = Math.tanh(sum);
+            if (activeHidden[j]) {
+                var qubit = new Qubit(act);
+                if (Math.random() < noise) {
+                    act = qubit.measure() === 0 ? Math.abs(act) : -Math.abs(act);
+                }
+            } else {
+                act = 0;
+            }
+            hiddenActivations[j] = act;
+        }
+        
+        // 出力層
+        outputActivations = [];
+        for (var k = 0; k < outputSize; k++) {
+            var sum2 = B2[k];
+            for (var j = 0; j < hiddenSize; j++) {
+                sum2 += hiddenActivations[j] * W2[k][j];
+            }
+            outputActivations[k] = Math.tanh(sum2);
+        }
+        
+        quantumLogs.push('📊 量子測定回数: ' + measureCount);
+        quantumLogs.push('📈 平均|r_N|: ' + (totalCorr / measureCount).toFixed(4));
+        
+        updateDisplay();
+        drawNN();
+        drawWeightChart();
+        drawActivationChart();
+    }
+
+    function updateDisplay() {
+        // 行列表示
+        var w1Grid = document.getElementById('w1Matrix');
+        w1Grid.innerHTML = '';
+        w1Grid.style.gridTemplateColumns = 'repeat(' + inputSize + ', 1fr)';
+        document.getElementById('w1Size').textContent = inputSize + '×' + hiddenSize;
+        
+        for (var j = 0; j < hiddenSize; j++) {
+            for (var i = 0; i < inputSize; i++) {
+                var cell = document.createElement('div');
+                cell.className = 'matrix-cell';
+                var w = W1[j] ? W1[j][i] : 0;
+                cell.textContent = w.toFixed(2);
+                if (!activeInputs[i] || !activeHidden[j]) {
+                    cell.classList.add('cell-inactive');
+                } else if (w > 0.01) {
+                    cell.classList.add('cell-pos');
+                } else if (w < -0.01) {
+                    cell.classList.add('cell-neg');
+                } else {
+                    cell.classList.add('cell-zero');
+                }
+                w1Grid.appendChild(cell);
+            }
+        }
+        
+        var w2Grid = document.getElementById('w2Matrix');
+        w2Grid.innerHTML = '';
+        w2Grid.style.gridTemplateColumns = 'repeat(' + hiddenSize + ', 1fr)';
+        document.getElementById('w2Size').textContent = hiddenSize + '×' + outputSize;
+        
+        for (var k = 0; k < outputSize; k++) {
+            for (var j = 0; j < hiddenSize; j++) {
+                var cell2 = document.createElement('div');
+                cell2.className = 'matrix-cell';
+                var w2 = W2[k] ? W2[k][j] : 0;
+                cell2.textContent = w2.toFixed(2);
+                if (!activeHidden[j]) {
+                    cell2.classList.add('cell-inactive');
+                } else if (w2 > 0.01) {
+                    cell2.classList.add('cell-pos');
+                } else if (w2 < -0.01) {
+                    cell2.classList.add('cell-neg');
+                } else {
+                    cell2.classList.add('cell-zero');
+                }
+                w2Grid.appendChild(cell2);
+            }
+        }
+        
+        // 量子ログ
+        document.getElementById('quantumLog').innerHTML = quantumLogs.join('<br>');
+        
+        // 出力
+        var outBox = document.getElementById('outputVals');
+        outBox.innerHTML = '';
+        outputActivations.forEach(function(v, i) {
+            var item = document.createElement('div');
+            item.className = 'output-item';
+            item.textContent = 'y' + i + ' = ' + v.toFixed(4);
+            item.style.background = v > 0 ? 'rgba(0,212,255,0.3)' : 'rgba(236,72,153,0.3)';
+            outBox.appendChild(item);
+        });
+        
+        // 統計
+        document.getElementById('activeInput').textContent = activeInputs.filter(function(x) { return x; }).length + '/' + inputSize;
+        document.getElementById('activeHidden').textContent = activeHidden.filter(function(x) { return x; }).length + '/' + hiddenSize;
+        document.getElementById('measureCount').textContent = measureCount;
+        document.getElementById('avgCorr').textContent = measureCount > 0 ? (totalCorr / measureCount).toFixed(4) : '-';
+    }
+
+    function drawNN() {
+        var w = nnCanvas.width, h = nnCanvas.height;
+        nnCtx.fillStyle = 'rgba(10,10,20,0.95)';
+        nnCtx.fillRect(0, 0, w, h);
+
+        var layers = [inputSize, hiddenSize, outputSize];
+        var layerX = [80, 260, 440];
+        var colors = ['#10b981', '#8b5cf6', '#ec4899'];
+        
+        // エッジ（重み）
+        // W1
+        for (var j = 0; j < hiddenSize; j++) {
+            var y2 = 30 + j * (h - 60) / Math.max(hiddenSize - 1, 1);
+            for (var i = 0; i < inputSize; i++) {
+                var y1 = 30 + i * (h - 60) / Math.max(inputSize - 1, 1);
+                var weight = W1[j] ? W1[j][i] : 0;
+                if (Math.abs(weight) > 0.01) {
+                    nnCtx.strokeStyle = weight > 0 ? 'rgba(0,212,255,' + Math.min(Math.abs(weight), 1) + ')' : 'rgba(236,72,153,' + Math.min(Math.abs(weight), 1) + ')';
+                    nnCtx.lineWidth = Math.abs(weight) * 3 + 0.5;
+                    nnCtx.beginPath();
+                    nnCtx.moveTo(layerX[0] + 15, y1);
+                    nnCtx.lineTo(layerX[1] - 15, y2);
+                    nnCtx.stroke();
+                }
+            }
+        }
+        
+        // W2
+        for (var k = 0; k < outputSize; k++) {
+            var y3 = 30 + k * (h - 60) / Math.max(outputSize - 1, 1);
+            for (var j = 0; j < hiddenSize; j++) {
+                var y2 = 30 + j * (h - 60) / Math.max(hiddenSize - 1, 1);
+                var weight2 = W2[k] ? W2[k][j] : 0;
+                if (Math.abs(weight2) > 0.01) {
+                    nnCtx.strokeStyle = weight2 > 0 ? 'rgba(0,212,255,' + Math.min(Math.abs(weight2), 1) + ')' : 'rgba(236,72,153,' + Math.min(Math.abs(weight2), 1) + ')';
+                    nnCtx.lineWidth = Math.abs(weight2) * 3 + 0.5;
+                    nnCtx.beginPath();
+                    nnCtx.moveTo(layerX[1] + 15, y2);
+                    nnCtx.lineTo(layerX[2] - 15, y3);
+                    nnCtx.stroke();
+                }
+            }
+        }
+
+        // ノード
+        // 入力層
+        for (var i = 0; i < inputSize; i++) {
+            var y = 30 + i * (h - 60) / Math.max(inputSize - 1, 1);
+            var active = activeInputs[i] !== false;
+            nnCtx.fillStyle = active ? colors[0] : '#333';
+            nnCtx.beginPath();
+            nnCtx.arc(layerX[0], y, 12, 0, Math.PI * 2);
+            nnCtx.fill();
+            nnCtx.fillStyle = '#fff';
+            nnCtx.font = '9px monospace';
+            nnCtx.textAlign = 'center';
+            nnCtx.fillText('x' + i, layerX[0], y + 3);
+        }
+
+        // 隠れ層
+        for (var j = 0; j < hiddenSize; j++) {
+            var y = 30 + j * (h - 60) / Math.max(hiddenSize - 1, 1);
+            var active = activeHidden[j] !== false;
+            var act = hiddenActivations[j] || 0;
+            nnCtx.fillStyle = active ? colors[1] : '#333';
+            nnCtx.globalAlpha = active ? 0.5 + Math.abs(act) * 0.5 : 0.3;
+            nnCtx.beginPath();
+            nnCtx.arc(layerX[1], y, 12, 0, Math.PI * 2);
+            nnCtx.fill();
+            nnCtx.globalAlpha = 1;
+            nnCtx.fillStyle = '#fff';
+            nnCtx.fillText('h' + j, layerX[1], y + 3);
+        }
+
+        // 出力層
+        for (var k = 0; k < outputSize; k++) {
+            var y = 30 + k * (h - 60) / Math.max(outputSize - 1, 1);
+            var act2 = outputActivations[k] || 0;
+            nnCtx.fillStyle = colors[2];
+            nnCtx.globalAlpha = 0.5 + Math.abs(act2) * 0.5;
+            nnCtx.beginPath();
+            nnCtx.arc(layerX[2], y, 14, 0, Math.PI * 2);
+            nnCtx.fill();
+            nnCtx.globalAlpha = 1;
+            nnCtx.fillStyle = '#fff';
+            nnCtx.fillText('y' + k, layerX[2], y + 3);
+        }
+
+        // ラベル
+        nnCtx.fillStyle = '#666';
+        nnCtx.font = '10px monospace';
+        nnCtx.fillText('入力層', layerX[0] - 15, h - 5);
+        nnCtx.fillText('隠れ層', layerX[1] - 15, h - 5);
+        nnCtx.fillText('出力層', layerX[2] - 15, h - 5);
+    }
+
+    function drawWeightChart() {
+        var w = weightChart.width, h = weightChart.height;
+        weightCtx.fillStyle = 'rgba(10,10,20,0.95)';
+        weightCtx.fillRect(0, 0, w, h);
+
+        weightCtx.fillStyle = '#666';
+        weightCtx.font = '9px monospace';
+        weightCtx.fillText('重み分布 W₁', 5, 12);
+
+        // W1の重みをヒストグラム化
+        var weights = [];
+        for (var j = 0; j < hiddenSize; j++) {
+            for (var i = 0; i < inputSize; i++) {
+                if (W1[j] && W1[j][i] !== undefined) {
+                    weights.push(W1[j][i]);
+                }
+            }
+        }
+
+        if (weights.length === 0) return;
+
+        var bins = 20;
+        var hist = new Array(bins).fill(0);
+        weights.forEach(function(w) {
+            var idx = Math.floor((w + 1) / 2 * (bins - 1));
+            idx = Math.max(0, Math.min(bins - 1, idx));
+            hist[idx]++;
+        });
+
+        var maxH = Math.max.apply(null, hist);
+        var barW = (w - 20) / bins;
+
+        for (var i = 0; i < bins; i++) {
+            var barH = (hist[i] / maxH) * (h - 30);
+            var x = 10 + i * barW;
+            var color = i < bins/2 ? '#ec4899' : '#00d4ff';
+            weightCtx.fillStyle = color;
+            weightCtx.fillRect(x, h - 15 - barH, barW - 1, barH);
+        }
+
+        weightCtx.fillStyle = '#666';
+        weightCtx.fillText('-1', 10, h - 3);
+        weightCtx.fillText('+1', w - 20, h - 3);
+    }
+
+    function drawActivationChart() {
+        var w = activationChart.width, h = activationChart.height;
+        actCtx.fillStyle = 'rgba(10,10,20,0.95)';
+        actCtx.fillRect(0, 0, w, h);
+
+        actCtx.fillStyle = '#666';
+        actCtx.font = '9px monospace';
+        actCtx.fillText('隠れ層活性化', 5, 12);
+
+        if (hiddenActivations.length === 0) return;
+
+        var barW = (w - 30) / hiddenSize;
+
+        for (var i = 0; i < hiddenSize; i++) {
+            var val = hiddenActivations[i] || 0;
+            var barH = Math.abs(val) * (h/2 - 20);
+            var x = 15 + i * barW;
+            var y = h/2;
+
+            actCtx.fillStyle = val > 0 ? '#00d4ff' : '#ec4899';
+            if (val > 0) {
+                actCtx.fillRect(x, y - barH, barW - 2, barH);
+            } else {
+                actCtx.fillRect(x, y, barW - 2, barH);
+            }
+
+            // アクティブ表示
+            if (!activeHidden[i]) {
+                actCtx.fillStyle = 'rgba(100,100,100,0.5)';
+                actCtx.fillRect(x, 20, barW - 2, h - 35);
+            }
+        }
+
+        // 0ライン
+        actCtx.strokeStyle = 'rgba(255,255,255,0.3)';
+        actCtx.beginPath();
+        actCtx.moveTo(10, h/2);
+        actCtx.lineTo(w - 10, h/2);
+        actCtx.stroke();
+    }
+
+    // イベント
+    document.getElementById('nSlider').oninput = updateSliders;
+    document.getElementById('noiseSlider').oninput = updateSliders;
+    document.getElementById('r0Slider').oninput = updateSliders;
+    document.getElementById('inputSlider').oninput = updateSliders;
+    document.getElementById('hiddenSlider').oninput = updateSliders;
+    document.getElementById('outputSlider').oninput = updateSliders;
+
+    document.getElementById('sampleBtn').onclick = sampleInput;
+    document.getElementById('runBtn').onclick = quantumInference;
+    document.getElementById('trainBtn').onclick = function() {
+        // 量子学習（複数回実行して平均）
+        for (var t = 0; t < 10; t++) {
+            quantumInference();
+        }
+    };
+    document.getElementById('resetBtn').onclick = function() {
+        W1 = []; W2 = []; B1 = []; B2 = [];
+        hiddenActivations = []; outputActivations = [];
+        activeInputs = []; activeHidden = [];
+        quantumLogs = [];
+        updateSliders();
+    };
+
+    // 初期化
+    updateSliders();
+    drawNN();
+})();
+</script>
+</body>
+</html>
+

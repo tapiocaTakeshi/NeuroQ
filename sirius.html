@@ -1,0 +1,657 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Hawk - 並列量子ビット計算エンジン</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { background: #0a0a1a; min-height: 100vh; font-family: monospace; color: #fff; padding: 15px; }
+        h1 { text-align: center; color: #00d4ff; margin-bottom: 5px; font-size: 1.8rem; }
+        .subtitle { text-align: center; color: #888; font-size: 0.8rem; margin-bottom: 15px; }
+        .main-container { display: flex; gap: 15px; max-width: 1800px; margin: 0 auto; }
+        .panel { background: rgba(0,0,0,0.5); border: 2px solid #00d4ff; border-radius: 10px; padding: 12px; }
+        .sidebar { width: 180px; }
+        .editor-area { flex: 1; min-width: 300px; }
+        .qubits-area { width: 320px; }
+        .output-area { width: 350px; }
+        h3 { color: #00d4ff; margin-bottom: 8px; font-size: 0.85rem; }
+        .btn { display: block; width: 100%; padding: 6px; margin-bottom: 4px; border: none; border-radius: 5px; cursor: pointer; font-size: 0.75rem; color: #fff; background: #333; }
+        .btn:hover { background: #444; }
+        .btn-run { background: #10b981; font-size: 0.85rem; padding: 8px; }
+        .btn-run:hover { background: #059669; }
+        textarea { width: 100%; height: 380px; background: #111; border: 1px solid #333; border-radius: 5px; padding: 8px; color: #fff; font-family: monospace; font-size: 12px; resize: none; }
+        textarea:focus { outline: none; border-color: #00d4ff; }
+        #output { background: #111; border: 1px solid #333; border-radius: 5px; padding: 8px; height: 380px; overflow-y: auto; font-size: 11px; }
+        .out-print { color: #10b981; margin-bottom: 2px; }
+        .out-error { color: #ec4899; margin-bottom: 2px; }
+        .out-quantum { color: #06b6d4; font-size: 0.8em; margin-bottom: 2px; }
+        .out-info { color: #888; margin-bottom: 2px; }
+        .toolbar { margin-bottom: 8px; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+        label { font-size: 0.7rem; color: #888; display: flex; align-items: center; gap: 4px; }
+        
+        /* 量子ビット表示 */
+        .qubits-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin-bottom: 10px; }
+        .qubit-cell {
+            background: rgba(0,0,0,0.7);
+            border: 2px solid #333;
+            border-radius: 8px;
+            padding: 8px;
+            text-align: center;
+            transition: all 0.1s;
+        }
+        .qubit-cell.state-0 { border-color: #10b981; background: rgba(16,185,129,0.1); }
+        .qubit-cell.state-1 { border-color: #ec4899; background: rgba(236,72,153,0.1); }
+        .qubit-cell.state-super { border-color: #f59e0b; background: rgba(245,158,11,0.1); animation: pulse 0.5s infinite; }
+        @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.6; } }
+        .qubit-id { font-size: 0.6rem; color: #666; }
+        .qubit-value { font-size: 1.2rem; font-weight: bold; margin: 4px 0; }
+        .qubit-r { font-size: 0.6rem; color: #888; }
+        .qubit-prob { font-size: 0.55rem; color: #06b6d4; }
+        
+        .stats { font-size: 0.65rem; color: #888; margin-top: 8px; }
+        .stats div { margin: 2px 0; display: flex; justify-content: space-between; }
+        .stats span { color: #00d4ff; }
+        
+        .controls { margin-bottom: 10px; }
+        .controls input[type="range"] { width: 100%; }
+        .control-row { display: flex; justify-content: space-between; align-items: center; margin-bottom: 5px; font-size: 0.7rem; }
+    </style>
+</head>
+<body>
+    <h1>🦅 Hawk</h1>
+    <p class="subtitle">並列量子ビット計算エンジン - 複数の量子ビットが同時に動作</p>
+    
+    <div class="main-container">
+        <div class="panel sidebar">
+            <h3>サンプル</h3>
+            <button class="btn" onclick="loadExample('hello')">Hello World</button>
+            <button class="btn" onclick="loadExample('calc')">量子計算</button>
+            <button class="btn" onclick="loadExample('parallel')">並列計算</button>
+            <button class="btn" onclick="loadExample('vote')">多数決</button>
+            <button class="btn" onclick="loadExample('search')">量子探索</button>
+            <button class="btn" onclick="loadExample('fib')">フィボナッチ</button>
+            
+            <div class="stats" style="margin-top: 15px;">
+                <div style="color:#06b6d4;margin-bottom:5px">⚛️ 統計</div>
+                <div>総演算: <span id="calcCount">0</span></div>
+                <div>測定回数: <span id="measureCount">0</span></div>
+                <div>並列度: <span id="parallelism">0</span></div>
+            </div>
+        </div>
+        
+        <div class="panel editor-area">
+            <div class="toolbar">
+                <button class="btn btn-run" onclick="runCode()">▶ 実行</button>
+                <label><input type="checkbox" id="showQuantum" checked> ログ</label>
+                <label><input type="checkbox" id="autoRun"> 自動更新</label>
+            </div>
+            <textarea id="editor"># 並列量子ビット計算デモ
+# 16個の量子ビットが同時に動作！
+
+print("=== 並列量子計算 ===")
+
+# 量子ビットを作成（相関係数0.5）
+q = qubits(16, 0.5)
+print("量子ビット数:", len(q))
+
+# 全量子ビットを測定
+results = measure_all(q)
+print("測定結果:", results)
+
+# 0と1の数をカウント
+zeros = count(results, 0)
+ones = count(results, 1)
+print("0の数:", zeros)
+print("1の数:", ones)</textarea>
+        </div>
+        
+        <div class="panel qubits-area">
+            <h3>量子ビット状態 (リアルタイム)</h3>
+            <div class="controls">
+                <div class="control-row">
+                    <span>量子ビット数:</span>
+                    <span id="numQubitsValue">16</span>
+                </div>
+                <input type="range" id="numQubits" min="4" max="64" value="16" oninput="updateQubitDisplay()">
+                <div class="control-row">
+                    <span>相関係数 r:</span>
+                    <span id="rValue">0.00</span>
+                </div>
+                <input type="range" id="rSlider" min="-100" max="100" value="0" oninput="updateQubitDisplay()">
+                <div class="control-row">
+                    <span>更新速度:</span>
+                    <span id="speedValue">100ms</span>
+                </div>
+                <input type="range" id="speedSlider" min="50" max="1000" value="100" oninput="updateSpeed()">
+            </div>
+            <div id="qubitsGrid" class="qubits-grid"></div>
+            <div class="stats">
+                <div>P(0): <span id="prob0">50.0%</span></div>
+                <div>P(1): <span id="prob1">50.0%</span></div>
+                <div>実測0: <span id="actual0">0</span></div>
+                <div>実測1: <span id="actual1">0</span></div>
+            </div>
+        </div>
+        
+        <div class="panel output-area">
+            <h3>出力</h3>
+            <div id="output"></div>
+        </div>
+    </div>
+
+<script>
+(function(){
+    // ========================================
+    // 並列量子ビット計算エンジン
+    // ========================================
+    
+    var stats = { calcCount: 0, measureCount: 0, parallelism: 0 };
+    var quantumLogs = [];
+    var outputLines = [];
+    var globalVars = {};
+    var globalFuncs = {};
+    var activeQubits = [];  // 現在の量子ビット配列
+    var animationTimer = null;
+    var updateInterval = 100;
+    
+    // ========================================
+    // 擬似量子ビットクラス
+    // ========================================
+    function Qubit(r) {
+        this.r = Math.max(-1, Math.min(1, r || 0));  // 相関係数 [-1, 1]
+        this.theta = Math.PI * (1 - this.r) / 2;
+        this.alpha = Math.cos(this.theta / 2);  // |0⟩振幅
+        this.beta = Math.sin(this.theta / 2);   // |1⟩振幅
+        this.lastMeasurement = null;  // 最後の測定結果
+        this.measureCount = 0;
+    }
+    
+    Qubit.prototype.p0 = function() { return this.alpha * this.alpha; };
+    Qubit.prototype.p1 = function() { return this.beta * this.beta; };
+    
+    // 量子測定（確率的に0か1を返す）
+    Qubit.prototype.measure = function() {
+        stats.measureCount++;
+        this.measureCount++;
+        var result = Math.random() < this.p0() ? 0 : 1;
+        this.lastMeasurement = result;
+        return result;
+    };
+    
+    // 複数回測定して統計を取る
+    Qubit.prototype.sample = function(n) {
+        var zeros = 0;
+        for (var i = 0; i < n; i++) {
+            if (Math.random() < this.p0()) zeros++;
+        }
+        return { zeros: zeros, ones: n - zeros, ratio: zeros / n };
+    };
+    
+    // ========================================
+    // 量子ビット配列操作
+    // ========================================
+    
+    // n個の量子ビットを作成
+    function createQubits(n, r) {
+        r = r !== undefined ? r : 0;
+        var qubits = [];
+        for (var i = 0; i < n; i++) {
+            qubits.push(new Qubit(r));
+        }
+        stats.parallelism = Math.max(stats.parallelism, n);
+        qLog("⚛️ " + n + "個の量子ビット作成 (r=" + r.toFixed(2) + ")");
+        return qubits;
+    }
+    
+    // 全量子ビットを測定
+    function measureAll(qubits) {
+        var results = [];
+        for (var i = 0; i < qubits.length; i++) {
+            results.push(qubits[i].measure());
+        }
+        qLog("📊 " + qubits.length + "個を測定: [" + results.join("") + "]");
+        return results;
+    }
+    
+    // 結果をカウント
+    function countResults(results, value) {
+        var count = 0;
+        for (var i = 0; i < results.length; i++) {
+            if (results[i] === value) count++;
+        }
+        return count;
+    }
+    
+    // 多数決
+    function majorityVote(results) {
+        var zeros = countResults(results, 0);
+        var ones = results.length - zeros;
+        return zeros > ones ? 0 : (ones > zeros ? 1 : (Math.random() < 0.5 ? 0 : 1));
+    }
+    
+    // 量子並列計算（全量子ビットで同時に計算）
+    function quantumParallel(qubits, func) {
+        stats.calcCount++;
+        var results = [];
+        for (var i = 0; i < qubits.length; i++) {
+            var m = qubits[i].measure();
+            results.push(func(m, i));
+        }
+        return results;
+    }
+    
+    // ========================================
+    // リアルタイム表示
+    // ========================================
+    function updateQubitDisplay() {
+        var n = parseInt(document.getElementById('numQubits').value);
+        var r = parseInt(document.getElementById('rSlider').value) / 100;
+        
+        document.getElementById('numQubitsValue').textContent = n;
+        document.getElementById('rValue').textContent = r.toFixed(2);
+        
+        // 量子ビット配列を更新
+        activeQubits = [];
+        for (var i = 0; i < n; i++) {
+            activeQubits.push(new Qubit(r));
+        }
+        
+        // 確率表示
+        var p0 = (1 + r) / 2;
+        document.getElementById('prob0').textContent = (p0 * 100).toFixed(1) + '%';
+        document.getElementById('prob1').textContent = ((1 - p0) * 100).toFixed(1) + '%';
+        
+        renderQubits();
+    }
+    
+    function renderQubits() {
+        var grid = document.getElementById('qubitsGrid');
+        var cols = activeQubits.length <= 16 ? 4 : (activeQubits.length <= 36 ? 6 : 8);
+        grid.style.gridTemplateColumns = 'repeat(' + cols + ', 1fr)';
+        
+        var html = '';
+        var zeros = 0, ones = 0;
+        
+        for (var i = 0; i < activeQubits.length; i++) {
+            var q = activeQubits[i];
+            var m = q.measure();  // 測定
+            if (m === 0) zeros++; else ones++;
+            
+            var stateClass = m === 0 ? 'state-0' : 'state-1';
+            var color = m === 0 ? '#10b981' : '#ec4899';
+            
+            html += '<div class="qubit-cell ' + stateClass + '">';
+            html += '<div class="qubit-id">Q' + i + '</div>';
+            html += '<div class="qubit-value" style="color:' + color + '">' + m + '</div>';
+            html += '<div class="qubit-r">r=' + q.r.toFixed(2) + '</div>';
+            html += '<div class="qubit-prob">P₀=' + (q.p0() * 100).toFixed(0) + '%</div>';
+            html += '</div>';
+        }
+        
+        grid.innerHTML = html;
+        document.getElementById('actual0').textContent = zeros;
+        document.getElementById('actual1').textContent = ones;
+    }
+    
+    function startAnimation() {
+        if (animationTimer) return;
+        animationTimer = setInterval(renderQubits, updateInterval);
+    }
+    
+    function stopAnimation() {
+        if (animationTimer) {
+            clearInterval(animationTimer);
+            animationTimer = null;
+        }
+    }
+    
+    function updateSpeed() {
+        updateInterval = parseInt(document.getElementById('speedSlider').value);
+        document.getElementById('speedValue').textContent = updateInterval + 'ms';
+        if (animationTimer) {
+            stopAnimation();
+            startAnimation();
+        }
+    }
+    
+    // ========================================
+    // インタープリタ
+    // ========================================
+    function qLog(s) { quantumLogs.push(s); }
+    function output(s) { outputLines.push({text: String(s), type: 'print'}); }
+    function outputErr(s) { outputLines.push({text: s, type: 'error'}); }
+    
+    function evalExpr(e) {
+        e = e.trim();
+        if (!e) return undefined;
+        
+        if ((e[0] === '"' && e[e.length-1] === '"') || (e[0] === "'" && e[e.length-1] === "'")) {
+            return e.slice(1, -1);
+        }
+        if (/^-?\d+\.?\d*$/.test(e)) return parseFloat(e);
+        if (e === 'True') return true;
+        if (e === 'False') return false;
+        
+        // 関数呼び出し
+        var fm = e.match(/^(\w+)\((.*)?\)$/);
+        if (fm) return callFunc(fm[1], fm[2] || '');
+        
+        // リストインデックス
+        var idxMatch = e.match(/^(\w+)\[(.+)\]$/);
+        if (idxMatch) {
+            var arr = globalVars[idxMatch[1]];
+            var idx = evalExpr(idxMatch[2]);
+            if (Array.isArray(arr)) return arr[idx];
+            return undefined;
+        }
+        
+        // 比較
+        var ops = ['>=', '<=', '==', '!=', '>', '<'];
+        for (var oi = 0; oi < ops.length; oi++) {
+            var op = ops[oi];
+            var idx = e.indexOf(op);
+            if (idx > 0) {
+                var a = evalExpr(e.substring(0, idx));
+                var b = evalExpr(e.substring(idx + op.length));
+                switch(op) {
+                    case '>': return a > b;
+                    case '<': return a < b;
+                    case '>=': return a >= b;
+                    case '<=': return a <= b;
+                    case '==': return a === b;
+                    case '!=': return a !== b;
+                }
+            }
+        }
+        
+        // 算術
+        for (var i = e.length - 1; i >= 0; i--) {
+            if (e[i] === '+') return evalExpr(e.substring(0, i)) + evalExpr(e.substring(i + 1));
+            if (e[i] === '-' && i > 0) return evalExpr(e.substring(0, i)) - evalExpr(e.substring(i + 1));
+        }
+        for (var i = e.length - 1; i >= 0; i--) {
+            if (e[i] === '*') return evalExpr(e.substring(0, i)) * evalExpr(e.substring(i + 1));
+            if (e[i] === '/') return evalExpr(e.substring(0, i)) / evalExpr(e.substring(i + 1));
+            if (e[i] === '%') return evalExpr(e.substring(0, i)) % evalExpr(e.substring(i + 1));
+        }
+        
+        if (globalVars.hasOwnProperty(e)) return globalVars[e];
+        return undefined;
+    }
+    
+    function splitArgs(s) {
+        var args = [], cur = '', lv = 0;
+        for (var i = 0; i < s.length; i++) {
+            if (s[i] === '(' || s[i] === '[') lv++;
+            if (s[i] === ')' || s[i] === ']') lv--;
+            if (s[i] === ',' && lv === 0) { args.push(cur.trim()); cur = ''; continue; }
+            cur += s[i];
+        }
+        if (cur.trim()) args.push(cur.trim());
+        return args;
+    }
+    
+    function callFunc(name, argStr) {
+        var argStrs = splitArgs(argStr);
+        var args = argStrs.map(function(a) { return evalExpr(a); });
+        
+        // 標準関数
+        if (name === 'print') {
+            output(args.join(' '));
+            return null;
+        }
+        if (name === 'range') {
+            var r = [];
+            var start = 0, end = args[0], step = 1;
+            if (args.length >= 2) { start = args[0]; end = args[1]; }
+            if (args.length >= 3) step = args[2];
+            for (var i = start; step > 0 ? i < end : i > end; i += step) r.push(i);
+            return r;
+        }
+        if (name === 'len') return Array.isArray(args[0]) ? args[0].length : 0;
+        if (name === 'sum') {
+            var s = 0;
+            for (var i = 0; i < args[0].length; i++) s += args[0][i];
+            return s;
+        }
+        
+        // 量子ビット関数
+        if (name === 'qubits') {
+            // qubits(n, r) - n個の量子ビットを作成
+            var n = args[0] || 8;
+            var r = args.length > 1 ? args[1] : 0;
+            var qubits = createQubits(n, r);
+            activeQubits = qubits;
+            updateQubitDisplayFromCode(n, r);
+            return qubits;
+        }
+        if (name === 'measure_all') {
+            // measure_all(qubits) - 全量子ビットを測定
+            return measureAll(args[0]);
+        }
+        if (name === 'measure') {
+            // measure(qubit) - 単一量子ビットを測定
+            if (args[0] instanceof Qubit) return args[0].measure();
+            if (Array.isArray(args[0])) return measureAll(args[0]);
+            return args[0];
+        }
+        if (name === 'count') {
+            // count(results, value) - 値をカウント
+            return countResults(args[0], args[1]);
+        }
+        if (name === 'vote') {
+            // vote(results) - 多数決
+            return majorityVote(args[0]);
+        }
+        if (name === 'parallel') {
+            // parallel(qubits, expr) - 並列計算
+            var qubits = args[0];
+            var results = [];
+            for (var i = 0; i < qubits.length; i++) {
+                globalVars['_m'] = qubits[i].measure();
+                globalVars['_i'] = i;
+                results.push(evalExpr(args[1]));
+            }
+            return results;
+        }
+        
+        // ユーザー定義関数
+        if (globalFuncs[name]) {
+            var f = globalFuncs[name];
+            var oldVars = Object.assign({}, globalVars);
+            for (var i = 0; i < f.params.length; i++) {
+                globalVars[f.params[i]] = args[i];
+            }
+            var ret = runBlock(f.body);
+            globalVars = oldVars;
+            return ret.value;
+        }
+        
+        return null;
+    }
+    
+    function updateQubitDisplayFromCode(n, r) {
+        document.getElementById('numQubits').value = n;
+        document.getElementById('numQubitsValue').textContent = n;
+        document.getElementById('rSlider').value = Math.round(r * 100);
+        document.getElementById('rValue').textContent = r.toFixed(2);
+        var p0 = (1 + r) / 2;
+        document.getElementById('prob0').textContent = (p0 * 100).toFixed(1) + '%';
+        document.getElementById('prob1').textContent = ((1 - p0) * 100).toFixed(1) + '%';
+    }
+    
+    function runBlock(lines) {
+        var i = 0;
+        while (i < lines.length) {
+            var raw = lines[i];
+            var line = raw.trim();
+            var indent = raw.search(/\S/);
+            if (indent < 0) indent = 0;
+            
+            if (!line || line[0] === '#') { i++; continue; }
+            
+            try {
+                // def
+                if (line.indexOf('def ') === 0 && line.indexOf(':') > 0) {
+                    var m = line.match(/def\s+(\w+)\((.*)\):/);
+                    if (m) {
+                        var fn = m[1];
+                        var ps = m[2] ? m[2].split(',').map(function(p){return p.trim();}) : [];
+                        var body = [];
+                        i++;
+                        while (i < lines.length) {
+                            var ni = lines[i].search(/\S/);
+                            if (ni >= 0 && ni <= indent && lines[i].trim()) break;
+                            body.push(lines[i]);
+                            i++;
+                        }
+                        globalFuncs[fn] = {params: ps, body: body};
+                        continue;
+                    }
+                }
+                
+                // return
+                if (line.indexOf('return') === 0) {
+                    return {done: true, type: 'return', value: evalExpr(line.substring(6).trim())};
+                }
+                
+                // for
+                if (line.indexOf('for ') === 0 && line.indexOf(' in ') > 0) {
+                    var m = line.match(/for\s+(\w+)\s+in\s+(.+):/);
+                    if (m) {
+                        var vn = m[1];
+                        var iter = evalExpr(m[2]);
+                        var body = [];
+                        i++;
+                        while (i < lines.length) {
+                            var ni = lines[i].search(/\S/);
+                            if (ni >= 0 && ni <= indent && lines[i].trim()) break;
+                            body.push(lines[i]);
+                            i++;
+                        }
+                        if (Array.isArray(iter)) {
+                            for (var ii = 0; ii < iter.length; ii++) {
+                                globalVars[vn] = iter[ii];
+                                runBlock(body);
+                            }
+                        }
+                        continue;
+                    }
+                }
+                
+                // while
+                if (line.indexOf('while ') === 0) {
+                    var cond = line.slice(6, -1);
+                    var body = [];
+                    i++;
+                    while (i < lines.length) {
+                        var ni = lines[i].search(/\S/);
+                        if (ni >= 0 && ni <= indent && lines[i].trim()) break;
+                        body.push(lines[i]);
+                        i++;
+                    }
+                    var cnt = 0;
+                    while (evalExpr(cond) && cnt < 10000) {
+                        runBlock(body);
+                        cnt++;
+                    }
+                    continue;
+                }
+                
+                // if
+                if (line.indexOf('if ') === 0 && line.indexOf(':') > 0) {
+                    var cond = evalExpr(line.slice(3, -1));
+                    var ifBody = [];
+                    i++;
+                    while (i < lines.length) {
+                        var ni = lines[i].search(/\S/);
+                        if (ni >= 0 && ni <= indent && lines[i].trim()) break;
+                        ifBody.push(lines[i]);
+                        i++;
+                    }
+                    if (cond) runBlock(ifBody);
+                    continue;
+                }
+                
+                // 代入
+                var eq = line.indexOf('=');
+                if (eq > 0 && line[eq-1] !== '!' && line[eq-1] !== '<' && line[eq-1] !== '>' && line[eq+1] !== '=') {
+                    var left = line.substring(0, eq).trim();
+                    var right = line.substring(eq + 1).trim();
+                    globalVars[left] = evalExpr(right);
+                } else {
+                    evalExpr(line);
+                }
+            } catch (err) {
+                outputErr("エラー: " + err.message);
+            }
+            i++;
+        }
+        return {done: false};
+    }
+    
+    window.runCode = function() {
+        stats = { calcCount: 0, measureCount: 0, parallelism: 0 };
+        quantumLogs = []; outputLines = []; globalVars = {}; globalFuncs = {};
+        
+        var code = document.getElementById('editor').value;
+        var lines = code.split('\n');
+        
+        var startTime = performance.now();
+        runBlock(lines);
+        var endTime = performance.now();
+        
+        // 量子ビット表示を更新
+        renderQubits();
+        
+        var html = '';
+        for (var i = 0; i < outputLines.length; i++) {
+            html += '<div class="out-' + outputLines[i].type + '">' + outputLines[i].text + '</div>';
+        }
+        html += '<div class="out-info">実行時間: ' + (endTime - startTime).toFixed(2) + 'ms</div>';
+        
+        if (document.getElementById('showQuantum').checked && quantumLogs.length > 0) {
+            html += '<div class="out-info">--- 量子ログ ---</div>';
+            for (var i = 0; i < Math.min(quantumLogs.length, 30); i++) {
+                html += '<div class="out-quantum">' + quantumLogs[i] + '</div>';
+            }
+        }
+        
+        document.getElementById('output').innerHTML = html;
+        document.getElementById('calcCount').textContent = stats.calcCount;
+        document.getElementById('measureCount').textContent = stats.measureCount;
+        document.getElementById('parallelism').textContent = stats.parallelism;
+    };
+    
+    window.loadExample = function(name) {
+        var ex = {
+            hello: '# Hello World\nprint("Hello Hawk!")\nprint("並列量子ビット計算エンジン")',
+            calc: '# 量子計算デモ\n# 量子ビットの確率的な振る舞い\n\nq = qubits(8, 0.3)\nprint("8個の量子ビット (r=0.3)")\n\nresults = measure_all(q)\nprint("測定結果:", results)\n\nprint("0の数:", count(results, 0))\nprint("1の数:", count(results, 1))',
+            parallel: '# 並列量子計算\n# 全量子ビットで同時に計算\n\nprint("=== 並列量子計算 ===")\n\n# 32個の量子ビット\nq = qubits(32, 0)\nprint("32個の量子ビット作成")\n\n# 全てを測定\nresults = measure_all(q)\n\n# 統計\nzeros = count(results, 0)\nones = count(results, 1)\n\nprint("0:", zeros, "個")\nprint("1:", ones, "個")\nprint("比率:", zeros / 32)',
+            vote: '# 多数決による決定\n# 量子ビットの多数決で0か1を決定\n\nprint("=== 量子多数決 ===")\n\n# 相関係数を変えて実験\nfor r in range(-10, 11, 5):\n    r_val = r / 10\n    q = qubits(16, r_val)\n    results = measure_all(q)\n    winner = vote(results)\n    print("r=", r_val, "→ 勝者:", winner)',
+            search: '# 量子探索シミュレーション\n\nprint("=== 量子探索 ===")\n\n# ターゲットに近い相関係数を設定\ntarget = 7\n\n# 複数の量子ビットで探索\nq = qubits(16, 0.5)\nresults = measure_all(q)\n\n# 結果を表示\nprint("探索結果:", results)\nprint("合計:", sum(results))',
+            fib: '# フィボナッチ\ndef fib(n):\n    if n <= 1:\n        return n\n    a = 0\n    b = 1\n    i = 2\n    while i <= n:\n        c = a + b\n        a = b\n        b = c\n        i = i + 1\n    return b\n\nfor i in range(10):\n    print("fib(", i, ") =", fib(i))'
+        };
+        if (ex[name]) document.getElementById('editor').value = ex[name];
+    };
+    
+    // 自動更新
+    document.getElementById('autoRun').addEventListener('change', function() {
+        if (this.checked) {
+            startAnimation();
+        } else {
+            stopAnimation();
+        }
+    });
+    
+    // 初期化
+    window.updateQubitDisplay = updateQubitDisplay;
+    window.updateSpeed = updateSpeed;
+    updateQubitDisplay();
+    startAnimation();
+})();
+</script>
+</body>
+</html>
+
