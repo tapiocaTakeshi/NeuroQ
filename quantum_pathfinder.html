@@ -1,0 +1,550 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>再帰的量子パスファインダー（正しい定義）</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            background: linear-gradient(135deg, #0a0a1a, #1a0a2e);
+            min-height: 100vh;
+            font-family: monospace;
+            color: #fff;
+            padding: 15px;
+        }
+        h1 { text-align: center; font-size: 1.4rem; color: #00d4ff; margin-bottom: 5px; }
+        .subtitle { text-align: center; color: #888; font-size: 0.75rem; margin-bottom: 15px; }
+        .container { display: flex; gap: 15px; max-width: 1400px; margin: 0 auto; flex-wrap: wrap; }
+        .panel { background: rgba(0,0,0,0.6); border: 2px solid #00d4ff; border-radius: 10px; padding: 15px; }
+        .controls { width: 280px; }
+        .maze-panel { flex: 1; min-width: 350px; }
+        .stats-panel { width: 300px; }
+        h3 { color: #00d4ff; margin-bottom: 10px; font-size: 0.9rem; }
+        .control { margin-bottom: 12px; }
+        .control label { display: block; color: #888; font-size: 0.75rem; margin-bottom: 3px; }
+        input[type="range"] { width: 100%; -webkit-appearance: none; height: 6px; background: #1a1a2e; border-radius: 3px; }
+        input[type="range"]::-webkit-slider-thumb { -webkit-appearance: none; width: 14px; height: 14px; background: #00d4ff; border-radius: 50%; cursor: pointer; }
+        .value { text-align: right; color: #00d4ff; font-size: 0.85rem; }
+        .btn { width: 100%; padding: 10px; margin-bottom: 6px; border: none; border-radius: 20px; font-size: 0.85rem; cursor: pointer; color: #fff; }
+        .btn:active { transform: scale(0.98); }
+        .btn-start { background: linear-gradient(135deg, #10b981, #059669); }
+        .btn-stop { background: linear-gradient(135deg, #ec4899, #be185d); }
+        .btn-reset { background: linear-gradient(135deg, #8b5cf6, #6366f1); }
+        .btn-maze { background: linear-gradient(135deg, #f59e0b, #d97706); }
+        canvas { display: block; margin: 0 auto; border-radius: 8px; }
+        .stat-row { display: flex; justify-content: space-between; font-size: 0.8rem; margin: 4px 0; }
+        .stat-label { color: #888; }
+        .stat-value { color: #00d4ff; }
+        .chain-box { background: rgba(0,0,0,0.3); border-radius: 8px; padding: 10px; margin-bottom: 10px; }
+        .chain-title { font-size: 0.75rem; color: #8b5cf6; margin-bottom: 5px; }
+        .chain-values { font-size: 0.7rem; line-height: 1.6; color: #aaa; max-height: 100px; overflow-y: auto; }
+        .r-pos { color: #00d4ff; }
+        .r-neg { color: #ec4899; }
+        .r-zero { color: #f59e0b; }
+        .final-box { text-align: center; padding: 10px; margin-top: 8px; border-radius: 6px; background: rgba(139,92,246,0.2); }
+        .final-r { font-size: 1.5rem; font-weight: bold; }
+        .info { font-size: 0.75rem; color: #10b981; margin-top: 10px; padding: 8px; background: rgba(16,185,129,0.1); border-radius: 6px; }
+        .formula { background: rgba(139,92,246,0.1); padding: 10px; border-radius: 6px; font-size: 0.7rem; margin-top: 10px; line-height: 1.6; }
+        .formula-title { color: #8b5cf6; margin-bottom: 5px; font-weight: bold; }
+        .legend { font-size: 0.7rem; margin-top: 10px; }
+        .legend div { margin: 3px 0; display: flex; align-items: center; }
+        .legend span { width: 12px; height: 12px; display: inline-block; margin-right: 6px; border-radius: 2px; }
+        .insight { background: rgba(245,158,11,0.1); border-left: 3px solid #f59e0b; padding: 8px; margin-top: 10px; font-size: 0.7rem; color: #f59e0b; }
+    </style>
+</head>
+<body>
+    <h1>🧭 再帰的量子パスファインダー</h1>
+    <p class="subtitle">r_{k+1} = cos(π(1-r_k)/2) を N 回適用 → 二値化プロセス</p>
+    
+    <div class="container">
+        <div class="panel controls">
+            <h3>パラメータ</h3>
+            
+            <div class="control">
+                <label>再帰深度 N（写像 f の適用回数）</label>
+                <input type="range" id="nSlider" min="1" max="30" value="5">
+                <div class="value">N = <span id="nVal">5</span></div>
+            </div>
+            
+            <div class="control">
+                <label>最大ステップ</label>
+                <input type="range" id="stepsSlider" min="100" max="500" value="200">
+                <div class="value"><span id="stepsVal">200</span></div>
+            </div>
+            
+            <div class="control">
+                <label>速度 (ms)</label>
+                <input type="range" id="speedSlider" min="50" max="500" value="100">
+                <div class="value"><span id="speedVal">100</span> ms</div>
+            </div>
+            
+            <div class="control">
+                <label>量子ゆらぎ（測定確率的選択）</label>
+                <input type="range" id="noiseSlider" min="0" max="100" value="30">
+                <div class="value"><span id="noiseVal">30</span>%</div>
+            </div>
+            
+            <button class="btn btn-maze" id="mazeBtn">🔀 新しい迷路</button>
+            <button class="btn btn-start" id="startBtn">▶ 探索開始</button>
+            <button class="btn btn-stop" id="stopBtn" style="display:none">⏹ 停止</button>
+            <button class="btn btn-reset" id="resetBtn">🔄 リセット</button>
+            
+            <div class="formula">
+                <div class="formula-title">正しい再帰的写像:</div>
+                θ(r) = π(1-r)/2<br>
+                |ψ⟩ = cos(θ/2)|0⟩ + sin(θ/2)|1⟩<br>
+                <span style="color:#00d4ff">r_{k+1} = f(r_k) = cos(θ) = cos(π(1-r_k)/2)</span><br><br>
+                <span style="color:#888">固定点: r = -1, 0, 1</span><br>
+                <span style="color:#10b981">安定: r = ±1</span> / 
+                <span style="color:#ec4899">不安定: r = 0</span>
+            </div>
+            
+            <div class="insight">
+                💡 N↑ で r は ±1 に収束<br>
+                → 量子的曖昧さが消え古典化
+            </div>
+            
+            <div class="legend">
+                <div><span style="background:#10b981"></span>スタート</div>
+                <div><span style="background:#ec4899"></span>ゴール</div>
+                <div><span style="background:#00d4ff"></span>エージェント</div>
+                <div><span style="background:#f59e0b"></span>経路</div>
+            </div>
+        </div>
+        
+        <div class="panel maze-panel">
+            <canvas id="mazeCanvas" width="420" height="420"></canvas>
+            <canvas id="chartCanvas" width="420" height="130" style="margin-top:10px"></canvas>
+        </div>
+        
+        <div class="panel stats-panel">
+            <h3>再帰的写像 f^N(r₀)</h3>
+            
+            <div class="chain-box">
+                <div class="chain-title">r₀ → r₁ → r₂ → ... → r_N</div>
+                <div class="chain-values" id="chainValues">探索開始で表示</div>
+                <div class="final-box">
+                    <div style="font-size:0.7rem;color:#888">最終値 r_N</div>
+                    <div class="final-r" id="finalR">-</div>
+                    <div style="font-size:0.7rem;margin-top:3px" id="convergence">-</div>
+                </div>
+            </div>
+            
+            <h3>統計</h3>
+            <div class="stat-row"><span class="stat-label">ステップ:</span><span class="stat-value" id="stepStat">0</span></div>
+            <div class="stat-row"><span class="stat-label">距離:</span><span class="stat-value" id="distStat">-</span></div>
+            <div class="stat-row"><span class="stat-label">初期 r₀:</span><span class="stat-value" id="r0Stat">-</span></div>
+            <div class="stat-row"><span class="stat-label">最終 r_N:</span><span class="stat-value" id="rNStat">-</span></div>
+            <div class="stat-row"><span class="stat-label">+1方向 (r_N > 0):</span><span class="stat-value" id="cPosStat">0</span></div>
+            <div class="stat-row"><span class="stat-label">-1方向 (r_N < 0):</span><span class="stat-value" id="cNegStat">0</span></div>
+            <div class="stat-row"><span class="stat-label">経路長:</span><span class="stat-value" id="pathStat">0</span></div>
+            
+            <div class="info" id="infoBox">▶ 探索開始を押してください</div>
+        </div>
+    </div>
+
+<script>
+(function() {
+    // 正しい再帰的写像: f(r) = cos(π(1-r)/2)
+    function f(r) {
+        var theta = Math.PI * (1 - r) / 2;
+        return Math.cos(theta);
+    }
+
+    // N回写像を適用
+    function applyN(r0, N) {
+        var chain = [r0];
+        var r = r0;
+        for (var i = 0; i < N; i++) {
+            r = f(r);
+            chain.push(r);
+        }
+        return chain;
+    }
+
+    // 擬似量子ビット（測定用）
+    function Qubit(r) {
+        this.r = Math.max(-1, Math.min(1, r));
+        var theta = Math.PI * (1 - this.r) / 2;
+        this.p0 = Math.pow(Math.cos(theta/2), 2);
+    }
+    Qubit.prototype.measure = function() {
+        return Math.random() < this.p0 ? 0 : 1;
+    };
+
+    // 迷路生成
+    function createMaze(size) {
+        var maze = [];
+        for (var y = 0; y < size; y++) {
+            maze[y] = [];
+            for (var x = 0; x < size; x++) {
+                if (y === 0 || y === size-1 || x === 0 || x === size-1) {
+                    maze[y][x] = 1;
+                } else if (y % 2 === 0 && x % 2 === 0) {
+                    maze[y][x] = 1;
+                } else if (y % 2 === 1 && x % 2 === 1) {
+                    maze[y][x] = 0;
+                } else {
+                    maze[y][x] = Math.random() < 0.3 ? 1 : 0;
+                }
+            }
+        }
+        maze[1][1] = 0;
+        maze[size-2][size-2] = 0;
+        maze[1][2] = 0; maze[2][1] = 0;
+        maze[size-2][size-3] = 0; maze[size-3][size-2] = 0;
+        return maze;
+    }
+
+    // 状態
+    var SIZE = 21, CELL = 20;
+    var maze = [];
+    var agent = {x: 1, y: 1};
+    var start = {x: 1, y: 1};
+    var goal = {x: SIZE-2, y: SIZE-2};
+    var path = [];
+    var visited = {};
+    var running = false;
+    var timer = null;
+    var step = 0;
+    var cPos = 0, cNeg = 0;
+    var rHistory = [];
+
+    var mazeCanvas = document.getElementById('mazeCanvas');
+    var mazeCtx = mazeCanvas.getContext('2d');
+    var chartCanvas = document.getElementById('chartCanvas');
+    var chartCtx = chartCanvas.getContext('2d');
+
+    function updateSliders() {
+        document.getElementById('nVal').textContent = document.getElementById('nSlider').value;
+        document.getElementById('stepsVal').textContent = document.getElementById('stepsSlider').value;
+        document.getElementById('speedVal').textContent = document.getElementById('speedSlider').value;
+        document.getElementById('noiseVal').textContent = document.getElementById('noiseSlider').value;
+    }
+
+    document.getElementById('nSlider').oninput = updateSliders;
+    document.getElementById('stepsSlider').oninput = updateSliders;
+    document.getElementById('speedSlider').oninput = updateSliders;
+    document.getElementById('noiseSlider').oninput = updateSliders;
+
+    function genMaze() {
+        stopRun();
+        maze = createMaze(SIZE);
+        resetState();
+    }
+
+    function resetState() {
+        agent = {x: 1, y: 1};
+        path = [{x: 1, y: 1}];
+        visited = {}; visited['1,1'] = true;
+        step = 0; cPos = 0; cNeg = 0;
+        rHistory = [];
+        document.getElementById('chainValues').innerHTML = '<span style="color:#666">探索開始で表示</span>';
+        document.getElementById('finalR').textContent = '-';
+        document.getElementById('finalR').style.color = '#888';
+        document.getElementById('convergence').textContent = '-';
+        document.getElementById('stepStat').textContent = '0';
+        document.getElementById('distStat').textContent = '-';
+        document.getElementById('r0Stat').textContent = '-';
+        document.getElementById('rNStat').textContent = '-';
+        document.getElementById('cPosStat').textContent = '0';
+        document.getElementById('cNegStat').textContent = '0';
+        document.getElementById('pathStat').textContent = '1';
+        document.getElementById('infoBox').textContent = '▶ 探索開始を押してください';
+        document.getElementById('infoBox').style.color = '#10b981';
+        drawMaze();
+        drawChart();
+    }
+
+    function stopRun() {
+        running = false;
+        if (timer) { clearTimeout(timer); timer = null; }
+        document.getElementById('startBtn').style.display = 'block';
+        document.getElementById('stopBtn').style.display = 'none';
+    }
+
+    function displayChain(chain) {
+        var html = '';
+        for (var i = 0; i < chain.length; i++) {
+            var r = chain[i];
+            var cls = r > 0.01 ? 'r-pos' : (r < -0.01 ? 'r-neg' : 'r-zero');
+            html += '<span class="' + cls + '">r' + (i === 0 ? '₀' : '_' + i) + '=' + r.toFixed(4) + '</span>';
+            if (i < chain.length - 1) html += ' → ';
+        }
+        document.getElementById('chainValues').innerHTML = html;
+        
+        var rN = chain[chain.length - 1];
+        document.getElementById('finalR').textContent = rN.toFixed(6);
+        document.getElementById('finalR').style.color = rN > 0 ? '#00d4ff' : '#ec4899';
+        
+        var conv = '';
+        if (Math.abs(rN - 1) < 0.001) conv = '→ +1 に収束（|0⟩ 優勢）';
+        else if (Math.abs(rN + 1) < 0.001) conv = '→ -1 に収束（|1⟩ 優勢）';
+        else if (Math.abs(rN) < 0.001) conv = '→ 0 付近（不安定固定点）';
+        else conv = '→ 収束途中';
+        document.getElementById('convergence').textContent = conv;
+    }
+
+    function startRun() {
+        if (running) return;
+        running = true;
+        document.getElementById('startBtn').style.display = 'none';
+        document.getElementById('stopBtn').style.display = 'block';
+        document.getElementById('infoBox').textContent = '🔍 再帰的量子探索中...';
+        document.getElementById('infoBox').style.color = '#00d4ff';
+
+        var N = parseInt(document.getElementById('nSlider').value);
+        var maxSteps = parseInt(document.getElementById('stepsSlider').value);
+        var speed = parseInt(document.getElementById('speedSlider').value);
+        var noise = parseInt(document.getElementById('noiseSlider').value) / 100;
+
+        function tick() {
+            if (!running) return;
+
+            if (agent.x === goal.x && agent.y === goal.y) {
+                document.getElementById('infoBox').textContent = '🎉 ゴール到達！ ' + path.length + 'ステップ';
+                document.getElementById('infoBox').style.color = '#f59e0b';
+                stopRun();
+                return;
+            }
+
+            if (step >= maxSteps) {
+                document.getElementById('infoBox').textContent = '⏱ 時間切れ (' + step + 'ステップ)';
+                document.getElementById('infoBox').style.color = '#ec4899';
+                stopRun();
+                return;
+            }
+
+            // 移動可能方向
+            var dirs = [];
+            var moves = [{dx:0,dy:-1},{dx:0,dy:1},{dx:-1,dy:0},{dx:1,dy:0}];
+            for (var i = 0; i < moves.length; i++) {
+                var nx = agent.x + moves[i].dx;
+                var ny = agent.y + moves[i].dy;
+                if (nx >= 0 && nx < SIZE && ny >= 0 && ny < SIZE && maze[ny][nx] === 0) {
+                    var dist = Math.sqrt(Math.pow(goal.x - nx, 2) + Math.pow(goal.y - ny, 2));
+                    dirs.push({dx: moves[i].dx, dy: moves[i].dy, dist: dist, visited: visited[nx+','+ny]});
+                }
+            }
+
+            if (dirs.length === 0) {
+                if (path.length > 1) {
+                    path.pop();
+                    agent = {x: path[path.length-1].x, y: path[path.length-1].y};
+                }
+                step++;
+                drawMaze();
+                timer = setTimeout(tick, speed);
+                return;
+            }
+
+            // ゴール方向を計算 → 初期相関係数 r₀
+            dirs.sort(function(a, b) { return a.dist - b.dist; });
+            var best = dirs[0];
+            var worst = dirs[dirs.length - 1];
+            var curDist = Math.sqrt(Math.pow(goal.x - agent.x, 2) + Math.pow(goal.y - agent.y, 2));
+            
+            // r₀: ゴールに近づくほど正、遠ざかるほど負
+            var r0 = (curDist - best.dist) / (Math.max(curDist, 1) * 0.5);
+            if (best.visited) r0 -= 0.4;  // 訪問済みペナルティ
+            r0 = Math.max(-0.99, Math.min(0.99, r0));
+
+            // ★ N回の再帰的写像 f^N(r₀) を適用 ★
+            var chain = applyN(r0, N);
+            displayChain(chain);
+
+            var rN = chain[chain.length - 1];
+
+            // 統計
+            if (rN > 0) cPos++; else cNeg++;
+
+            // 方向決定：r_N の値と量子ゆらぎを使う
+            var chosen;
+            
+            // r_N が正ならゴール方向、負ならランダム
+            // ただし「量子ゆらぎ」パラメータで確率的に反転
+            var qubit = new Qubit(rN);
+            var measurement = qubit.measure();
+            
+            if (Math.random() < noise) {
+                // 量子測定で方向を決定
+                if (measurement === 0) {
+                    chosen = best;
+                } else {
+                    chosen = dirs[Math.floor(Math.random() * dirs.length)];
+                }
+            } else {
+                // r_N の符号で決定論的に決定
+                if (rN > 0) {
+                    chosen = best;
+                } else {
+                    chosen = dirs[Math.floor(Math.random() * dirs.length)];
+                }
+            }
+
+            // 移動
+            agent.x += chosen.dx;
+            agent.y += chosen.dy;
+            visited[agent.x + ',' + agent.y] = true;
+            path.push({x: agent.x, y: agent.y});
+
+            rHistory.push({r0: r0, rN: rN});
+
+            // 表示更新
+            document.getElementById('stepStat').textContent = step;
+            var d = Math.sqrt(Math.pow(goal.x - agent.x, 2) + Math.pow(goal.y - agent.y, 2));
+            document.getElementById('distStat').textContent = d.toFixed(1);
+            document.getElementById('r0Stat').textContent = r0.toFixed(4);
+            document.getElementById('rNStat').textContent = rN.toFixed(6);
+            document.getElementById('cPosStat').textContent = cPos;
+            document.getElementById('cNegStat').textContent = cNeg;
+            document.getElementById('pathStat').textContent = path.length;
+
+            step++;
+            drawMaze();
+            drawChart();
+            timer = setTimeout(tick, speed);
+        }
+
+        tick();
+    }
+
+    function drawMaze() {
+        mazeCtx.fillStyle = '#0a0a1a';
+        mazeCtx.fillRect(0, 0, mazeCanvas.width, mazeCanvas.height);
+
+        for (var y = 0; y < SIZE; y++) {
+            for (var x = 0; x < SIZE; x++) {
+                if (maze[y][x] === 1) {
+                    mazeCtx.fillStyle = '#1a1a3e';
+                    mazeCtx.fillRect(x * CELL, y * CELL, CELL, CELL);
+                } else if (visited[x + ',' + y]) {
+                    mazeCtx.fillStyle = 'rgba(139,92,246,0.2)';
+                    mazeCtx.fillRect(x * CELL, y * CELL, CELL, CELL);
+                }
+            }
+        }
+
+        if (path.length > 1) {
+            mazeCtx.strokeStyle = '#f59e0b';
+            mazeCtx.lineWidth = CELL * 0.3;
+            mazeCtx.lineCap = 'round';
+            mazeCtx.beginPath();
+            mazeCtx.moveTo(path[0].x * CELL + CELL/2, path[0].y * CELL + CELL/2);
+            for (var i = 1; i < path.length; i++) {
+                mazeCtx.lineTo(path[i].x * CELL + CELL/2, path[i].y * CELL + CELL/2);
+            }
+            mazeCtx.stroke();
+        }
+
+        mazeCtx.fillStyle = '#10b981';
+        mazeCtx.beginPath();
+        mazeCtx.arc(start.x * CELL + CELL/2, start.y * CELL + CELL/2, CELL * 0.35, 0, Math.PI * 2);
+        mazeCtx.fill();
+        mazeCtx.fillStyle = '#fff';
+        mazeCtx.font = (CELL * 0.5) + 'px sans-serif';
+        mazeCtx.textAlign = 'center';
+        mazeCtx.textBaseline = 'middle';
+        mazeCtx.fillText('S', start.x * CELL + CELL/2, start.y * CELL + CELL/2);
+
+        mazeCtx.fillStyle = '#ec4899';
+        mazeCtx.beginPath();
+        mazeCtx.arc(goal.x * CELL + CELL/2, goal.y * CELL + CELL/2, CELL * 0.35, 0, Math.PI * 2);
+        mazeCtx.fill();
+        mazeCtx.fillStyle = '#fff';
+        mazeCtx.fillText('G', goal.x * CELL + CELL/2, goal.y * CELL + CELL/2);
+
+        mazeCtx.fillStyle = '#00d4ff';
+        mazeCtx.beginPath();
+        mazeCtx.arc(agent.x * CELL + CELL/2, agent.y * CELL + CELL/2, CELL * 0.4, 0, Math.PI * 2);
+        mazeCtx.fill();
+        mazeCtx.strokeStyle = '#fff';
+        mazeCtx.lineWidth = 2;
+        mazeCtx.stroke();
+    }
+
+    function drawChart() {
+        var w = chartCanvas.width, h = chartCanvas.height;
+        chartCtx.fillStyle = 'rgba(10,10,15,0.95)';
+        chartCtx.fillRect(0, 0, w, h);
+
+        // グリッド
+        chartCtx.strokeStyle = 'rgba(255,255,255,0.1)';
+        chartCtx.beginPath();
+        chartCtx.moveTo(40, h/2);
+        chartCtx.lineTo(w, h/2);
+        chartCtx.stroke();
+
+        // y軸ラベル
+        chartCtx.fillStyle = '#666';
+        chartCtx.font = '10px monospace';
+        chartCtx.fillText('+1', 10, 15);
+        chartCtx.fillText('0', 18, h/2 + 3);
+        chartCtx.fillText('-1', 10, h - 5);
+
+        // 固定点を示すライン
+        chartCtx.strokeStyle = 'rgba(16,185,129,0.3)';
+        chartCtx.setLineDash([3, 3]);
+        chartCtx.beginPath();
+        chartCtx.moveTo(40, 10);
+        chartCtx.lineTo(w, 10);
+        chartCtx.moveTo(40, h - 10);
+        chartCtx.lineTo(w, h - 10);
+        chartCtx.stroke();
+        chartCtx.setLineDash([]);
+
+        if (rHistory.length < 2) {
+            chartCtx.fillStyle = '#666';
+            chartCtx.fillText('r₀ と r_N の時間変化', w/2 - 50, h/2);
+            return;
+        }
+
+        var xs = (w - 50) / Math.max(rHistory.length, 50);
+
+        // r₀ (初期)
+        chartCtx.strokeStyle = 'rgba(139,92,246,0.7)';
+        chartCtx.lineWidth = 1.5;
+        chartCtx.beginPath();
+        for (var i = 0; i < rHistory.length; i++) {
+            var x = 45 + i * xs;
+            var y = h/2 - rHistory[i].r0 * (h/2 - 15);
+            if (i === 0) chartCtx.moveTo(x, y);
+            else chartCtx.lineTo(x, y);
+        }
+        chartCtx.stroke();
+
+        // r_N (最終)
+        chartCtx.strokeStyle = '#00d4ff';
+        chartCtx.lineWidth = 2;
+        chartCtx.beginPath();
+        for (var i = 0; i < rHistory.length; i++) {
+            var x = 45 + i * xs;
+            var y = h/2 - rHistory[i].rN * (h/2 - 15);
+            if (i === 0) chartCtx.moveTo(x, y);
+            else chartCtx.lineTo(x, y);
+        }
+        chartCtx.stroke();
+
+        // 凡例
+        chartCtx.fillStyle = 'rgba(139,92,246,0.7)';
+        chartCtx.fillText('― r₀ (初期)', w - 100, 15);
+        chartCtx.fillStyle = '#00d4ff';
+        chartCtx.fillText('― r_N (N回後)', w - 100, 27);
+        chartCtx.fillStyle = 'rgba(16,185,129,0.5)';
+        chartCtx.fillText('--- 安定固定点 ±1', w - 100, 39);
+    }
+
+    // イベント
+    document.getElementById('mazeBtn').onclick = genMaze;
+    document.getElementById('startBtn').onclick = startRun;
+    document.getElementById('stopBtn').onclick = stopRun;
+    document.getElementById('resetBtn').onclick = resetState;
+
+    // 初期化
+    updateSliders();
+    genMaze();
+})();
+</script>
+</body>
+</html>

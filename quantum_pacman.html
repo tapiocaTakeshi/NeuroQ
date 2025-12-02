@@ -1,0 +1,950 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>量子パックマン | Quantum Pac-Man</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            background: linear-gradient(135deg, #0a0a1a 0%, #1a0a2e 50%, #0a1a1a 100%);
+            min-height: 100vh;
+            font-family: 'Courier New', monospace;
+            color: #fff;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            padding: 20px;
+        }
+        
+        h1 {
+            font-size: 2.5rem;
+            background: linear-gradient(90deg, #ffff00, #00ffff, #ff00ff);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            margin-bottom: 10px;
+            text-shadow: 0 0 30px rgba(255,255,0,0.5);
+        }
+        
+        .subtitle {
+            color: #8b5cf6;
+            margin-bottom: 20px;
+            font-size: 0.9rem;
+        }
+        
+        .game-container {
+            display: flex;
+            gap: 30px;
+            flex-wrap: wrap;
+            justify-content: center;
+        }
+        
+        .game-panel {
+            background: rgba(0, 0, 0, 0.6);
+            border: 2px solid #00d4ff;
+            border-radius: 15px;
+            padding: 20px;
+            box-shadow: 0 0 30px rgba(0, 212, 255, 0.3);
+        }
+        
+        #gameCanvas {
+            border: 3px solid #ffff00;
+            border-radius: 10px;
+            box-shadow: 0 0 20px rgba(255, 255, 0, 0.5);
+        }
+        
+        .info-panel {
+            width: 300px;
+        }
+        
+        .score-display {
+            font-size: 1.5rem;
+            color: #ffff00;
+            margin-bottom: 15px;
+            text-align: center;
+        }
+        
+        .quantum-info {
+            background: rgba(139, 92, 246, 0.2);
+            border: 1px solid #8b5cf6;
+            border-radius: 10px;
+            padding: 15px;
+            margin-bottom: 15px;
+        }
+        
+        .quantum-info h3 {
+            color: #8b5cf6;
+            margin-bottom: 10px;
+            font-size: 1rem;
+        }
+        
+        .quantum-meter {
+            display: flex;
+            align-items: center;
+            margin: 8px 0;
+        }
+        
+        .quantum-meter label {
+            width: 120px;
+            font-size: 0.8rem;
+            color: #aaa;
+        }
+        
+        .meter-bar {
+            flex: 1;
+            height: 15px;
+            background: #1a1a2e;
+            border-radius: 10px;
+            overflow: hidden;
+        }
+        
+        .meter-fill {
+            height: 100%;
+            transition: width 0.3s ease;
+            border-radius: 10px;
+        }
+        
+        .superposition-fill { background: linear-gradient(90deg, #00d4ff, #8b5cf6); }
+        .entangle-fill { background: linear-gradient(90deg, #ec4899, #f59e0b); }
+        .tunnel-fill { background: linear-gradient(90deg, #10b981, #00d4ff); }
+        
+        .ghost-states {
+            background: rgba(0, 0, 0, 0.3);
+            border-radius: 10px;
+            padding: 15px;
+            margin-bottom: 15px;
+        }
+        
+        .ghost-states h3 {
+            color: #ec4899;
+            margin-bottom: 10px;
+            font-size: 1rem;
+        }
+        
+        .ghost-state {
+            display: flex;
+            align-items: center;
+            margin: 5px 0;
+            font-size: 0.85rem;
+        }
+        
+        .ghost-icon {
+            width: 25px;
+            height: 25px;
+            border-radius: 50% 50% 0 0;
+            margin-right: 10px;
+        }
+        
+        .ghost-probability {
+            color: #aaa;
+            margin-left: auto;
+        }
+        
+        .controls {
+            text-align: center;
+            margin-top: 15px;
+        }
+        
+        .controls h3 {
+            color: #10b981;
+            margin-bottom: 10px;
+        }
+        
+        .key-grid {
+            display: grid;
+            grid-template-columns: repeat(3, 50px);
+            grid-template-rows: repeat(2, 50px);
+            gap: 5px;
+            justify-content: center;
+        }
+        
+        .key {
+            background: rgba(255, 255, 255, 0.1);
+            border: 1px solid #444;
+            border-radius: 5px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 1.2rem;
+        }
+        
+        .key:nth-child(2) { grid-column: 2; }
+        .key:nth-child(3) { grid-column: 1; grid-row: 2; }
+        .key:nth-child(4) { grid-column: 2; grid-row: 2; }
+        .key:nth-child(5) { grid-column: 3; grid-row: 2; }
+        
+        .special-keys {
+            margin-top: 15px;
+            font-size: 0.8rem;
+            color: #888;
+        }
+        
+        .special-keys span {
+            display: block;
+            margin: 5px 0;
+        }
+        
+        .special-keys .key-name {
+            color: #00d4ff;
+        }
+        
+        .btn {
+            background: linear-gradient(135deg, #8b5cf6, #6366f1);
+            border: none;
+            color: white;
+            padding: 12px 25px;
+            border-radius: 25px;
+            cursor: pointer;
+            font-size: 1rem;
+            margin: 5px;
+            transition: transform 0.2s, box-shadow 0.2s;
+        }
+        
+        .btn:hover {
+            transform: scale(1.05);
+            box-shadow: 0 0 20px rgba(139, 92, 246, 0.5);
+        }
+        
+        .btn-quantum {
+            background: linear-gradient(135deg, #ec4899, #f59e0b);
+        }
+        
+        .game-message {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            font-size: 2rem;
+            color: #ffff00;
+            text-shadow: 0 0 20px #ffff00;
+            z-index: 100;
+            display: none;
+        }
+        
+        .legend {
+            margin-top: 15px;
+            font-size: 0.75rem;
+            color: #888;
+        }
+        
+        .legend-item {
+            display: flex;
+            align-items: center;
+            margin: 5px 0;
+        }
+        
+        .legend-color {
+            width: 15px;
+            height: 15px;
+            border-radius: 3px;
+            margin-right: 8px;
+        }
+        
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+        
+        .quantum-active {
+            animation: pulse 0.5s infinite;
+        }
+    </style>
+</head>
+<body>
+    <h1>🎮 量子パックマン 👻</h1>
+    <p class="subtitle">Quantum Pac-Man - 擬似量子ビットで動くゴースト</p>
+    
+    <div class="game-container">
+        <div class="game-panel">
+            <canvas id="gameCanvas" width="560" height="620"></canvas>
+        </div>
+        
+        <div class="game-panel info-panel">
+            <div class="score-display">
+                スコア: <span id="score">0</span>
+            </div>
+            
+            <div class="quantum-info">
+                <h3>⚛️ 量子状態</h3>
+                <div class="quantum-meter">
+                    <label>重ね合わせ</label>
+                    <div class="meter-bar">
+                        <div class="meter-fill superposition-fill" id="superpositionMeter" style="width: 50%"></div>
+                    </div>
+                </div>
+                <div class="quantum-meter">
+                    <label>もつれ度</label>
+                    <div class="meter-bar">
+                        <div class="meter-fill entangle-fill" id="entangleMeter" style="width: 30%"></div>
+                    </div>
+                </div>
+                <div class="quantum-meter">
+                    <label>トンネル確率</label>
+                    <div class="meter-bar">
+                        <div class="meter-fill tunnel-fill" id="tunnelMeter" style="width: 20%"></div>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="ghost-states">
+                <h3>👻 ゴースト量子状態</h3>
+                <div id="ghostStates"></div>
+            </div>
+            
+            <div class="controls">
+                <h3>🎮 操作</h3>
+                <div class="key-grid">
+                    <div class="key">↑</div>
+                    <div class="key">←</div>
+                    <div class="key">↓</div>
+                    <div class="key">→</div>
+                </div>
+                <div class="special-keys">
+                    <span><span class="key-name">SPACE</span> : 量子測定（ゴースト収束）</span>
+                    <span><span class="key-name">Q</span> : 量子トンネリング</span>
+                    <span><span class="key-name">R</span> : リスタート</span>
+                </div>
+            </div>
+            
+            <div style="text-align: center; margin-top: 15px;">
+                <button class="btn" onclick="startGame()">▶ スタート</button>
+                <button class="btn btn-quantum" onclick="quantumMeasure()">⚛ 測定</button>
+            </div>
+            
+            <div class="legend">
+                <h4 style="color: #aaa; margin-bottom: 8px;">アイテム</h4>
+                <div class="legend-item">
+                    <div class="legend-color" style="background: #ffff00; border-radius: 50%;"></div>
+                    <span>ドット (10点)</span>
+                </div>
+                <div class="legend-item">
+                    <div class="legend-color" style="background: #00d4ff; border-radius: 50%;"></div>
+                    <span>パワーペレット (50点)</span>
+                </div>
+                <div class="legend-item">
+                    <div class="legend-color" style="background: #8b5cf6; border-radius: 50%;"></div>
+                    <span>量子ペレット (重ね合わせ)</span>
+                </div>
+                <div class="legend-item">
+                    <div class="legend-color" style="background: #ec4899; border-radius: 50%;"></div>
+                    <span>もつれペレット (ゴースト同期)</span>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // ============================================================
+        // 擬似量子ビット
+        // ============================================================
+        class PseudoQubit {
+            constructor(correlation = 0) {
+                this.correlation = Math.max(-1, Math.min(1, correlation));
+                this.updateState();
+            }
+            
+            updateState() {
+                const theta = Math.acos(this.correlation) / 2;
+                this.alpha = Math.cos(theta);
+                this.beta = Math.sin(theta);
+                this.prob0 = this.alpha ** 2;
+                this.prob1 = this.beta ** 2;
+            }
+            
+            measure() {
+                return Math.random() < this.prob0 ? 0 : 1;
+            }
+            
+            setCorrelation(r) {
+                this.correlation = Math.max(-1, Math.min(1, r));
+                this.updateState();
+            }
+        }
+        
+        // ============================================================
+        // 量子ゴースト
+        // ============================================================
+        class QuantumGhost {
+            constructor(x, y, color, name) {
+                this.positions = [{ x, y }]; // 重ね合わせ位置
+                this.color = color;
+                this.name = name;
+                this.qubit = new PseudoQubit(0); // 重ね合わせ状態
+                this.direction = { x: 0, y: 0 };
+                this.isScared = false;
+                this.isSuperposition = true;
+                this.entangledWith = null;
+            }
+            
+            addSuperposition(x, y) {
+                if (this.positions.length < 3) {
+                    this.positions.push({ x, y });
+                }
+            }
+            
+            collapse() {
+                // 量子測定：位置を確定
+                const idx = Math.floor(Math.random() * this.positions.length);
+                const pos = this.positions[idx];
+                this.positions = [{ x: pos.x, y: pos.y }];
+                this.isSuperposition = false;
+                
+                // もつれたゴーストも収束
+                if (this.entangledWith) {
+                    this.entangledWith.positions = [{ ...this.entangledWith.positions[0] }];
+                    this.entangledWith.isSuperposition = false;
+                }
+                
+                setTimeout(() => {
+                    this.isSuperposition = true;
+                }, 3000);
+            }
+            
+            move(maze, pacmanX, pacmanY) {
+                // 各重ね合わせ位置を移動
+                for (let i = 0; i < this.positions.length; i++) {
+                    const pos = this.positions[i];
+                    
+                    // パックマンへの方向を計算（量子ビットで確率的に）
+                    const dx = pacmanX - pos.x;
+                    const dy = pacmanY - pos.y;
+                    
+                    // 相関係数：パックマンに近いほど追跡
+                    const dist = Math.sqrt(dx * dx + dy * dy);
+                    this.qubit.setCorrelation(this.isScared ? -0.8 : 0.3 / (dist / 10 + 1));
+                    
+                    let newX = pos.x;
+                    let newY = pos.y;
+                    
+                    // 量子的な移動選択
+                    const directions = [
+                        { x: 0, y: -1 },
+                        { x: 0, y: 1 },
+                        { x: -1, y: 0 },
+                        { x: 1, y: 0 }
+                    ];
+                    
+                    // パックマン方向への重み付け
+                    const weights = directions.map(d => {
+                        const dotProduct = d.x * Math.sign(dx) + d.y * Math.sign(dy);
+                        return this.isScared ? (1 - dotProduct) : (1 + dotProduct);
+                    });
+                    
+                    // 量子測定で方向選択
+                    const totalWeight = weights.reduce((a, b) => a + b, 0);
+                    let random = Math.random() * totalWeight;
+                    let selectedDir = directions[0];
+                    
+                    for (let j = 0; j < directions.length; j++) {
+                        random -= weights[j];
+                        if (random <= 0) {
+                            selectedDir = directions[j];
+                            break;
+                        }
+                    }
+                    
+                    newX = pos.x + selectedDir.x;
+                    newY = pos.y + selectedDir.y;
+                    
+                    // 壁チェック
+                    if (!maze.isWall(newX, newY)) {
+                        pos.x = newX;
+                        pos.y = newY;
+                    } else {
+                        // 別の方向を試す
+                        for (const d of directions) {
+                            if (!maze.isWall(pos.x + d.x, pos.y + d.y)) {
+                                pos.x += d.x;
+                                pos.y += d.y;
+                                break;
+                            }
+                        }
+                    }
+                }
+                
+                // もつれているゴーストと位置を同期
+                if (this.entangledWith && Math.random() < 0.3) {
+                    const avgX = (this.positions[0].x + this.entangledWith.positions[0].x) / 2;
+                    const avgY = (this.positions[0].y + this.entangledWith.positions[0].y) / 2;
+                    // 互いに近づく
+                }
+            }
+        }
+        
+        // ============================================================
+        // 迷路
+        // ============================================================
+        class Maze {
+            constructor() {
+                // 0: 通路, 1: 壁, 2: ドット, 3: パワーペレット, 4: 量子ペレット, 5: もつれペレット
+                this.grid = [
+                    [1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1],
+                    [1,2,2,2,2,2,2,2,2,2,2,2,2,1,1,2,2,2,2,2,2,2,2,2,2,2,2,1],
+                    [1,2,1,1,1,1,2,1,1,1,1,1,2,1,1,2,1,1,1,1,1,2,1,1,1,1,2,1],
+                    [1,3,1,1,1,1,2,1,1,1,1,1,2,1,1,2,1,1,1,1,1,2,1,1,1,1,3,1],
+                    [1,2,1,1,1,1,2,1,1,1,1,1,2,1,1,2,1,1,1,1,1,2,1,1,1,1,2,1],
+                    [1,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,1],
+                    [1,2,1,1,1,1,2,1,1,2,1,1,1,1,1,1,1,1,2,1,1,2,1,1,1,1,2,1],
+                    [1,2,1,1,1,1,2,1,1,2,1,1,1,1,1,1,1,1,2,1,1,2,1,1,1,1,2,1],
+                    [1,2,2,2,2,2,2,1,1,2,2,2,2,1,1,2,2,2,2,1,1,2,2,2,2,2,2,1],
+                    [1,1,1,1,1,1,2,1,1,1,1,1,0,1,1,0,1,1,1,1,1,2,1,1,1,1,1,1],
+                    [0,0,0,0,0,1,2,1,1,1,1,1,0,1,1,0,1,1,1,1,1,2,1,0,0,0,0,0],
+                    [0,0,0,0,0,1,2,1,1,0,0,0,0,0,0,0,0,0,0,1,1,2,1,0,0,0,0,0],
+                    [0,0,0,0,0,1,2,1,1,0,1,1,1,0,0,1,1,1,0,1,1,2,1,0,0,0,0,0],
+                    [1,1,1,1,1,1,2,1,1,0,1,0,0,0,0,0,0,1,0,1,1,2,1,1,1,1,1,1],
+                    [0,0,0,0,0,0,4,0,0,0,1,0,0,0,0,0,0,1,0,0,0,4,0,0,0,0,0,0],
+                    [1,1,1,1,1,1,2,1,1,0,1,0,0,0,0,0,0,1,0,1,1,2,1,1,1,1,1,1],
+                    [0,0,0,0,0,1,2,1,1,0,1,1,1,1,1,1,1,1,0,1,1,2,1,0,0,0,0,0],
+                    [0,0,0,0,0,1,2,1,1,0,0,0,0,0,0,0,0,0,0,1,1,2,1,0,0,0,0,0],
+                    [0,0,0,0,0,1,2,1,1,0,1,1,1,1,1,1,1,1,0,1,1,2,1,0,0,0,0,0],
+                    [1,1,1,1,1,1,2,1,1,0,1,1,1,1,1,1,1,1,0,1,1,2,1,1,1,1,1,1],
+                    [1,2,2,2,2,2,2,2,2,2,2,2,2,1,1,2,2,2,2,2,2,2,2,2,2,2,2,1],
+                    [1,2,1,1,1,1,2,1,1,1,1,1,2,1,1,2,1,1,1,1,1,2,1,1,1,1,2,1],
+                    [1,2,1,1,1,1,2,1,1,1,1,1,2,1,1,2,1,1,1,1,1,2,1,1,1,1,2,1],
+                    [1,3,2,2,1,1,2,2,2,2,2,2,2,0,0,2,2,2,2,2,2,2,1,1,2,2,3,1],
+                    [1,1,1,2,1,1,2,1,1,2,1,1,1,1,1,1,1,1,2,1,1,2,1,1,2,1,1,1],
+                    [1,1,1,2,1,1,2,1,1,2,1,1,1,1,1,1,1,1,2,1,1,2,1,1,2,1,1,1],
+                    [1,2,2,2,2,2,2,1,1,2,2,2,2,1,1,2,2,2,2,1,1,2,2,2,2,2,2,1],
+                    [1,2,1,1,1,1,1,1,1,1,1,1,2,1,1,2,1,1,1,1,1,1,1,1,1,1,2,1],
+                    [1,2,1,1,1,1,1,1,1,1,1,1,2,1,1,2,1,1,1,1,1,1,1,1,1,1,2,1],
+                    [1,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,1],
+                    [1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1]
+                ];
+                
+                // もつれペレットを追加
+                this.grid[7][7] = 5;
+                this.grid[7][20] = 5;
+                
+                this.width = this.grid[0].length;
+                this.height = this.grid.length;
+                this.cellSize = 20;
+            }
+            
+            isWall(x, y) {
+                if (x < 0 || x >= this.width || y < 0 || y >= this.height) return true;
+                return this.grid[y][x] === 1;
+            }
+            
+            getCell(x, y) {
+                if (x < 0 || x >= this.width || y < 0 || y >= this.height) return 0;
+                return this.grid[y][x];
+            }
+            
+            clearCell(x, y) {
+                if (x >= 0 && x < this.width && y >= 0 && y < this.height) {
+                    this.grid[y][x] = 0;
+                }
+            }
+        }
+        
+        // ============================================================
+        // ゲーム
+        // ============================================================
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+        
+        let maze = new Maze();
+        let pacman = { x: 14, y: 23, direction: { x: 0, y: 0 }, mouthOpen: 0 };
+        let ghosts = [];
+        let score = 0;
+        let gameRunning = false;
+        let superpositionLevel = 50;
+        let entangleLevel = 30;
+        let tunnelLevel = 20;
+        let tunnelCooldown = 0;
+        let powerMode = false;
+        let powerTimer = 0;
+        
+        function initGame() {
+            maze = new Maze();
+            pacman = { x: 14, y: 23, direction: { x: 0, y: 0 }, mouthOpen: 0 };
+            
+            ghosts = [
+                new QuantumGhost(13, 14, '#ff0000', 'Blinky'),
+                new QuantumGhost(14, 14, '#ffb8ff', 'Pinky'),
+                new QuantumGhost(13, 12, '#00ffff', 'Inky'),
+                new QuantumGhost(14, 12, '#ffb852', 'Clyde')
+            ];
+            
+            // 初期重ね合わせ
+            ghosts.forEach(g => {
+                g.addSuperposition(g.positions[0].x + 1, g.positions[0].y);
+            });
+            
+            // Blinky と Pinky をもつれさせる
+            ghosts[0].entangledWith = ghosts[1];
+            ghosts[1].entangledWith = ghosts[0];
+            
+            score = 0;
+            superpositionLevel = 50;
+            entangleLevel = 30;
+            tunnelLevel = 20;
+            powerMode = false;
+            
+            updateUI();
+        }
+        
+        function startGame() {
+            if (!gameRunning) {
+                initGame();
+                gameRunning = true;
+                gameLoop();
+            }
+        }
+        
+        function gameLoop() {
+            if (!gameRunning) return;
+            
+            update();
+            draw();
+            
+            setTimeout(() => requestAnimationFrame(gameLoop), 150);
+        }
+        
+        function update() {
+            // パックマン移動
+            const newX = pacman.x + pacman.direction.x;
+            const newY = pacman.y + pacman.direction.y;
+            
+            if (!maze.isWall(newX, newY)) {
+                pacman.x = newX;
+                pacman.y = newY;
+            }
+            
+            // ワープ
+            if (pacman.x < 0) pacman.x = maze.width - 1;
+            if (pacman.x >= maze.width) pacman.x = 0;
+            
+            // アイテム取得
+            const cell = maze.getCell(pacman.x, pacman.y);
+            if (cell === 2) {
+                score += 10;
+                maze.clearCell(pacman.x, pacman.y);
+            } else if (cell === 3) {
+                score += 50;
+                maze.clearCell(pacman.x, pacman.y);
+                powerMode = true;
+                powerTimer = 50;
+                ghosts.forEach(g => g.isScared = true);
+            } else if (cell === 4) {
+                score += 30;
+                maze.clearCell(pacman.x, pacman.y);
+                superpositionLevel = Math.min(100, superpositionLevel + 20);
+                // 全ゴーストに重ね合わせ追加
+                ghosts.forEach(g => {
+                    if (g.positions.length < 3) {
+                        g.addSuperposition(
+                            g.positions[0].x + Math.floor(Math.random() * 5) - 2,
+                            g.positions[0].y + Math.floor(Math.random() * 5) - 2
+                        );
+                    }
+                });
+            } else if (cell === 5) {
+                score += 40;
+                maze.clearCell(pacman.x, pacman.y);
+                entangleLevel = Math.min(100, entangleLevel + 25);
+            }
+            
+            // パワーモードタイマー
+            if (powerMode) {
+                powerTimer--;
+                if (powerTimer <= 0) {
+                    powerMode = false;
+                    ghosts.forEach(g => g.isScared = false);
+                }
+            }
+            
+            // ゴースト移動
+            ghosts.forEach(g => g.move(maze, pacman.x, pacman.y));
+            
+            // 衝突判定
+            for (const ghost of ghosts) {
+                for (const pos of ghost.positions) {
+                    if (Math.abs(pos.x - pacman.x) < 1 && Math.abs(pos.y - pacman.y) < 1) {
+                        if (powerMode || ghost.isScared) {
+                            // ゴーストを食べる
+                            score += 200;
+                            ghost.positions = [{ x: 13, y: 14 }];
+                            ghost.isScared = false;
+                        } else if (!ghost.isSuperposition || Math.random() < 0.7) {
+                            // ゲームオーバー（重ね合わせ中は30%で回避）
+                            gameRunning = false;
+                            alert(`ゲームオーバー！スコア: ${score}`);
+                            return;
+                        }
+                    }
+                }
+            }
+            
+            // トンネルクールダウン
+            if (tunnelCooldown > 0) tunnelCooldown--;
+            
+            // 口の開閉
+            pacman.mouthOpen = (pacman.mouthOpen + 1) % 4;
+            
+            updateUI();
+        }
+        
+        function draw() {
+            ctx.fillStyle = '#000';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            
+            const cellSize = maze.cellSize;
+            
+            // 迷路描画
+            for (let y = 0; y < maze.height; y++) {
+                for (let x = 0; x < maze.width; x++) {
+                    const cell = maze.grid[y][x];
+                    const px = x * cellSize;
+                    const py = y * cellSize;
+                    
+                    if (cell === 1) {
+                        ctx.fillStyle = '#1a1a8e';
+                        ctx.fillRect(px, py, cellSize, cellSize);
+                        ctx.strokeStyle = '#0000ff';
+                        ctx.strokeRect(px, py, cellSize, cellSize);
+                    } else if (cell === 2) {
+                        ctx.fillStyle = '#ffff00';
+                        ctx.beginPath();
+                        ctx.arc(px + cellSize/2, py + cellSize/2, 3, 0, Math.PI * 2);
+                        ctx.fill();
+                    } else if (cell === 3) {
+                        ctx.fillStyle = '#00d4ff';
+                        ctx.beginPath();
+                        ctx.arc(px + cellSize/2, py + cellSize/2, 6, 0, Math.PI * 2);
+                        ctx.fill();
+                        // 光るエフェクト
+                        ctx.strokeStyle = 'rgba(0, 212, 255, 0.5)';
+                        ctx.lineWidth = 2;
+                        ctx.beginPath();
+                        ctx.arc(px + cellSize/2, py + cellSize/2, 8, 0, Math.PI * 2);
+                        ctx.stroke();
+                    } else if (cell === 4) {
+                        // 量子ペレット
+                        ctx.fillStyle = '#8b5cf6';
+                        ctx.beginPath();
+                        ctx.arc(px + cellSize/2, py + cellSize/2, 5, 0, Math.PI * 2);
+                        ctx.fill();
+                        ctx.strokeStyle = 'rgba(139, 92, 246, 0.5)';
+                        ctx.lineWidth = 2;
+                        ctx.beginPath();
+                        ctx.arc(px + cellSize/2, py + cellSize/2, 8 + Math.sin(Date.now() / 200) * 2, 0, Math.PI * 2);
+                        ctx.stroke();
+                    } else if (cell === 5) {
+                        // もつれペレット
+                        ctx.fillStyle = '#ec4899';
+                        ctx.beginPath();
+                        ctx.arc(px + cellSize/2, py + cellSize/2, 5, 0, Math.PI * 2);
+                        ctx.fill();
+                        // もつれエフェクト
+                        ctx.strokeStyle = '#f59e0b';
+                        ctx.lineWidth = 1;
+                        for (let i = 0; i < 3; i++) {
+                            ctx.beginPath();
+                            ctx.arc(px + cellSize/2, py + cellSize/2, 7 + i * 3, 0, Math.PI * 2);
+                            ctx.stroke();
+                        }
+                    }
+                }
+            }
+            
+            // ゴースト描画
+            ghosts.forEach(ghost => {
+                ghost.positions.forEach((pos, idx) => {
+                    const px = pos.x * cellSize;
+                    const py = pos.y * cellSize;
+                    const alpha = idx === 0 ? 1 : 0.4;
+                    
+                    // ゴースト本体
+                    ctx.globalAlpha = alpha;
+                    ctx.fillStyle = ghost.isScared ? '#0000ff' : ghost.color;
+                    
+                    // 体
+                    ctx.beginPath();
+                    ctx.arc(px + cellSize/2, py + cellSize/2 - 2, cellSize/2 - 2, Math.PI, 0, false);
+                    ctx.lineTo(px + cellSize - 2, py + cellSize - 2);
+                    
+                    // 波形の足
+                    const waveCount = 3;
+                    const waveWidth = (cellSize - 4) / waveCount;
+                    for (let i = waveCount; i > 0; i--) {
+                        const waveX = px + 2 + (i - 0.5) * waveWidth;
+                        ctx.lineTo(waveX, py + cellSize - 6);
+                        ctx.lineTo(px + 2 + (i - 1) * waveWidth, py + cellSize - 2);
+                    }
+                    ctx.closePath();
+                    ctx.fill();
+                    
+                    // 目
+                    ctx.fillStyle = '#fff';
+                    ctx.beginPath();
+                    ctx.arc(px + cellSize/3, py + cellSize/2 - 3, 4, 0, Math.PI * 2);
+                    ctx.arc(px + cellSize*2/3, py + cellSize/2 - 3, 4, 0, Math.PI * 2);
+                    ctx.fill();
+                    
+                    ctx.fillStyle = ghost.isScared ? '#fff' : '#00f';
+                    ctx.beginPath();
+                    ctx.arc(px + cellSize/3 + 1, py + cellSize/2 - 2, 2, 0, Math.PI * 2);
+                    ctx.arc(px + cellSize*2/3 + 1, py + cellSize/2 - 2, 2, 0, Math.PI * 2);
+                    ctx.fill();
+                    
+                    // 重ね合わせエフェクト
+                    if (ghost.isSuperposition && idx > 0) {
+                        ctx.strokeStyle = 'rgba(139, 92, 246, 0.5)';
+                        ctx.lineWidth = 2;
+                        ctx.setLineDash([3, 3]);
+                        ctx.beginPath();
+                        ctx.arc(px + cellSize/2, py + cellSize/2, cellSize/2 + 3, 0, Math.PI * 2);
+                        ctx.stroke();
+                        ctx.setLineDash([]);
+                    }
+                    
+                    // もつれ線
+                    if (ghost.entangledWith && idx === 0) {
+                        const other = ghost.entangledWith.positions[0];
+                        ctx.strokeStyle = 'rgba(236, 72, 153, 0.3)';
+                        ctx.lineWidth = 2;
+                        ctx.setLineDash([5, 5]);
+                        ctx.beginPath();
+                        ctx.moveTo(px + cellSize/2, py + cellSize/2);
+                        ctx.lineTo(other.x * cellSize + cellSize/2, other.y * cellSize + cellSize/2);
+                        ctx.stroke();
+                        ctx.setLineDash([]);
+                    }
+                });
+                ctx.globalAlpha = 1;
+            });
+            
+            // パックマン描画
+            const px = pacman.x * cellSize;
+            const py = pacman.y * cellSize;
+            
+            ctx.fillStyle = '#ffff00';
+            ctx.beginPath();
+            
+            let startAngle = 0.2 * (pacman.mouthOpen > 1 ? 2 - pacman.mouthOpen : pacman.mouthOpen);
+            let endAngle = 2 * Math.PI - startAngle;
+            
+            // 向きに応じて回転
+            let rotation = 0;
+            if (pacman.direction.x === 1) rotation = 0;
+            else if (pacman.direction.x === -1) rotation = Math.PI;
+            else if (pacman.direction.y === 1) rotation = Math.PI / 2;
+            else if (pacman.direction.y === -1) rotation = -Math.PI / 2;
+            
+            ctx.arc(px + cellSize/2, py + cellSize/2, cellSize/2 - 2, 
+                    startAngle + rotation, endAngle + rotation);
+            ctx.lineTo(px + cellSize/2, py + cellSize/2);
+            ctx.closePath();
+            ctx.fill();
+            
+            // パワーモード時のエフェクト
+            if (powerMode) {
+                ctx.strokeStyle = 'rgba(0, 212, 255, ' + (0.5 + Math.sin(Date.now() / 100) * 0.3) + ')';
+                ctx.lineWidth = 3;
+                ctx.beginPath();
+                ctx.arc(px + cellSize/2, py + cellSize/2, cellSize/2 + 5, 0, Math.PI * 2);
+                ctx.stroke();
+            }
+        }
+        
+        function updateUI() {
+            document.getElementById('score').textContent = score;
+            document.getElementById('superpositionMeter').style.width = superpositionLevel + '%';
+            document.getElementById('entangleMeter').style.width = entangleLevel + '%';
+            document.getElementById('tunnelMeter').style.width = tunnelLevel + '%';
+            
+            // ゴースト状態
+            const ghostStatesEl = document.getElementById('ghostStates');
+            ghostStatesEl.innerHTML = ghosts.map(g => `
+                <div class="ghost-state">
+                    <div class="ghost-icon" style="background: ${g.isScared ? '#0000ff' : g.color}"></div>
+                    <span>${g.name}</span>
+                    <span class="ghost-probability">
+                        ${g.isSuperposition ? '⚛ ' + g.positions.length + '重' : '確定'}
+                        ${g.entangledWith ? ' 🔗' : ''}
+                    </span>
+                </div>
+            `).join('');
+        }
+        
+        function quantumMeasure() {
+            if (!gameRunning) return;
+            
+            // 全ゴーストを測定して収束
+            ghosts.forEach(g => g.collapse());
+            superpositionLevel = Math.max(0, superpositionLevel - 30);
+            
+            updateUI();
+        }
+        
+        function quantumTunnel() {
+            if (!gameRunning || tunnelCooldown > 0 || tunnelLevel < 20) return;
+            
+            // 量子トンネリング：壁を通り抜ける
+            const tunnelX = pacman.x + pacman.direction.x * 2;
+            const tunnelY = pacman.y + pacman.direction.y * 2;
+            
+            if (tunnelX >= 0 && tunnelX < maze.width && 
+                tunnelY >= 0 && tunnelY < maze.height &&
+                !maze.isWall(tunnelX, tunnelY)) {
+                
+                // 量子ビットで成功確率を決定
+                const qubit = new PseudoQubit(tunnelLevel / 100);
+                if (qubit.measure() === 0) {
+                    pacman.x = tunnelX;
+                    pacman.y = tunnelY;
+                    tunnelLevel = Math.max(0, tunnelLevel - 20);
+                    tunnelCooldown = 10;
+                }
+            }
+            
+            updateUI();
+        }
+        
+        // キー入力
+        document.addEventListener('keydown', (e) => {
+            switch(e.key) {
+                case 'ArrowUp':
+                    pacman.direction = { x: 0, y: -1 };
+                    break;
+                case 'ArrowDown':
+                    pacman.direction = { x: 0, y: 1 };
+                    break;
+                case 'ArrowLeft':
+                    pacman.direction = { x: -1, y: 0 };
+                    break;
+                case 'ArrowRight':
+                    pacman.direction = { x: 1, y: 0 };
+                    break;
+                case ' ':
+                    e.preventDefault();
+                    quantumMeasure();
+                    break;
+                case 'q':
+                case 'Q':
+                    quantumTunnel();
+                    break;
+                case 'r':
+                case 'R':
+                    initGame();
+                    if (!gameRunning) {
+                        gameRunning = true;
+                        gameLoop();
+                    }
+                    break;
+            }
+        });
+        
+        // 初期描画
+        initGame();
+        draw();
+    </script>
+</body>
+</html>
+

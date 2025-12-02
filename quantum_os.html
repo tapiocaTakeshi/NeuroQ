@@ -1,0 +1,1536 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Quantum OS</title>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700&family=Share+Tech+Mono&display=swap');
+        
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+            user-select: none;
+        }
+        
+        :root {
+            --quantum-blue: #00d4ff;
+            --quantum-purple: #8b5cf6;
+            --quantum-pink: #ec4899;
+            --quantum-green: #10b981;
+            --dark-bg: #0a0a0f;
+            --panel-bg: rgba(15, 15, 25, 0.95);
+            --border-glow: rgba(0, 212, 255, 0.3);
+        }
+        
+        body {
+            font-family: 'Share Tech Mono', monospace;
+            background: var(--dark-bg);
+            color: #e0e0e0;
+            overflow: hidden;
+            height: 100vh;
+        }
+        
+        /* デスクトップ背景 */
+        #desktop {
+            position: relative;
+            width: 100vw;
+            height: calc(100vh - 50px);
+            background: linear-gradient(135deg, #0a0a15 0%, #1a1a2e 50%, #0f0f1a 100%);
+            overflow: hidden;
+        }
+        
+        /* 量子パーティクル背景 */
+        .quantum-particle {
+            position: absolute;
+            width: 4px;
+            height: 4px;
+            background: var(--quantum-blue);
+            border-radius: 50%;
+            opacity: 0.6;
+            animation: float 8s infinite ease-in-out;
+            box-shadow: 0 0 10px var(--quantum-blue);
+        }
+        
+        @keyframes float {
+            0%, 100% { transform: translateY(0) translateX(0); opacity: 0.3; }
+            50% { transform: translateY(-30px) translateX(20px); opacity: 0.8; }
+        }
+        
+        /* デスクトップアイコン */
+        .desktop-icons {
+            display: flex;
+            flex-direction: column;
+            gap: 20px;
+            padding: 20px;
+            position: absolute;
+            top: 0;
+            left: 0;
+        }
+        
+        .desktop-icon {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 8px;
+            cursor: pointer;
+            padding: 10px;
+            border-radius: 8px;
+            transition: all 0.3s;
+            width: 80px;
+        }
+        
+        .desktop-icon:hover {
+            background: rgba(0, 212, 255, 0.1);
+            transform: scale(1.05);
+        }
+        
+        .desktop-icon .icon {
+            font-size: 40px;
+            filter: drop-shadow(0 0 8px var(--quantum-blue));
+        }
+        
+        .desktop-icon span {
+            font-size: 11px;
+            text-align: center;
+            color: #fff;
+            text-shadow: 0 0 5px rgba(0,0,0,0.8);
+        }
+        
+        /* ウィンドウ */
+        .window {
+            position: absolute;
+            min-width: 400px;
+            min-height: 300px;
+            background: var(--panel-bg);
+            border: 1px solid var(--border-glow);
+            border-radius: 12px;
+            box-shadow: 0 10px 40px rgba(0, 0, 0, 0.5), 
+                        0 0 20px rgba(0, 212, 255, 0.1);
+            display: none;
+            overflow: hidden;
+        }
+        
+        .window.active {
+            display: block;
+            z-index: 100;
+        }
+        
+        .window-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 12px 15px;
+            background: linear-gradient(90deg, rgba(0, 212, 255, 0.1), rgba(139, 92, 246, 0.1));
+            border-bottom: 1px solid var(--border-glow);
+            cursor: move;
+        }
+        
+        .window-title {
+            font-family: 'Orbitron', sans-serif;
+            font-size: 14px;
+            color: var(--quantum-blue);
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        
+        .window-controls {
+            display: flex;
+            gap: 8px;
+        }
+        
+        .window-btn {
+            width: 14px;
+            height: 14px;
+            border-radius: 50%;
+            border: none;
+            cursor: pointer;
+            transition: transform 0.2s;
+        }
+        
+        .window-btn:hover { transform: scale(1.2); }
+        .window-btn.close { background: #ff5f57; }
+        .window-btn.minimize { background: #ffbd2e; }
+        .window-btn.maximize { background: #28c840; }
+        
+        .window-content {
+            padding: 20px;
+            height: calc(100% - 50px);
+            overflow: auto;
+        }
+        
+        /* タスクバー */
+        #taskbar {
+            position: fixed;
+            bottom: 0;
+            left: 0;
+            right: 0;
+            height: 50px;
+            background: linear-gradient(180deg, rgba(20, 20, 35, 0.98), rgba(10, 10, 20, 0.98));
+            border-top: 1px solid var(--border-glow);
+            display: flex;
+            align-items: center;
+            padding: 0 15px;
+            gap: 10px;
+            z-index: 1000;
+        }
+        
+        #start-btn {
+            width: 45px;
+            height: 45px;
+            background: linear-gradient(135deg, var(--quantum-blue), var(--quantum-purple));
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 24px;
+            transition: all 0.3s;
+        }
+        
+        #start-btn:hover {
+            transform: scale(1.1);
+            box-shadow: 0 0 20px var(--quantum-blue);
+        }
+        
+        .taskbar-apps {
+            display: flex;
+            gap: 5px;
+            flex: 1;
+        }
+        
+        .taskbar-app {
+            padding: 8px 15px;
+            background: rgba(255, 255, 255, 0.05);
+            border: 1px solid transparent;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 12px;
+            transition: all 0.3s;
+        }
+        
+        .taskbar-app:hover, .taskbar-app.active {
+            background: rgba(0, 212, 255, 0.15);
+            border-color: var(--quantum-blue);
+        }
+        
+        #taskbar-clock {
+            font-family: 'Orbitron', sans-serif;
+            font-size: 14px;
+            color: var(--quantum-blue);
+            padding: 0 15px;
+        }
+        
+        /* 量子ステータス */
+        #quantum-status {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 0 15px;
+            border-left: 1px solid var(--border-glow);
+        }
+        
+        .qubit-indicator {
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            animation: pulse 1s infinite;
+        }
+        
+        @keyframes pulse {
+            0%, 100% { opacity: 0.5; transform: scale(1); }
+            50% { opacity: 1; transform: scale(1.2); }
+        }
+        
+        /* スタートメニュー */
+        #start-menu {
+            position: fixed;
+            bottom: 55px;
+            left: 10px;
+            width: 300px;
+            background: var(--panel-bg);
+            border: 1px solid var(--border-glow);
+            border-radius: 12px;
+            padding: 15px;
+            display: none;
+            z-index: 999;
+            box-shadow: 0 10px 40px rgba(0, 0, 0, 0.5);
+        }
+        
+        #start-menu.active { display: block; }
+        
+        .start-menu-header {
+            font-family: 'Orbitron', sans-serif;
+            font-size: 18px;
+            color: var(--quantum-blue);
+            padding-bottom: 15px;
+            border-bottom: 1px solid var(--border-glow);
+            margin-bottom: 15px;
+        }
+        
+        .start-menu-item {
+            display: flex;
+            align-items: center;
+            gap: 15px;
+            padding: 12px;
+            border-radius: 8px;
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+        
+        .start-menu-item:hover {
+            background: rgba(0, 212, 255, 0.1);
+        }
+        
+        .start-menu-item .icon { font-size: 24px; }
+        
+        /* 計算機アプリ */
+        .calculator {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 10px;
+        }
+        
+        .calc-display {
+            grid-column: span 4;
+            background: rgba(0, 0, 0, 0.4);
+            padding: 20px;
+            font-size: 28px;
+            text-align: right;
+            border-radius: 8px;
+            font-family: 'Orbitron', sans-serif;
+            color: var(--quantum-green);
+            border: 1px solid var(--border-glow);
+            margin-bottom: 10px;
+        }
+        
+        .calc-btn {
+            padding: 20px;
+            font-size: 18px;
+            border: 1px solid var(--border-glow);
+            background: rgba(255, 255, 255, 0.05);
+            color: #fff;
+            border-radius: 8px;
+            cursor: pointer;
+            transition: all 0.2s;
+            font-family: 'Share Tech Mono', monospace;
+        }
+        
+        .calc-btn:hover {
+            background: rgba(0, 212, 255, 0.2);
+            transform: scale(1.05);
+        }
+        
+        .calc-btn.operator {
+            background: rgba(139, 92, 246, 0.3);
+        }
+        
+        .calc-btn.equals {
+            background: linear-gradient(135deg, var(--quantum-blue), var(--quantum-purple));
+        }
+        
+        /* ターミナル */
+        .terminal {
+            background: rgba(0, 0, 0, 0.6);
+            border-radius: 8px;
+            padding: 15px;
+            font-family: 'Share Tech Mono', monospace;
+            font-size: 14px;
+            height: 300px;
+            overflow-y: auto;
+        }
+        
+        .terminal-output {
+            white-space: pre-wrap;
+            margin-bottom: 10px;
+        }
+        
+        .terminal-input-line {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        
+        .terminal-prompt {
+            color: var(--quantum-green);
+        }
+        
+        .terminal-input {
+            flex: 1;
+            background: transparent;
+            border: none;
+            color: #fff;
+            font-family: 'Share Tech Mono', monospace;
+            font-size: 14px;
+            outline: none;
+        }
+        
+        /* 量子ビット可視化 */
+        .qubit-visualizer {
+            text-align: center;
+        }
+        
+        .bloch-sphere {
+            width: 200px;
+            height: 200px;
+            margin: 20px auto;
+            position: relative;
+            border: 2px solid var(--quantum-blue);
+            border-radius: 50%;
+            background: radial-gradient(circle, rgba(0, 212, 255, 0.1), transparent);
+        }
+        
+        .qubit-state {
+            position: absolute;
+            width: 16px;
+            height: 16px;
+            background: var(--quantum-pink);
+            border-radius: 50%;
+            transform: translate(-50%, -50%);
+            box-shadow: 0 0 20px var(--quantum-pink);
+            transition: all 0.3s;
+        }
+        
+        .qubit-controls {
+            display: flex;
+            flex-direction: column;
+            gap: 15px;
+            margin-top: 20px;
+        }
+        
+        .slider-container {
+            display: flex;
+            align-items: center;
+            gap: 15px;
+        }
+        
+        .slider-container label {
+            width: 100px;
+            text-align: right;
+        }
+        
+        .slider-container input[type="range"] {
+            flex: 1;
+            -webkit-appearance: none;
+            height: 8px;
+            background: linear-gradient(90deg, var(--quantum-blue), var(--quantum-purple));
+            border-radius: 4px;
+            outline: none;
+        }
+        
+        .slider-container input[type="range"]::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            width: 20px;
+            height: 20px;
+            background: #fff;
+            border-radius: 50%;
+            cursor: pointer;
+            box-shadow: 0 0 10px var(--quantum-blue);
+        }
+        
+        .state-display {
+            font-family: 'Orbitron', sans-serif;
+            font-size: 16px;
+            color: var(--quantum-green);
+            margin-top: 15px;
+            padding: 15px;
+            background: rgba(0, 0, 0, 0.3);
+            border-radius: 8px;
+        }
+        
+        /* ファイルエクスプローラ */
+        .file-explorer {
+            display: flex;
+            flex-direction: column;
+            height: 100%;
+        }
+        
+        .file-path {
+            padding: 10px;
+            background: rgba(0, 0, 0, 0.3);
+            border-radius: 6px;
+            margin-bottom: 15px;
+            color: var(--quantum-blue);
+            font-size: 12px;
+        }
+        
+        .file-list {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(100px, 1fr));
+            gap: 15px;
+        }
+        
+        .file-item {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 8px;
+            padding: 15px;
+            border-radius: 8px;
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+        
+        .file-item:hover {
+            background: rgba(0, 212, 255, 0.1);
+        }
+        
+        .file-item .icon {
+            font-size: 36px;
+        }
+        
+        .file-item span {
+            font-size: 11px;
+            text-align: center;
+        }
+        
+        /* テキストエディタ */
+        .text-editor textarea {
+            width: 100%;
+            height: 250px;
+            background: rgba(0, 0, 0, 0.4);
+            border: 1px solid var(--border-glow);
+            border-radius: 8px;
+            padding: 15px;
+            color: #e0e0e0;
+            font-family: 'Share Tech Mono', monospace;
+            font-size: 14px;
+            resize: none;
+            outline: none;
+        }
+        
+        .editor-toolbar {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 10px;
+        }
+        
+        .editor-btn {
+            padding: 8px 15px;
+            background: rgba(0, 212, 255, 0.2);
+            border: 1px solid var(--border-glow);
+            border-radius: 6px;
+            color: #fff;
+            cursor: pointer;
+            font-size: 12px;
+            transition: all 0.3s;
+        }
+        
+        .editor-btn:hover {
+            background: rgba(0, 212, 255, 0.4);
+        }
+        
+        /* 量子ゲームアプリ */
+        .quantum-game {
+            text-align: center;
+        }
+        
+        .game-board {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 10px;
+            max-width: 300px;
+            margin: 20px auto;
+        }
+        
+        .game-cell {
+            aspect-ratio: 1;
+            background: rgba(0, 0, 0, 0.4);
+            border: 2px solid var(--border-glow);
+            border-radius: 8px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 40px;
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+        
+        .game-cell:hover {
+            background: rgba(0, 212, 255, 0.1);
+            transform: scale(1.05);
+        }
+        
+        .game-cell.superposition {
+            animation: superposition 0.5s infinite;
+        }
+        
+        @keyframes superposition {
+            0%, 100% { content: '|0⟩'; color: var(--quantum-blue); }
+            50% { content: '|1⟩'; color: var(--quantum-pink); }
+        }
+        
+        .game-status {
+            font-family: 'Orbitron', sans-serif;
+            font-size: 16px;
+            color: var(--quantum-green);
+            margin: 15px 0;
+        }
+        
+        .game-btn {
+            padding: 12px 25px;
+            background: linear-gradient(135deg, var(--quantum-blue), var(--quantum-purple));
+            border: none;
+            border-radius: 8px;
+            color: #fff;
+            font-family: 'Orbitron', sans-serif;
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+        
+        .game-btn:hover {
+            transform: scale(1.05);
+            box-shadow: 0 0 20px var(--quantum-blue);
+        }
+        
+        /* 設定 */
+        .settings-section {
+            margin-bottom: 25px;
+        }
+        
+        .settings-title {
+            font-family: 'Orbitron', sans-serif;
+            color: var(--quantum-blue);
+            margin-bottom: 15px;
+            padding-bottom: 10px;
+            border-bottom: 1px solid var(--border-glow);
+        }
+        
+        .settings-option {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 10px 0;
+        }
+        
+        .toggle {
+            width: 50px;
+            height: 26px;
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 13px;
+            cursor: pointer;
+            position: relative;
+            transition: all 0.3s;
+        }
+        
+        .toggle.active {
+            background: var(--quantum-blue);
+        }
+        
+        .toggle::after {
+            content: '';
+            position: absolute;
+            width: 22px;
+            height: 22px;
+            background: #fff;
+            border-radius: 50%;
+            top: 2px;
+            left: 2px;
+            transition: all 0.3s;
+        }
+        
+        .toggle.active::after {
+            left: 26px;
+        }
+        
+        /* ローディング */
+        #boot-screen {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: var(--dark-bg);
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            z-index: 9999;
+            transition: opacity 0.5s;
+        }
+        
+        #boot-screen.hidden {
+            opacity: 0;
+            pointer-events: none;
+        }
+        
+        .boot-logo {
+            font-family: 'Orbitron', sans-serif;
+            font-size: 48px;
+            color: var(--quantum-blue);
+            margin-bottom: 30px;
+            text-shadow: 0 0 30px var(--quantum-blue);
+        }
+        
+        .boot-progress {
+            width: 300px;
+            height: 4px;
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 2px;
+            overflow: hidden;
+        }
+        
+        .boot-progress-bar {
+            height: 100%;
+            width: 0%;
+            background: linear-gradient(90deg, var(--quantum-blue), var(--quantum-purple));
+            transition: width 0.3s;
+        }
+        
+        .boot-status {
+            margin-top: 20px;
+            font-size: 12px;
+            color: #666;
+        }
+    </style>
+</head>
+<body>
+    <!-- ブート画面 -->
+    <div id="boot-screen">
+        <div class="boot-logo">⚛ QUANTUM OS</div>
+        <div class="boot-progress">
+            <div class="boot-progress-bar" id="boot-progress"></div>
+        </div>
+        <div class="boot-status" id="boot-status">量子コア初期化中...</div>
+    </div>
+    
+    <!-- デスクトップ -->
+    <div id="desktop">
+        <!-- 量子パーティクル（JSで生成） -->
+        
+        <!-- デスクトップアイコン -->
+        <div class="desktop-icons">
+            <div class="desktop-icon" onclick="openApp('qubit')">
+                <div class="icon">⚛</div>
+                <span>量子ビット</span>
+            </div>
+            <div class="desktop-icon" onclick="openApp('calculator')">
+                <div class="icon">🔢</div>
+                <span>計算機</span>
+            </div>
+            <div class="desktop-icon" onclick="openApp('terminal')">
+                <div class="icon">💻</div>
+                <span>ターミナル</span>
+            </div>
+            <div class="desktop-icon" onclick="openApp('files')">
+                <div class="icon">📁</div>
+                <span>ファイル</span>
+            </div>
+            <div class="desktop-icon" onclick="openApp('editor')">
+                <div class="icon">📝</div>
+                <span>エディタ</span>
+            </div>
+            <div class="desktop-icon" onclick="openApp('game')">
+                <div class="icon">🎮</div>
+                <span>量子ゲーム</span>
+            </div>
+            <div class="desktop-icon" onclick="openApp('settings')">
+                <div class="icon">⚙️</div>
+                <span>設定</span>
+            </div>
+        </div>
+        
+        <!-- ウィンドウ: 量子ビット -->
+        <div class="window" id="window-qubit" style="width: 450px; height: 500px; left: 150px; top: 50px;">
+            <div class="window-header" onmousedown="startDrag(event, 'window-qubit')">
+                <div class="window-title">⚛ 量子ビット ビジュアライザ</div>
+                <div class="window-controls">
+                    <button class="window-btn minimize" onclick="minimizeApp('qubit')"></button>
+                    <button class="window-btn maximize"></button>
+                    <button class="window-btn close" onclick="closeApp('qubit')"></button>
+                </div>
+            </div>
+            <div class="window-content">
+                <div class="qubit-visualizer">
+                    <div class="bloch-sphere">
+                        <div class="qubit-state" id="qubit-state"></div>
+                    </div>
+                    <div class="qubit-controls">
+                        <div class="slider-container">
+                            <label>相関係数 r:</label>
+                            <input type="range" id="correlation-slider" min="-100" max="100" value="0" oninput="updateQubit()">
+                            <span id="correlation-value">0.00</span>
+                        </div>
+                    </div>
+                    <div class="state-display">
+                        |ψ⟩ = <span id="state-equation">0.707|0⟩ + 0.707|1⟩</span>
+                        <br><br>
+                        P(|0⟩) = <span id="prob-0">50.0%</span> | P(|1⟩) = <span id="prob-1">50.0%</span>
+                    </div>
+                    <button class="game-btn" style="margin-top: 15px;" onclick="measureQubit()">測定</button>
+                    <div id="measurement-result" style="margin-top: 10px; font-size: 24px;"></div>
+                </div>
+            </div>
+        </div>
+        
+        <!-- ウィンドウ: 計算機 -->
+        <div class="window" id="window-calculator" style="width: 350px; height: 450px; left: 300px; top: 100px;">
+            <div class="window-header" onmousedown="startDrag(event, 'window-calculator')">
+                <div class="window-title">🔢 量子計算機</div>
+                <div class="window-controls">
+                    <button class="window-btn minimize" onclick="minimizeApp('calculator')"></button>
+                    <button class="window-btn maximize"></button>
+                    <button class="window-btn close" onclick="closeApp('calculator')"></button>
+                </div>
+            </div>
+            <div class="window-content">
+                <div class="calculator">
+                    <div class="calc-display" id="calc-display">0</div>
+                    <button class="calc-btn" onclick="calcClear()">C</button>
+                    <button class="calc-btn" onclick="calcInput('(')">(</button>
+                    <button class="calc-btn" onclick="calcInput(')')">)</button>
+                    <button class="calc-btn operator" onclick="calcInput('/')">÷</button>
+                    <button class="calc-btn" onclick="calcInput('7')">7</button>
+                    <button class="calc-btn" onclick="calcInput('8')">8</button>
+                    <button class="calc-btn" onclick="calcInput('9')">9</button>
+                    <button class="calc-btn operator" onclick="calcInput('*')">×</button>
+                    <button class="calc-btn" onclick="calcInput('4')">4</button>
+                    <button class="calc-btn" onclick="calcInput('5')">5</button>
+                    <button class="calc-btn" onclick="calcInput('6')">6</button>
+                    <button class="calc-btn operator" onclick="calcInput('-')">−</button>
+                    <button class="calc-btn" onclick="calcInput('1')">1</button>
+                    <button class="calc-btn" onclick="calcInput('2')">2</button>
+                    <button class="calc-btn" onclick="calcInput('3')">3</button>
+                    <button class="calc-btn operator" onclick="calcInput('+')">+</button>
+                    <button class="calc-btn" onclick="calcInput('0')">0</button>
+                    <button class="calc-btn" onclick="calcInput('.')">.</button>
+                    <button class="calc-btn" onclick="calcBackspace()">⌫</button>
+                    <button class="calc-btn equals" onclick="calcEquals()">=</button>
+                </div>
+            </div>
+        </div>
+        
+        <!-- ウィンドウ: ターミナル -->
+        <div class="window" id="window-terminal" style="width: 550px; height: 400px; left: 200px; top: 150px;">
+            <div class="window-header" onmousedown="startDrag(event, 'window-terminal')">
+                <div class="window-title">💻 量子ターミナル</div>
+                <div class="window-controls">
+                    <button class="window-btn minimize" onclick="minimizeApp('terminal')"></button>
+                    <button class="window-btn maximize"></button>
+                    <button class="window-btn close" onclick="closeApp('terminal')"></button>
+                </div>
+            </div>
+            <div class="window-content">
+                <div class="terminal" id="terminal">
+                    <div class="terminal-output" id="terminal-output">Quantum OS Terminal v1.0
+Type 'help' for available commands.
+</div>
+                    <div class="terminal-input-line">
+                        <span class="terminal-prompt">quantum@os:~$</span>
+                        <input type="text" class="terminal-input" id="terminal-input" onkeypress="handleTerminalInput(event)">
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <!-- ウィンドウ: ファイル -->
+        <div class="window" id="window-files" style="width: 500px; height: 400px; left: 250px; top: 80px;">
+            <div class="window-header" onmousedown="startDrag(event, 'window-files')">
+                <div class="window-title">📁 ファイルエクスプローラ</div>
+                <div class="window-controls">
+                    <button class="window-btn minimize" onclick="minimizeApp('files')"></button>
+                    <button class="window-btn maximize"></button>
+                    <button class="window-btn close" onclick="closeApp('files')"></button>
+                </div>
+            </div>
+            <div class="window-content">
+                <div class="file-explorer">
+                    <div class="file-path">/quantum/home</div>
+                    <div class="file-list">
+                        <div class="file-item">
+                            <div class="icon">📁</div>
+                            <span>Documents</span>
+                        </div>
+                        <div class="file-item">
+                            <div class="icon">📁</div>
+                            <span>Downloads</span>
+                        </div>
+                        <div class="file-item">
+                            <div class="icon">📁</div>
+                            <span>Quantum</span>
+                        </div>
+                        <div class="file-item">
+                            <div class="icon">📄</div>
+                            <span>readme.txt</span>
+                        </div>
+                        <div class="file-item">
+                            <div class="icon">🖼️</div>
+                            <span>wallpaper.png</span>
+                        </div>
+                        <div class="file-item">
+                            <div class="icon">⚛</div>
+                            <span>qubit.qb</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <!-- ウィンドウ: エディタ -->
+        <div class="window" id="window-editor" style="width: 500px; height: 400px; left: 180px; top: 120px;">
+            <div class="window-header" onmousedown="startDrag(event, 'window-editor')">
+                <div class="window-title">📝 量子エディタ</div>
+                <div class="window-controls">
+                    <button class="window-btn minimize" onclick="minimizeApp('editor')"></button>
+                    <button class="window-btn maximize"></button>
+                    <button class="window-btn close" onclick="closeApp('editor')"></button>
+                </div>
+            </div>
+            <div class="window-content">
+                <div class="text-editor">
+                    <div class="editor-toolbar">
+                        <button class="editor-btn" onclick="editorNew()">新規</button>
+                        <button class="editor-btn" onclick="editorSave()">保存</button>
+                        <button class="editor-btn" onclick="editorCopy()">コピー</button>
+                    </div>
+                    <textarea id="editor-content" placeholder="ここにテキストを入力...">// Quantum OS へようこそ！
+// 
+// このエディタで量子プログラムを書けます。
+
+function quantum_hello() {
+    let qubit = new PseudoQubit(0.0);
+    console.log(qubit.measure());
+}
+
+quantum_hello();</textarea>
+                </div>
+            </div>
+        </div>
+        
+        <!-- ウィンドウ: ゲーム -->
+        <div class="window" id="window-game" style="width: 400px; height: 450px; left: 350px; top: 70px;">
+            <div class="window-header" onmousedown="startDrag(event, 'window-game')">
+                <div class="window-title">🎮 量子三目並べ</div>
+                <div class="window-controls">
+                    <button class="window-btn minimize" onclick="minimizeApp('game')"></button>
+                    <button class="window-btn maximize"></button>
+                    <button class="window-btn close" onclick="closeApp('game')"></button>
+                </div>
+            </div>
+            <div class="window-content">
+                <div class="quantum-game">
+                    <div class="game-status" id="game-status">あなたの番 (|0⟩)</div>
+                    <div class="game-board" id="game-board"></div>
+                    <button class="game-btn" onclick="resetGame()">リセット</button>
+                </div>
+            </div>
+        </div>
+        
+        <!-- ウィンドウ: 設定 -->
+        <div class="window" id="window-settings" style="width: 400px; height: 350px; left: 280px; top: 100px;">
+            <div class="window-header" onmousedown="startDrag(event, 'window-settings')">
+                <div class="window-title">⚙️ 設定</div>
+                <div class="window-controls">
+                    <button class="window-btn minimize" onclick="minimizeApp('settings')"></button>
+                    <button class="window-btn maximize"></button>
+                    <button class="window-btn close" onclick="closeApp('settings')"></button>
+                </div>
+            </div>
+            <div class="window-content">
+                <div class="settings-section">
+                    <div class="settings-title">表示</div>
+                    <div class="settings-option">
+                        <span>量子パーティクル</span>
+                        <div class="toggle active" id="toggle-particles" onclick="toggleSetting('particles')"></div>
+                    </div>
+                    <div class="settings-option">
+                        <span>ダークモード</span>
+                        <div class="toggle active" id="toggle-dark"></div>
+                    </div>
+                </div>
+                <div class="settings-section">
+                    <div class="settings-title">システム</div>
+                    <div class="settings-option">
+                        <span>量子コア数</span>
+                        <span style="color: var(--quantum-blue);">8 qubits</span>
+                    </div>
+                    <div class="settings-option">
+                        <span>メモリ</span>
+                        <span style="color: var(--quantum-green);">256 QB</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <!-- タスクバー -->
+    <div id="taskbar">
+        <button id="start-btn" onclick="toggleStartMenu()">⚛</button>
+        <div class="taskbar-apps" id="taskbar-apps"></div>
+        <div id="quantum-status">
+            <div class="qubit-indicator" style="background: var(--quantum-blue);"></div>
+            <div class="qubit-indicator" style="background: var(--quantum-purple); animation-delay: 0.3s;"></div>
+            <div class="qubit-indicator" style="background: var(--quantum-pink); animation-delay: 0.6s;"></div>
+            <span style="font-size: 11px;">8 qubits</span>
+        </div>
+        <div id="taskbar-clock"></div>
+    </div>
+    
+    <!-- スタートメニュー -->
+    <div id="start-menu">
+        <div class="start-menu-header">⚛ Quantum OS</div>
+        <div class="start-menu-item" onclick="openApp('qubit'); toggleStartMenu();">
+            <div class="icon">⚛</div>
+            <div>
+                <div>量子ビット</div>
+                <div style="font-size: 10px; color: #666;">量子状態を可視化</div>
+            </div>
+        </div>
+        <div class="start-menu-item" onclick="openApp('calculator'); toggleStartMenu();">
+            <div class="icon">🔢</div>
+            <div>
+                <div>計算機</div>
+                <div style="font-size: 10px; color: #666;">量子計算機</div>
+            </div>
+        </div>
+        <div class="start-menu-item" onclick="openApp('terminal'); toggleStartMenu();">
+            <div class="icon">💻</div>
+            <div>
+                <div>ターミナル</div>
+                <div style="font-size: 10px; color: #666;">コマンドライン</div>
+            </div>
+        </div>
+        <div class="start-menu-item" onclick="openApp('game'); toggleStartMenu();">
+            <div class="icon">🎮</div>
+            <div>
+                <div>量子ゲーム</div>
+                <div style="font-size: 10px; color: #666;">量子三目並べ</div>
+            </div>
+        </div>
+    </div>
+    
+    <script>
+        // ============================================================
+        // 擬似量子ビット
+        // ============================================================
+        class PseudoQubit {
+            constructor(correlation = 0) {
+                this.correlation = Math.max(-1, Math.min(1, correlation));
+                this.theta = Math.acos(this.correlation) || 0;
+            }
+            
+            get amplitude0() {
+                return Math.cos(this.theta / 2);
+            }
+            
+            get amplitude1() {
+                return Math.sin(this.theta / 2);
+            }
+            
+            get prob0() {
+                return this.amplitude0 ** 2;
+            }
+            
+            get prob1() {
+                return this.amplitude1 ** 2;
+            }
+            
+            measure() {
+                return Math.random() < this.prob0 ? 0 : 1;
+            }
+            
+            toBlochCoordinates() {
+                return {
+                    x: Math.sin(this.theta),
+                    y: 0,
+                    z: Math.cos(this.theta)
+                };
+            }
+        }
+        
+        // ============================================================
+        // グローバル状態
+        // ============================================================
+        let openApps = new Set();
+        let currentQubit = new PseudoQubit(0);
+        let calcExpression = '';
+        let gameBoard = Array(9).fill(null);
+        let currentPlayer = '|0⟩';
+        let gameOver = false;
+        
+        // ============================================================
+        // ブート処理
+        // ============================================================
+        window.onload = function() {
+            const bootMessages = [
+                '量子コア初期化中...',
+                '擬似量子ビット生成中...',
+                '量子レジスタ構築中...',
+                '量子ゲート読み込み中...',
+                'デスクトップ準備中...',
+                'Quantum OS 起動完了！'
+            ];
+            
+            let progress = 0;
+            let messageIndex = 0;
+            
+            const bootInterval = setInterval(() => {
+                progress += Math.random() * 20;
+                if (progress > 100) progress = 100;
+                
+                document.getElementById('boot-progress').style.width = progress + '%';
+                
+                if (progress >= (messageIndex + 1) * 16 && messageIndex < bootMessages.length) {
+                    document.getElementById('boot-status').textContent = bootMessages[messageIndex];
+                    messageIndex++;
+                }
+                
+                if (progress >= 100) {
+                    clearInterval(bootInterval);
+                    setTimeout(() => {
+                        document.getElementById('boot-screen').classList.add('hidden');
+                        initializeOS();
+                    }, 500);
+                }
+            }, 100);
+        };
+        
+        function initializeOS() {
+            // パーティクル生成
+            createParticles();
+            
+            // 時計開始
+            updateClock();
+            setInterval(updateClock, 1000);
+            
+            // ゲームボード初期化
+            initGame();
+            
+            // 量子ビット初期化
+            updateQubit();
+        }
+        
+        // ============================================================
+        // パーティクル
+        // ============================================================
+        function createParticles() {
+            const desktop = document.getElementById('desktop');
+            for (let i = 0; i < 30; i++) {
+                const particle = document.createElement('div');
+                particle.className = 'quantum-particle';
+                particle.style.left = Math.random() * 100 + '%';
+                particle.style.top = Math.random() * 100 + '%';
+                particle.style.animationDelay = Math.random() * 5 + 's';
+                particle.style.animationDuration = (5 + Math.random() * 5) + 's';
+                desktop.appendChild(particle);
+            }
+        }
+        
+        // ============================================================
+        // 時計
+        // ============================================================
+        function updateClock() {
+            const now = new Date();
+            const time = now.toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' });
+            const date = now.toLocaleDateString('ja-JP', { month: 'short', day: 'numeric' });
+            document.getElementById('taskbar-clock').textContent = `${date} ${time}`;
+        }
+        
+        // ============================================================
+        // ウィンドウ管理
+        // ============================================================
+        function openApp(appId) {
+            const window = document.getElementById('window-' + appId);
+            window.classList.add('active');
+            openApps.add(appId);
+            updateTaskbar();
+            bringToFront(window);
+        }
+        
+        function closeApp(appId) {
+            const window = document.getElementById('window-' + appId);
+            window.classList.remove('active');
+            openApps.delete(appId);
+            updateTaskbar();
+        }
+        
+        function minimizeApp(appId) {
+            const window = document.getElementById('window-' + appId);
+            window.classList.remove('active');
+        }
+        
+        function bringToFront(window) {
+            document.querySelectorAll('.window').forEach(w => w.style.zIndex = 100);
+            window.style.zIndex = 101;
+        }
+        
+        function updateTaskbar() {
+            const container = document.getElementById('taskbar-apps');
+            container.innerHTML = '';
+            
+            const appNames = {
+                'qubit': '⚛ 量子ビット',
+                'calculator': '🔢 計算機',
+                'terminal': '💻 ターミナル',
+                'files': '📁 ファイル',
+                'editor': '📝 エディタ',
+                'game': '🎮 ゲーム',
+                'settings': '⚙️ 設定'
+            };
+            
+            openApps.forEach(appId => {
+                const btn = document.createElement('div');
+                btn.className = 'taskbar-app';
+                btn.textContent = appNames[appId] || appId;
+                btn.onclick = () => {
+                    const window = document.getElementById('window-' + appId);
+                    if (window.classList.contains('active')) {
+                        window.classList.remove('active');
+                    } else {
+                        window.classList.add('active');
+                        bringToFront(window);
+                    }
+                };
+                container.appendChild(btn);
+            });
+        }
+        
+        // ============================================================
+        // ウィンドウドラッグ
+        // ============================================================
+        let draggedWindow = null;
+        let dragOffset = { x: 0, y: 0 };
+        
+        function startDrag(event, windowId) {
+            draggedWindow = document.getElementById(windowId);
+            bringToFront(draggedWindow);
+            dragOffset.x = event.clientX - draggedWindow.offsetLeft;
+            dragOffset.y = event.clientY - draggedWindow.offsetTop;
+            document.addEventListener('mousemove', drag);
+            document.addEventListener('mouseup', stopDrag);
+        }
+        
+        function drag(event) {
+            if (draggedWindow) {
+                draggedWindow.style.left = (event.clientX - dragOffset.x) + 'px';
+                draggedWindow.style.top = (event.clientY - dragOffset.y) + 'px';
+            }
+        }
+        
+        function stopDrag() {
+            draggedWindow = null;
+            document.removeEventListener('mousemove', drag);
+            document.removeEventListener('mouseup', stopDrag);
+        }
+        
+        // ============================================================
+        // スタートメニュー
+        // ============================================================
+        function toggleStartMenu() {
+            document.getElementById('start-menu').classList.toggle('active');
+        }
+        
+        // クリックで閉じる
+        document.addEventListener('click', (e) => {
+            if (!e.target.closest('#start-menu') && !e.target.closest('#start-btn')) {
+                document.getElementById('start-menu').classList.remove('active');
+            }
+        });
+        
+        // ============================================================
+        // 量子ビット
+        // ============================================================
+        function updateQubit() {
+            const slider = document.getElementById('correlation-slider');
+            const r = slider.value / 100;
+            currentQubit = new PseudoQubit(r);
+            
+            // 値表示
+            document.getElementById('correlation-value').textContent = r.toFixed(2);
+            
+            // ブロッホ球上の位置
+            const coords = currentQubit.toBlochCoordinates();
+            const sphere = document.querySelector('.bloch-sphere');
+            const state = document.getElementById('qubit-state');
+            
+            const centerX = sphere.offsetWidth / 2;
+            const centerY = sphere.offsetHeight / 2;
+            const radius = sphere.offsetWidth / 2 - 10;
+            
+            state.style.left = (centerX + coords.x * radius) + 'px';
+            state.style.top = (centerY - coords.z * radius) + 'px';
+            
+            // 状態方程式
+            const a0 = currentQubit.amplitude0.toFixed(3);
+            const a1 = currentQubit.amplitude1.toFixed(3);
+            document.getElementById('state-equation').textContent = `${a0}|0⟩ + ${a1}|1⟩`;
+            
+            // 確率
+            document.getElementById('prob-0').textContent = (currentQubit.prob0 * 100).toFixed(1) + '%';
+            document.getElementById('prob-1').textContent = (currentQubit.prob1 * 100).toFixed(1) + '%';
+        }
+        
+        function measureQubit() {
+            const result = currentQubit.measure();
+            const resultDiv = document.getElementById('measurement-result');
+            resultDiv.textContent = result === 0 ? '|0⟩' : '|1⟩';
+            resultDiv.style.color = result === 0 ? 'var(--quantum-blue)' : 'var(--quantum-pink)';
+            
+            // アニメーション
+            resultDiv.style.transform = 'scale(1.5)';
+            setTimeout(() => resultDiv.style.transform = 'scale(1)', 200);
+        }
+        
+        // ============================================================
+        // 計算機
+        // ============================================================
+        function calcInput(value) {
+            if (calcExpression === '0' && !isNaN(value)) {
+                calcExpression = value;
+            } else {
+                calcExpression += value;
+            }
+            document.getElementById('calc-display').textContent = calcExpression || '0';
+        }
+        
+        function calcClear() {
+            calcExpression = '';
+            document.getElementById('calc-display').textContent = '0';
+        }
+        
+        function calcBackspace() {
+            calcExpression = calcExpression.slice(0, -1);
+            document.getElementById('calc-display').textContent = calcExpression || '0';
+        }
+        
+        function calcEquals() {
+            try {
+                const result = eval(calcExpression);
+                document.getElementById('calc-display').textContent = result;
+                calcExpression = String(result);
+            } catch (e) {
+                document.getElementById('calc-display').textContent = 'Error';
+                calcExpression = '';
+            }
+        }
+        
+        // ============================================================
+        // ターミナル
+        // ============================================================
+        function handleTerminalInput(event) {
+            if (event.key === 'Enter') {
+                const input = document.getElementById('terminal-input');
+                const command = input.value.trim();
+                input.value = '';
+                
+                processCommand(command);
+            }
+        }
+        
+        function processCommand(command) {
+            const output = document.getElementById('terminal-output');
+            output.textContent += `quantum@os:~$ ${command}\n`;
+            
+            const args = command.split(' ');
+            const cmd = args[0].toLowerCase();
+            
+            switch (cmd) {
+                case 'help':
+                    output.textContent += `
+利用可能なコマンド:
+  help     - このヘルプを表示
+  qubit    - 量子ビットを生成 (qubit [相関])
+  measure  - 量子測定を実行
+  clear    - 画面をクリア
+  time     - 現在時刻を表示
+  factor   - 素因数分解 (factor [数])
+  calc     - 計算 (calc [式])
+  echo     - テキストを表示
+  quantum  - 量子状態を表示
+\n`;
+                    break;
+                    
+                case 'clear':
+                    output.textContent = '';
+                    break;
+                    
+                case 'time':
+                    output.textContent += new Date().toLocaleString('ja-JP') + '\n';
+                    break;
+                    
+                case 'qubit':
+                    const r = parseFloat(args[1]) || 0;
+                    currentQubit = new PseudoQubit(r);
+                    output.textContent += `量子ビット生成: r=${r.toFixed(2)}
+  |ψ⟩ = ${currentQubit.amplitude0.toFixed(3)}|0⟩ + ${currentQubit.amplitude1.toFixed(3)}|1⟩
+  P(|0⟩) = ${(currentQubit.prob0 * 100).toFixed(1)}%
+  P(|1⟩) = ${(currentQubit.prob1 * 100).toFixed(1)}%
+\n`;
+                    break;
+                    
+                case 'measure':
+                    const result = currentQubit.measure();
+                    output.textContent += `測定結果: |${result}⟩\n`;
+                    break;
+                    
+                case 'factor':
+                    const n = parseInt(args[1]);
+                    if (n > 1) {
+                        const factors = factorize(n);
+                        output.textContent += `${n} = ${factors.join(' × ')}\n`;
+                    } else {
+                        output.textContent += `使用法: factor [数]\n`;
+                    }
+                    break;
+                    
+                case 'calc':
+                    try {
+                        const expr = args.slice(1).join('');
+                        const calcResult = eval(expr);
+                        output.textContent += `${calcResult}\n`;
+                    } catch (e) {
+                        output.textContent += `エラー: 無効な式\n`;
+                    }
+                    break;
+                    
+                case 'echo':
+                    output.textContent += args.slice(1).join(' ') + '\n';
+                    break;
+                    
+                case 'quantum':
+                    output.textContent += `
+╔══════════════════════════════════╗
+║      Quantum System Status       ║
+╠══════════════════════════════════╣
+║ Qubits:     8                    ║
+║ Memory:     256 QB               ║
+║ Status:     Active               ║
+║ Coherence:  99.7%                ║
+╚══════════════════════════════════╝
+\n`;
+                    break;
+                    
+                case '':
+                    break;
+                    
+                default:
+                    output.textContent += `コマンドが見つかりません: ${cmd}\n'help' で利用可能なコマンドを表示\n`;
+            }
+            
+            // スクロール
+            const terminal = document.getElementById('terminal');
+            terminal.scrollTop = terminal.scrollHeight;
+        }
+        
+        function factorize(n) {
+            const factors = [];
+            let d = 2;
+            while (n > 1) {
+                while (n % d === 0) {
+                    factors.push(d);
+                    n /= d;
+                }
+                d++;
+            }
+            return factors;
+        }
+        
+        // ============================================================
+        // エディタ
+        // ============================================================
+        function editorNew() {
+            document.getElementById('editor-content').value = '';
+        }
+        
+        function editorSave() {
+            alert('ファイルを保存しました（シミュレーション）');
+        }
+        
+        function editorCopy() {
+            const content = document.getElementById('editor-content');
+            content.select();
+            document.execCommand('copy');
+            alert('コピーしました');
+        }
+        
+        // ============================================================
+        // 量子ゲーム
+        // ============================================================
+        function initGame() {
+            const board = document.getElementById('game-board');
+            board.innerHTML = '';
+            
+            for (let i = 0; i < 9; i++) {
+                const cell = document.createElement('div');
+                cell.className = 'game-cell';
+                cell.onclick = () => makeMove(i);
+                board.appendChild(cell);
+            }
+        }
+        
+        function makeMove(index) {
+            if (gameBoard[index] || gameOver) return;
+            
+            // 量子測定で結果を決定
+            const qubit = new PseudoQubit(currentPlayer === '|0⟩' ? 0.8 : -0.8);
+            const measured = qubit.measure();
+            
+            gameBoard[index] = currentPlayer;
+            
+            const cells = document.querySelectorAll('.game-cell');
+            cells[index].textContent = currentPlayer;
+            cells[index].style.color = currentPlayer === '|0⟩' ? 'var(--quantum-blue)' : 'var(--quantum-pink)';
+            
+            if (checkWin()) {
+                document.getElementById('game-status').textContent = `${currentPlayer} の勝ち！`;
+                gameOver = true;
+                return;
+            }
+            
+            if (gameBoard.every(cell => cell !== null)) {
+                document.getElementById('game-status').textContent = '引き分け！';
+                gameOver = true;
+                return;
+            }
+            
+            currentPlayer = currentPlayer === '|0⟩' ? '|1⟩' : '|0⟩';
+            document.getElementById('game-status').textContent = `あなたの番 (${currentPlayer})`;
+        }
+        
+        function checkWin() {
+            const lines = [
+                [0, 1, 2], [3, 4, 5], [6, 7, 8],
+                [0, 3, 6], [1, 4, 7], [2, 5, 8],
+                [0, 4, 8], [2, 4, 6]
+            ];
+            
+            return lines.some(([a, b, c]) => 
+                gameBoard[a] && gameBoard[a] === gameBoard[b] && gameBoard[a] === gameBoard[c]
+            );
+        }
+        
+        function resetGame() {
+            gameBoard = Array(9).fill(null);
+            currentPlayer = '|0⟩';
+            gameOver = false;
+            
+            const cells = document.querySelectorAll('.game-cell');
+            cells.forEach(cell => {
+                cell.textContent = '';
+                cell.style.color = '';
+            });
+            
+            document.getElementById('game-status').textContent = `あなたの番 (${currentPlayer})`;
+        }
+        
+        // ============================================================
+        // 設定
+        // ============================================================
+        function toggleSetting(setting) {
+            const toggle = document.getElementById('toggle-' + setting);
+            toggle.classList.toggle('active');
+            
+            if (setting === 'particles') {
+                const particles = document.querySelectorAll('.quantum-particle');
+                particles.forEach(p => {
+                    p.style.display = toggle.classList.contains('active') ? 'block' : 'none';
+                });
+            }
+        }
+    </script>
+</body>
+</html>
+

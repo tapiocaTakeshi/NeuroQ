@@ -1,0 +1,902 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>APQB Neural Network - 量子確率的ニューラルネットワーク</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            background: linear-gradient(135deg, #0a0a1a 0%, #1a0a2a 50%, #0a1a2a 100%);
+            min-height: 100vh;
+            font-family: 'Courier New', monospace;
+            color: #fff;
+            padding: 20px;
+        }
+        
+        h1 {
+            text-align: center;
+            font-size: 2.2rem;
+            background: linear-gradient(90deg, #00d4ff, #ff00ff, #00ff88);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            margin-bottom: 5px;
+        }
+        
+        .subtitle {
+            text-align: center;
+            color: #888;
+            margin-bottom: 20px;
+            font-size: 0.9rem;
+        }
+        
+        .main-container {
+            display: grid;
+            grid-template-columns: 280px 1fr 280px;
+            gap: 15px;
+            max-width: 1400px;
+            margin: 0 auto;
+        }
+        
+        .panel {
+            background: rgba(0, 0, 0, 0.6);
+            border: 2px solid #00d4ff;
+            border-radius: 15px;
+            padding: 15px;
+        }
+        
+        .network-panel {
+            min-height: 500px;
+        }
+        
+        h3 {
+            color: #00d4ff;
+            margin-bottom: 12px;
+            font-size: 1rem;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        
+        .control-group {
+            margin-bottom: 15px;
+        }
+        
+        .control-group label {
+            display: block;
+            color: #aaa;
+            font-size: 0.8rem;
+            margin-bottom: 5px;
+        }
+        
+        .control-row {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        
+        input[type="range"] {
+            flex: 1;
+            height: 6px;
+            -webkit-appearance: none;
+            background: linear-gradient(90deg, #333, #00d4ff);
+            border-radius: 3px;
+        }
+        
+        input[type="range"]::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            width: 16px;
+            height: 16px;
+            background: #00d4ff;
+            border-radius: 50%;
+            cursor: pointer;
+            box-shadow: 0 0 10px #00d4ff;
+        }
+        
+        .value-display {
+            min-width: 40px;
+            text-align: right;
+            color: #00d4ff;
+            font-weight: bold;
+        }
+        
+        .btn {
+            width: 100%;
+            padding: 12px;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 0.9rem;
+            font-weight: bold;
+            margin-bottom: 8px;
+            transition: all 0.3s;
+        }
+        
+        .btn-primary {
+            background: linear-gradient(135deg, #00d4ff, #0088ff);
+            color: #000;
+        }
+        
+        .btn-primary:hover {
+            box-shadow: 0 0 20px #00d4ff;
+            transform: translateY(-2px);
+        }
+        
+        .btn-secondary {
+            background: linear-gradient(135deg, #ff00ff, #8800ff);
+            color: #fff;
+        }
+        
+        .btn-success {
+            background: linear-gradient(135deg, #00ff88, #00cc66);
+            color: #000;
+        }
+        
+        .btn-warning {
+            background: linear-gradient(135deg, #ffaa00, #ff6600);
+            color: #000;
+        }
+        
+        /* ネットワーク可視化 */
+        #networkCanvas {
+            width: 100%;
+            height: 450px;
+            background: rgba(0, 0, 0, 0.3);
+            border-radius: 10px;
+        }
+        
+        /* 入力表示 */
+        .input-grid {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 5px;
+            margin-bottom: 10px;
+        }
+        
+        .input-cell {
+            aspect-ratio: 1;
+            background: #222;
+            border: 1px solid #444;
+            border-radius: 4px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 0.7rem;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        
+        .input-cell.active {
+            background: #00d4ff;
+            color: #000;
+            box-shadow: 0 0 10px #00d4ff;
+        }
+        
+        /* 出力表示 */
+        .output-display {
+            display: flex;
+            justify-content: center;
+            gap: 10px;
+            margin-top: 10px;
+        }
+        
+        .output-neuron {
+            width: 60px;
+            height: 60px;
+            border-radius: 50%;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            font-weight: bold;
+            transition: all 0.3s;
+        }
+        
+        .output-neuron.off {
+            background: linear-gradient(135deg, #333, #222);
+            border: 2px solid #555;
+        }
+        
+        .output-neuron.on {
+            background: linear-gradient(135deg, #00ff88, #00cc66);
+            border: 2px solid #00ff88;
+            box-shadow: 0 0 20px #00ff88;
+            color: #000;
+        }
+        
+        .output-label {
+            font-size: 0.7rem;
+            color: #888;
+        }
+        
+        .output-value {
+            font-size: 1.2rem;
+        }
+        
+        /* 統計 */
+        .stats {
+            background: rgba(0, 0, 0, 0.4);
+            border-radius: 8px;
+            padding: 10px;
+            margin-top: 10px;
+        }
+        
+        .stat-row {
+            display: flex;
+            justify-content: space-between;
+            padding: 4px 0;
+            border-bottom: 1px solid #333;
+            font-size: 0.8rem;
+        }
+        
+        .stat-row:last-child {
+            border-bottom: none;
+        }
+        
+        .stat-label { color: #888; }
+        .stat-value { color: #00d4ff; font-weight: bold; }
+        
+        /* ログ */
+        .log-container {
+            background: #111;
+            border-radius: 8px;
+            padding: 10px;
+            height: 200px;
+            overflow-y: auto;
+            font-size: 0.75rem;
+            margin-top: 10px;
+        }
+        
+        .log-entry {
+            padding: 3px 0;
+            border-bottom: 1px solid #222;
+        }
+        
+        .log-entry.forward { color: #00d4ff; }
+        .log-entry.measure { color: #ff00ff; }
+        .log-entry.result { color: #00ff88; }
+        
+        /* APQB説明 */
+        .apqb-info {
+            background: rgba(0, 212, 255, 0.1);
+            border: 1px solid #00d4ff;
+            border-radius: 8px;
+            padding: 10px;
+            margin-bottom: 15px;
+            font-size: 0.75rem;
+        }
+        
+        .apqb-formula {
+            font-family: 'Times New Roman', serif;
+            font-style: italic;
+            color: #ff00ff;
+            text-align: center;
+            margin: 5px 0;
+        }
+        
+        /* タスク選択 */
+        .task-buttons {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 5px;
+            margin-bottom: 10px;
+        }
+        
+        .task-btn {
+            padding: 8px;
+            font-size: 0.75rem;
+            background: #333;
+            border: 1px solid #555;
+            color: #fff;
+            border-radius: 5px;
+            cursor: pointer;
+        }
+        
+        .task-btn.active {
+            background: #00d4ff;
+            color: #000;
+            border-color: #00d4ff;
+        }
+    </style>
+</head>
+<body>
+    <h1>⚛️ APQB Neural Network</h1>
+    <p class="subtitle">Adjustable Pseudo Quantum Bit ニューラルネットワーク - 量子確率で活性化を決定</p>
+    
+    <div class="main-container">
+        <!-- 左パネル: 設定 -->
+        <div class="panel">
+            <h3>🔧 ネットワーク設定</h3>
+            
+            <div class="apqb-info">
+                <strong>APQB (Adjustable Pseudo Quantum Bit)</strong><br>
+                相関係数 r から量子状態を生成し、確率的に0/1を出力
+                <div class="apqb-formula">P(1) = sin²(π(1-r)/4)</div>
+            </div>
+            
+            <div class="control-group">
+                <label>入力層ニューロン数</label>
+                <div class="control-row">
+                    <input type="range" id="inputSize" min="2" max="16" value="4">
+                    <span class="value-display" id="inputSizeVal">4</span>
+                </div>
+            </div>
+            
+            <div class="control-group">
+                <label>隠れ層1 ニューロン数</label>
+                <div class="control-row">
+                    <input type="range" id="hidden1Size" min="2" max="16" value="6">
+                    <span class="value-display" id="hidden1SizeVal">6</span>
+                </div>
+            </div>
+            
+            <div class="control-group">
+                <label>隠れ層2 ニューロン数</label>
+                <div class="control-row">
+                    <input type="range" id="hidden2Size" min="0" max="16" value="4">
+                    <span class="value-display" id="hidden2SizeVal">4</span>
+                </div>
+            </div>
+            
+            <div class="control-group">
+                <label>出力層ニューロン数</label>
+                <div class="control-row">
+                    <input type="range" id="outputSize" min="1" max="8" value="2">
+                    <span class="value-display" id="outputSizeVal">2</span>
+                </div>
+            </div>
+            
+            <div class="control-group">
+                <label>基準相関係数 r₀</label>
+                <div class="control-row">
+                    <input type="range" id="baseR" min="-100" max="100" value="0">
+                    <span class="value-display" id="baseRVal">0.00</span>
+                </div>
+            </div>
+            
+            <button class="btn btn-primary" onclick="initNetwork()">🔄 ネットワーク初期化</button>
+            <button class="btn btn-secondary" onclick="randomizeWeights()">🎲 重みランダム化</button>
+        </div>
+        
+        <!-- 中央パネル: ネットワーク可視化 -->
+        <div class="panel network-panel">
+            <h3>🧠 APQBニューラルネットワーク</h3>
+            <canvas id="networkCanvas"></canvas>
+        </div>
+        
+        <!-- 右パネル: 入力/出力/実行 -->
+        <div class="panel">
+            <h3>📊 入力/出力</h3>
+            
+            <label style="color: #aaa; font-size: 0.8rem;">タスク選択</label>
+            <div class="task-buttons">
+                <button class="task-btn active" onclick="setTask('xor')" id="taskXor">XOR</button>
+                <button class="task-btn" onclick="setTask('and')" id="taskAnd">AND</button>
+                <button class="task-btn" onclick="setTask('or')" id="taskOr">OR</button>
+                <button class="task-btn" onclick="setTask('custom')" id="taskCustom">カスタム</button>
+            </div>
+            
+            <label style="color: #aaa; font-size: 0.8rem;">入力 (クリックで切替)</label>
+            <div class="input-grid" id="inputGrid"></div>
+            
+            <button class="btn btn-success" onclick="forward()">⚡ 順伝播実行</button>
+            <button class="btn btn-warning" onclick="runMultiple()">🔁 100回実行 (統計)</button>
+            
+            <label style="color: #aaa; font-size: 0.8rem; margin-top: 10px; display: block;">出力</label>
+            <div class="output-display" id="outputDisplay"></div>
+            
+            <div class="stats">
+                <div class="stat-row">
+                    <span class="stat-label">実行回数</span>
+                    <span class="stat-value" id="statRuns">0</span>
+                </div>
+                <div class="stat-row">
+                    <span class="stat-label">出力0確率</span>
+                    <span class="stat-value" id="statOut0">-</span>
+                </div>
+                <div class="stat-row">
+                    <span class="stat-label">出力1確率</span>
+                    <span class="stat-value" id="statOut1">-</span>
+                </div>
+                <div class="stat-row">
+                    <span class="stat-label">量子測定回数</span>
+                    <span class="stat-value" id="statMeasure">0</span>
+                </div>
+            </div>
+            
+            <div class="log-container" id="logContainer"></div>
+        </div>
+    </div>
+
+<script>
+// ========== APQB (Adjustable Pseudo Quantum Bit) ==========
+class APQB {
+    constructor(r = 0) {
+        this.r = Math.max(-1, Math.min(1, r)); // 相関係数 (-1 to 1)
+    }
+    
+    // 相関係数から角度を計算
+    get theta() {
+        return Math.PI * (1 - this.r) / 2;
+    }
+    
+    // |0⟩の確率
+    get p0() {
+        return Math.cos(this.theta / 2) ** 2;
+    }
+    
+    // |1⟩の確率
+    get p1() {
+        return Math.sin(this.theta / 2) ** 2;
+    }
+    
+    // 量子測定: 確率的に0または1を返す
+    measure() {
+        stats.measureCount++;
+        return Math.random() < this.p1 ? 1 : 0;
+    }
+    
+    // 状態の文字列表現
+    toString() {
+        return `APQB(r=${this.r.toFixed(3)}, P(1)=${(this.p1*100).toFixed(1)}%)`;
+    }
+}
+
+// ========== APQBニューロン ==========
+class APQBNeuron {
+    constructor(numInputs) {
+        this.weights = [];
+        this.bias = 0;
+        this.apqb = new APQB(0);
+        this.lastInput = [];
+        this.lastWeightedSum = 0;
+        this.lastOutput = 0;
+        
+        // 重みを初期化 (-1 to 1)
+        for (let i = 0; i < numInputs; i++) {
+            this.weights.push((Math.random() * 2 - 1) * 0.5);
+        }
+        this.bias = (Math.random() * 2 - 1) * 0.2;
+    }
+    
+    // 順伝播: 入力から出力を計算
+    forward(inputs, baseR = 0) {
+        this.lastInput = inputs;
+        
+        // 重み付き和を計算
+        let sum = this.bias;
+        for (let i = 0; i < inputs.length; i++) {
+            sum += inputs[i] * this.weights[i];
+        }
+        this.lastWeightedSum = sum;
+        
+        // 重み付き和を相関係数 r に変換 (tanh で -1〜1 にクリップ)
+        let r = Math.tanh(sum) + baseR * 0.3;
+        r = Math.max(-1, Math.min(1, r));
+        
+        // APQBを更新して測定
+        this.apqb = new APQB(r);
+        this.lastOutput = this.apqb.measure();
+        
+        return this.lastOutput;
+    }
+}
+
+// ========== APQBニューラルネットワーク ==========
+class APQBNeuralNetwork {
+    constructor(layerSizes) {
+        this.layerSizes = layerSizes;
+        this.layers = [];
+        this.baseR = 0;
+        
+        // 各層のニューロンを作成
+        for (let l = 1; l < layerSizes.length; l++) {
+            const layer = [];
+            const inputSize = layerSizes[l - 1];
+            for (let n = 0; n < layerSizes[l]; n++) {
+                layer.push(new APQBNeuron(inputSize));
+            }
+            this.layers.push(layer);
+        }
+    }
+    
+    // 順伝播
+    forward(inputs) {
+        let current = inputs;
+        const activations = [inputs.slice()];
+        
+        for (let l = 0; l < this.layers.length; l++) {
+            const layer = this.layers[l];
+            const outputs = [];
+            
+            for (let n = 0; n < layer.length; n++) {
+                outputs.push(layer[n].forward(current, this.baseR));
+            }
+            
+            current = outputs;
+            activations.push(outputs.slice());
+        }
+        
+        return { output: current, activations };
+    }
+    
+    // 重みをランダム化
+    randomizeWeights() {
+        for (const layer of this.layers) {
+            for (const neuron of layer) {
+                for (let i = 0; i < neuron.weights.length; i++) {
+                    neuron.weights[i] = (Math.random() * 2 - 1) * 0.8;
+                }
+                neuron.bias = (Math.random() * 2 - 1) * 0.3;
+            }
+        }
+    }
+}
+
+// ========== グローバル変数 ==========
+let network = null;
+let inputs = [0, 0, 0, 0];
+let currentTask = 'xor';
+let stats = {
+    runs: 0,
+    outputCounts: {},
+    measureCount: 0
+};
+let logs = [];
+
+// ========== 初期化 ==========
+function initNetwork() {
+    const inputSize = parseInt(document.getElementById('inputSize').value);
+    const hidden1 = parseInt(document.getElementById('hidden1Size').value);
+    const hidden2 = parseInt(document.getElementById('hidden2Size').value);
+    const outputSize = parseInt(document.getElementById('outputSize').value);
+    
+    const layerSizes = [inputSize];
+    if (hidden1 > 0) layerSizes.push(hidden1);
+    if (hidden2 > 0) layerSizes.push(hidden2);
+    layerSizes.push(outputSize);
+    
+    network = new APQBNeuralNetwork(layerSizes);
+    network.baseR = parseFloat(document.getElementById('baseR').value) / 100;
+    
+    // 入力を調整
+    inputs = new Array(inputSize).fill(0);
+    
+    resetStats();
+    updateInputGrid();
+    updateOutputDisplay([]);
+    drawNetwork();
+    log('ネットワーク初期化: ' + layerSizes.join(' → '), 'forward');
+}
+
+function randomizeWeights() {
+    if (network) {
+        network.randomizeWeights();
+        drawNetwork();
+        log('重みをランダム化しました', 'measure');
+    }
+}
+
+function resetStats() {
+    stats = {
+        runs: 0,
+        outputCounts: {},
+        measureCount: 0
+    };
+    updateStats();
+}
+
+// ========== タスク設定 ==========
+function setTask(task) {
+    currentTask = task;
+    document.querySelectorAll('.task-btn').forEach(btn => btn.classList.remove('active'));
+    document.getElementById('task' + task.charAt(0).toUpperCase() + task.slice(1)).classList.add('active');
+    
+    // タスクに応じて入力サイズを調整
+    if (task !== 'custom') {
+        document.getElementById('inputSize').value = 2;
+        document.getElementById('inputSizeVal').textContent = '2';
+        document.getElementById('outputSize').value = 1;
+        document.getElementById('outputSizeVal').textContent = '1';
+        initNetwork();
+    }
+    
+    log('タスク変更: ' + task.toUpperCase(), 'forward');
+}
+
+// ========== 入力グリッド ==========
+function updateInputGrid() {
+    const grid = document.getElementById('inputGrid');
+    grid.innerHTML = '';
+    
+    for (let i = 0; i < inputs.length; i++) {
+        const cell = document.createElement('div');
+        cell.className = 'input-cell' + (inputs[i] ? ' active' : '');
+        cell.textContent = inputs[i];
+        cell.onclick = () => toggleInput(i);
+        grid.appendChild(cell);
+    }
+}
+
+function toggleInput(index) {
+    inputs[index] = inputs[index] ? 0 : 1;
+    updateInputGrid();
+    drawNetwork();
+}
+
+// ========== 出力表示 ==========
+function updateOutputDisplay(outputs) {
+    const display = document.getElementById('outputDisplay');
+    display.innerHTML = '';
+    
+    const outputSize = network ? network.layerSizes[network.layerSizes.length - 1] : 2;
+    
+    for (let i = 0; i < outputSize; i++) {
+        const neuron = document.createElement('div');
+        const value = outputs[i] !== undefined ? outputs[i] : '-';
+        const isOn = value === 1;
+        neuron.className = 'output-neuron ' + (isOn ? 'on' : 'off');
+        neuron.innerHTML = `
+            <span class="output-label">O${i}</span>
+            <span class="output-value">${value}</span>
+        `;
+        display.appendChild(neuron);
+    }
+}
+
+// ========== 順伝播実行 ==========
+function forward() {
+    if (!network) {
+        initNetwork();
+    }
+    
+    network.baseR = parseFloat(document.getElementById('baseR').value) / 100;
+    
+    const result = network.forward(inputs);
+    
+    stats.runs++;
+    const key = result.output.join(',');
+    stats.outputCounts[key] = (stats.outputCounts[key] || 0) + 1;
+    
+    updateOutputDisplay(result.output);
+    updateStats();
+    drawNetwork(result.activations);
+    
+    log(`入力: [${inputs.join(',')}] → 出力: [${result.output.join(',')}]`, 'result');
+    
+    // XOR/AND/ORの正解チェック
+    if (currentTask !== 'custom' && inputs.length === 2 && result.output.length === 1) {
+        let expected;
+        if (currentTask === 'xor') expected = inputs[0] ^ inputs[1];
+        else if (currentTask === 'and') expected = inputs[0] & inputs[1];
+        else if (currentTask === 'or') expected = inputs[0] | inputs[1];
+        
+        const correct = result.output[0] === expected;
+        log(`  期待: ${expected}, 結果: ${result.output[0]} → ${correct ? '✓正解' : '✗不正解'}`, correct ? 'result' : 'measure');
+    }
+}
+
+function runMultiple() {
+    resetStats();
+    
+    for (let i = 0; i < 100; i++) {
+        if (!network) initNetwork();
+        network.baseR = parseFloat(document.getElementById('baseR').value) / 100;
+        
+        const result = network.forward(inputs);
+        stats.runs++;
+        const key = result.output.join(',');
+        stats.outputCounts[key] = (stats.outputCounts[key] || 0) + 1;
+    }
+    
+    updateStats();
+    log(`100回実行完了 - 統計を更新しました`, 'forward');
+}
+
+// ========== 統計更新 ==========
+function updateStats() {
+    document.getElementById('statRuns').textContent = stats.runs;
+    document.getElementById('statMeasure').textContent = stats.measureCount;
+    
+    // 出力確率を計算
+    if (stats.runs > 0) {
+        const counts = Object.entries(stats.outputCounts);
+        counts.sort((a, b) => b[1] - a[1]);
+        
+        if (counts.length >= 1) {
+            document.getElementById('statOut0').textContent = 
+                `[${counts[0][0]}]: ${((counts[0][1] / stats.runs) * 100).toFixed(1)}%`;
+        }
+        if (counts.length >= 2) {
+            document.getElementById('statOut1').textContent = 
+                `[${counts[1][0]}]: ${((counts[1][1] / stats.runs) * 100).toFixed(1)}%`;
+        }
+    }
+}
+
+// ========== ログ ==========
+function log(message, type = 'forward') {
+    logs.unshift({ message, type, time: new Date().toLocaleTimeString() });
+    if (logs.length > 50) logs.pop();
+    
+    const container = document.getElementById('logContainer');
+    container.innerHTML = logs.map(l => 
+        `<div class="log-entry ${l.type}">[${l.time}] ${l.message}</div>`
+    ).join('');
+}
+
+// ========== ネットワーク描画 ==========
+function drawNetwork(activations = null) {
+    const canvas = document.getElementById('networkCanvas');
+    const ctx = canvas.getContext('2d');
+    
+    // キャンバスサイズ設定
+    canvas.width = canvas.offsetWidth * 2;
+    canvas.height = canvas.offsetHeight * 2;
+    ctx.scale(2, 2);
+    
+    const width = canvas.offsetWidth;
+    const height = canvas.offsetHeight;
+    
+    ctx.clearRect(0, 0, width, height);
+    
+    if (!network) return;
+    
+    const layerSizes = network.layerSizes;
+    const numLayers = layerSizes.length;
+    const layerSpacing = width / (numLayers + 1);
+    
+    // ニューロンの位置を計算
+    const positions = [];
+    for (let l = 0; l < numLayers; l++) {
+        const layerPositions = [];
+        const numNeurons = layerSizes[l];
+        const neuronSpacing = height / (numNeurons + 1);
+        
+        for (let n = 0; n < numNeurons; n++) {
+            layerPositions.push({
+                x: layerSpacing * (l + 1),
+                y: neuronSpacing * (n + 1)
+            });
+        }
+        positions.push(layerPositions);
+    }
+    
+    // 接続線を描画
+    for (let l = 1; l < numLayers; l++) {
+        const layer = network.layers[l - 1];
+        
+        for (let n = 0; n < layerSizes[l]; n++) {
+            const neuron = layer[n];
+            const toPos = positions[l][n];
+            
+            for (let p = 0; p < layerSizes[l - 1]; p++) {
+                const fromPos = positions[l - 1][p];
+                const weight = neuron.weights[p];
+                
+                // 重みに応じた色と太さ
+                const absWeight = Math.abs(weight);
+                ctx.beginPath();
+                ctx.moveTo(fromPos.x, fromPos.y);
+                ctx.lineTo(toPos.x, toPos.y);
+                
+                if (weight > 0) {
+                    ctx.strokeStyle = `rgba(0, 255, 136, ${absWeight * 0.8})`;
+                } else {
+                    ctx.strokeStyle = `rgba(255, 0, 136, ${absWeight * 0.8})`;
+                }
+                ctx.lineWidth = absWeight * 3 + 0.5;
+                ctx.stroke();
+            }
+        }
+    }
+    
+    // ニューロンを描画
+    for (let l = 0; l < numLayers; l++) {
+        for (let n = 0; n < layerSizes[l]; n++) {
+            const pos = positions[l][n];
+            const radius = 18;
+            
+            // ニューロンの状態を取得
+            let value = '-';
+            let p1 = 0.5;
+            
+            if (activations && activations[l]) {
+                value = activations[l][n];
+            } else if (l === 0) {
+                value = inputs[n] !== undefined ? inputs[n] : 0;
+            }
+            
+            if (l > 0 && network.layers[l - 1] && network.layers[l - 1][n]) {
+                p1 = network.layers[l - 1][n].apqb.p1;
+            }
+            
+            // ニューロン背景
+            const gradient = ctx.createRadialGradient(pos.x, pos.y, 0, pos.x, pos.y, radius);
+            if (value === 1) {
+                gradient.addColorStop(0, '#00ff88');
+                gradient.addColorStop(1, '#006633');
+            } else if (value === 0) {
+                gradient.addColorStop(0, '#333');
+                gradient.addColorStop(1, '#111');
+            } else {
+                gradient.addColorStop(0, '#444');
+                gradient.addColorStop(1, '#222');
+            }
+            
+            ctx.beginPath();
+            ctx.arc(pos.x, pos.y, radius, 0, Math.PI * 2);
+            ctx.fillStyle = gradient;
+            ctx.fill();
+            
+            // 確率リング (隠れ層/出力層のみ)
+            if (l > 0) {
+                ctx.beginPath();
+                ctx.arc(pos.x, pos.y, radius + 3, -Math.PI/2, -Math.PI/2 + Math.PI * 2 * p1);
+                ctx.strokeStyle = '#ff00ff';
+                ctx.lineWidth = 3;
+                ctx.stroke();
+            }
+            
+            // ニューロン枠
+            ctx.beginPath();
+            ctx.arc(pos.x, pos.y, radius, 0, Math.PI * 2);
+            ctx.strokeStyle = l === 0 ? '#00d4ff' : (l === numLayers - 1 ? '#00ff88' : '#ff00ff');
+            ctx.lineWidth = 2;
+            ctx.stroke();
+            
+            // ニューロン値
+            ctx.fillStyle = value === 1 ? '#000' : '#fff';
+            ctx.font = 'bold 14px monospace';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillText(value.toString(), pos.x, pos.y);
+        }
+    }
+    
+    // レイヤーラベル
+    ctx.fillStyle = '#666';
+    ctx.font = '11px monospace';
+    ctx.textAlign = 'center';
+    
+    const labels = ['入力層'];
+    for (let i = 1; i < numLayers - 1; i++) {
+        labels.push(`隠れ層${i}`);
+    }
+    labels.push('出力層');
+    
+    for (let l = 0; l < numLayers; l++) {
+        ctx.fillText(labels[l], layerSpacing * (l + 1), height - 10);
+        ctx.fillText(`(APQB×${layerSizes[l]})`, layerSpacing * (l + 1), height - 25);
+    }
+}
+
+// ========== スライダーイベント ==========
+document.querySelectorAll('input[type="range"]').forEach(slider => {
+    slider.addEventListener('input', function() {
+        const val = this.value;
+        const display = document.getElementById(this.id + 'Val');
+        if (display) {
+            if (this.id === 'baseR') {
+                display.textContent = (val / 100).toFixed(2);
+            } else {
+                display.textContent = val;
+            }
+        }
+    });
+});
+
+// ========== 初期化 ==========
+window.onload = function() {
+    initNetwork();
+    log('APQB Neural Network 起動', 'forward');
+    log('各ニューロンはAPQBとして動作し、量子確率で活性化', 'measure');
+};
+
+window.onresize = function() {
+    drawNetwork();
+};
+</script>
+</body>
+</html>
+

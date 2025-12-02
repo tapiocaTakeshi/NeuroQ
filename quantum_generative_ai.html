@@ -1,0 +1,671 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>量子生成AI | Quantum Generative AI</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            background: linear-gradient(135deg, #0a0a1a, #1a0a2e, #0a1a2e);
+            min-height: 100vh;
+            font-family: 'Courier New', monospace;
+            color: #fff;
+            padding: 15px;
+        }
+        h1 { text-align: center; font-size: 1.6rem; color: #00d4ff; margin-bottom: 5px; }
+        .subtitle { text-align: center; color: #888; font-size: 0.75rem; margin-bottom: 15px; }
+        .container { display: flex; gap: 15px; max-width: 1600px; margin: 0 auto; flex-wrap: wrap; }
+        .panel { background: rgba(0,0,0,0.6); border: 2px solid #00d4ff; border-radius: 10px; padding: 15px; }
+        .config-panel { width: 300px; }
+        .viz-panel { flex: 1; min-width: 400px; }
+        .gen-panel { width: 350px; }
+        h3 { color: #00d4ff; margin-bottom: 10px; font-size: 0.9rem; }
+        .control { margin-bottom: 10px; }
+        .control label { display: block; color: #888; font-size: 0.7rem; margin-bottom: 3px; }
+        input[type="range"] { width: 100%; -webkit-appearance: none; height: 5px; background: #1a1a2e; border-radius: 3px; }
+        input[type="range"]::-webkit-slider-thumb { -webkit-appearance: none; width: 12px; height: 12px; background: #00d4ff; border-radius: 50%; cursor: pointer; }
+        input[type="text"], input[type="number"] { width: 100%; padding: 8px; background: #1a1a2e; border: 1px solid #333; border-radius: 5px; color: #fff; font-family: monospace; }
+        textarea { width: 100%; padding: 8px; background: #1a1a2e; border: 1px solid #333; border-radius: 5px; color: #fff; font-family: monospace; resize: vertical; }
+        .value { text-align: right; color: #00d4ff; font-size: 0.8rem; }
+        .btn { width: 100%; padding: 10px; margin-bottom: 5px; border: none; border-radius: 15px; font-size: 0.85rem; cursor: pointer; color: #fff; }
+        .btn:active { transform: scale(0.98); }
+        .btn-gen { background: linear-gradient(135deg, #10b981, #059669); }
+        .btn-train { background: linear-gradient(135deg, #8b5cf6, #6366f1); }
+        .btn-clear { background: linear-gradient(135deg, #ec4899, #be185d); }
+        .btn-preset { background: linear-gradient(135deg, #f59e0b, #d97706); }
+        canvas { display: block; margin: 0 auto; border-radius: 8px; }
+        .layer-config { background: rgba(139,92,246,0.1); border: 1px solid #8b5cf6; border-radius: 8px; padding: 10px; margin-bottom: 10px; }
+        .layer-row { display: flex; gap: 5px; align-items: center; margin-bottom: 5px; font-size: 0.75rem; }
+        .layer-input { width: 50px; padding: 4px; background: #1a1a2e; border: 1px solid #333; border-radius: 4px; color: #00d4ff; text-align: center; font-size: 0.8rem; }
+        .layer-label { color: #888; width: 60px; }
+        .layer-add, .layer-remove { padding: 3px 8px; font-size: 0.7rem; border: none; border-radius: 10px; cursor: pointer; }
+        .layer-add { background: #10b981; color: #fff; }
+        .layer-remove { background: #ec4899; color: #fff; }
+        .output-box { background: rgba(0,0,0,0.4); border: 1px solid #10b981; border-radius: 8px; padding: 12px; margin-bottom: 10px; min-height: 150px; max-height: 300px; overflow-y: auto; }
+        .generated-text { font-size: 1rem; line-height: 1.6; color: #10b981; white-space: pre-wrap; word-break: break-all; }
+        .cursor { animation: blink 1s infinite; }
+        @keyframes blink { 0%, 50% { opacity: 1; } 51%, 100% { opacity: 0; } }
+        .stat-row { display: flex; justify-content: space-between; font-size: 0.75rem; margin: 3px 0; }
+        .stat-label { color: #888; }
+        .stat-value { color: #00d4ff; }
+        .mode-select { display: flex; gap: 5px; flex-wrap: wrap; margin-bottom: 10px; }
+        .mode-btn { padding: 6px 10px; font-size: 0.75rem; border: 1px solid #333; border-radius: 10px; background: #1a1a2e; color: #888; cursor: pointer; }
+        .mode-btn.active { border-color: #10b981; color: #10b981; background: rgba(16,185,129,0.1); }
+        .quantum-info { background: rgba(0,212,255,0.1); border-radius: 6px; padding: 8px; font-size: 0.65rem; line-height: 1.4; margin-top: 10px; color: #aaa; }
+        .token-display { display: flex; flex-wrap: wrap; gap: 3px; margin-top: 10px; max-height: 80px; overflow-y: auto; }
+        .token { padding: 2px 5px; background: rgba(139,92,246,0.2); border-radius: 3px; font-size: 0.65rem; color: #8b5cf6; }
+        .token.active { background: rgba(16,185,129,0.3); color: #10b981; }
+        .arch-display { font-size: 0.7rem; color: #f59e0b; margin-bottom: 10px; padding: 5px; background: rgba(245,158,11,0.1); border-radius: 5px; text-align: center; }
+    </style>
+</head>
+<body>
+    <h1>🧠⚛️ 量子生成AI</h1>
+    <p class="subtitle">重み・バイアス・構造が全て擬似量子ビットに依存する生成AI</p>
+    
+    <div class="container">
+        <div class="panel config-panel">
+            <h3>🏗️ ネットワーク構造</h3>
+            
+            <div class="layer-config">
+                <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+                    <span style="color:#8b5cf6;font-size:0.8rem">レイヤー設定</span>
+                    <button class="layer-add" id="addLayerBtn">+ 層追加</button>
+                </div>
+                <div id="layerList"></div>
+            </div>
+            
+            <div class="arch-display" id="archDisplay">入力(64) → 隠れ(128) → 隠れ(64) → 出力(32)</div>
+            
+            <h3>⚛️ 量子パラメータ</h3>
+            
+            <div class="control">
+                <label>量子揺らぎ強度</label>
+                <input type="range" id="noiseSlider" min="0" max="100" value="25">
+                <div class="value"><span id="noiseVal">25</span>%</div>
+            </div>
+            
+            <div class="control">
+                <label>基底相関係数 r₀</label>
+                <input type="range" id="r0Slider" min="-100" max="100" value="60">
+                <div class="value">r₀ = <span id="r0Val">0.60</span></div>
+            </div>
+            
+            <div class="control">
+                <label>温度（生成の多様性）</label>
+                <input type="range" id="tempSlider" min="1" max="200" value="100">
+                <div class="value">T = <span id="tempVal">1.00</span></div>
+            </div>
+            
+            <h3>📊 プリセット</h3>
+            <div style="display:flex;gap:5px;flex-wrap:wrap">
+                <button class="btn-preset" style="flex:1;padding:5px;font-size:0.7rem" onclick="loadPreset('small')">小(64-32)</button>
+                <button class="btn-preset" style="flex:1;padding:5px;font-size:0.7rem" onclick="loadPreset('medium')">中(128-64-32)</button>
+                <button class="btn-preset" style="flex:1;padding:5px;font-size:0.7rem" onclick="loadPreset('large')">大(256-128-64)</button>
+            </div>
+            
+            <div class="quantum-info">
+                💡 各重み w_ij = Q(r).measure() × r<br>
+                🎲 量子測定で重みの符号が決定<br>
+                📐 層サイズは自由に設定可能
+            </div>
+        </div>
+        
+        <div class="panel viz-panel">
+            <canvas id="nnCanvas" width="450" height="350"></canvas>
+            <div style="display:flex;gap:10px;margin-top:10px">
+                <canvas id="weightChart" width="220" height="100"></canvas>
+                <canvas id="genChart" width="220" height="100"></canvas>
+            </div>
+        </div>
+        
+        <div class="panel gen-panel">
+            <h3>🎯 生成モード</h3>
+            <div class="mode-select">
+                <button class="mode-btn active" data-mode="text">テキスト</button>
+                <button class="mode-btn" data-mode="code">コード</button>
+                <button class="mode-btn" data-mode="number">数列</button>
+                <button class="mode-btn" data-mode="music">音符</button>
+            </div>
+            
+            <div class="control">
+                <label>プロンプト / シード</label>
+                <textarea id="promptInput" rows="2" placeholder="生成の開始テキスト...">こんにちは</textarea>
+            </div>
+            
+            <div class="control">
+                <label>生成長</label>
+                <input type="range" id="lenSlider" min="10" max="200" value="50">
+                <div class="value"><span id="lenVal">50</span> トークン</div>
+            </div>
+            
+            <button class="btn btn-gen" id="genBtn">⚡ 量子生成</button>
+            <button class="btn btn-train" id="trainBtn">🔄 量子学習</button>
+            <button class="btn btn-clear" id="clearBtn">🗑 クリア</button>
+            
+            <h3 style="margin-top:15px">📝 生成結果</h3>
+            <div class="output-box">
+                <span class="generated-text" id="outputText"></span><span class="cursor">|</span>
+            </div>
+            
+            <h3>🎲 トークン候補</h3>
+            <div class="token-display" id="tokenDisplay"></div>
+            
+            <h3 style="margin-top:10px">📊 統計</h3>
+            <div class="stat-row"><span class="stat-label">生成トークン:</span><span class="stat-value" id="tokenCount">0</span></div>
+            <div class="stat-row"><span class="stat-label">量子測定回数:</span><span class="stat-value" id="measureCount">0</span></div>
+            <div class="stat-row"><span class="stat-label">平均|r|:</span><span class="stat-value" id="avgR">-</span></div>
+            <div class="stat-row"><span class="stat-label">エントロピー:</span><span class="stat-value" id="entropy">-</span></div>
+        </div>
+    </div>
+
+<script>
+(function() {
+    // 量子ビット
+    function Qubit(r) {
+        this.r = Math.max(-1, Math.min(1, r));
+        var theta = Math.PI * (1 - this.r) / 2;
+        this.p0 = Math.pow(Math.cos(theta/2), 2);
+    }
+    Qubit.prototype.measure = function() {
+        return Math.random() < this.p0 ? 0 : 1;
+    };
+
+    // 量子重み生成（直接量子ビットから）
+    function generateQuantumWeight(baseR, noise) {
+        var r = baseR + (Math.random() - 0.5) * noise * 2;
+        r = Math.max(-0.99, Math.min(0.99, r));
+        var qubit = new Qubit(r);
+        var m = qubit.measure();
+        return r * (m === 0 ? 1 : -1) * (0.3 + Math.random() * 0.7);
+    }
+
+    // ネットワーク構造
+    var layers = [64, 128, 64, 32];
+    var weights = [];
+    var biases = [];
+    var activations = [];
+    
+    var currentMode = 'text';
+    var measureCount = 0;
+    var totalR = 0;
+    var generatedTokens = [];
+
+    // 文字セット
+    var charSets = {
+        text: 'あいうえおかきくけこさしすせそたちつてとなにぬねのはひふへほまみむめもやゆよらりるれろわをん、。！？ ',
+        code: 'abcdefghijklmnopqrstuvwxyz0123456789(){}[];:=+-*/<>"\' \n',
+        number: '0123456789.+-×÷=() ',
+        music: '♩♪♫♬🎵CDEFGAB#♭12348 '
+    };
+
+    var nnCanvas = document.getElementById('nnCanvas');
+    var nnCtx = nnCanvas.getContext('2d');
+    var weightChart = document.getElementById('weightChart');
+    var weightCtx = weightChart.getContext('2d');
+    var genChart = document.getElementById('genChart');
+    var genCtx = genChart.getContext('2d');
+
+    // レイヤー設定UI
+    function updateLayerUI() {
+        var list = document.getElementById('layerList');
+        list.innerHTML = '';
+        
+        var labels = ['入力層', '隠れ層', '隠れ層', '隠れ層', '隠れ層', '出力層'];
+        
+        layers.forEach(function(size, i) {
+            var row = document.createElement('div');
+            row.className = 'layer-row';
+            
+            var label = i === 0 ? '入力層' : (i === layers.length - 1 ? '出力層' : '隠れ' + i);
+            row.innerHTML = '<span class="layer-label">' + label + '</span>' +
+                '<input type="number" class="layer-input" value="' + size + '" min="1" max="512" data-idx="' + i + '">' +
+                (layers.length > 2 && i > 0 && i < layers.length - 1 ? 
+                    '<button class="layer-remove" data-idx="' + i + '">×</button>' : '');
+            
+            list.appendChild(row);
+        });
+        
+        // イベント
+        list.querySelectorAll('.layer-input').forEach(function(inp) {
+            inp.onchange = function() {
+                layers[parseInt(inp.dataset.idx)] = parseInt(inp.value) || 32;
+                updateArchDisplay();
+                initNetwork();
+            };
+        });
+        
+        list.querySelectorAll('.layer-remove').forEach(function(btn) {
+            btn.onclick = function() {
+                var idx = parseInt(btn.dataset.idx);
+                layers.splice(idx, 1);
+                updateLayerUI();
+                initNetwork();
+            };
+        });
+        
+        updateArchDisplay();
+    }
+
+    function updateArchDisplay() {
+        var arch = layers.map(function(s, i) {
+            if (i === 0) return '入力(' + s + ')';
+            if (i === layers.length - 1) return '出力(' + s + ')';
+            return '隠れ(' + s + ')';
+        }).join(' → ');
+        document.getElementById('archDisplay').textContent = arch;
+    }
+
+    document.getElementById('addLayerBtn').onclick = function() {
+        if (layers.length < 6) {
+            layers.splice(layers.length - 1, 0, 64);
+            updateLayerUI();
+            initNetwork();
+        }
+    };
+
+    // ネットワーク初期化
+    function initNetwork() {
+        var noise = parseInt(document.getElementById('noiseSlider').value) / 100;
+        var baseR = parseInt(document.getElementById('r0Slider').value) / 100;
+        
+        weights = [];
+        biases = [];
+        measureCount = 0;
+        totalR = 0;
+        
+        for (var l = 0; l < layers.length - 1; l++) {
+            var inSize = layers[l];
+            var outSize = layers[l + 1];
+            
+            var W = [];
+            var B = [];
+            
+            for (var j = 0; j < outSize; j++) {
+                W[j] = [];
+                var bR = baseR * 0.3 + (Math.random() - 0.5) * noise;
+                B[j] = generateQuantumWeight(bR, noise) * 0.1;
+                measureCount++;
+                
+                for (var i = 0; i < inSize; i++) {
+                    var wR = baseR + (Math.random() - 0.5) * noise * 0.5;
+                    totalR += Math.abs(wR);
+                    W[j][i] = generateQuantumWeight(wR, noise);
+                    measureCount++;
+                }
+            }
+            
+            weights.push(W);
+            biases.push(B);
+        }
+        
+        drawNetwork();
+        drawWeightChart();
+    }
+
+    // 順伝播
+    function forward(input) {
+        activations = [input];
+        var x = input;
+        
+        for (var l = 0; l < weights.length; l++) {
+            var W = weights[l];
+            var B = biases[l];
+            var nextSize = W.length;
+            var y = [];
+            
+            for (var j = 0; j < nextSize; j++) {
+                var sum = B[j];
+                for (var i = 0; i < x.length; i++) {
+                    sum += x[i] * W[j][i];
+                }
+                // 量子活性化
+                y[j] = Math.tanh(sum);
+            }
+            
+            activations.push(y);
+            x = y;
+        }
+        
+        return x;
+    }
+
+    // ソフトマックス
+    function softmax(x, temperature) {
+        var maxX = Math.max.apply(null, x);
+        var expX = x.map(function(v) { return Math.exp((v - maxX) / temperature); });
+        var sumExp = expX.reduce(function(a, b) { return a + b; }, 0);
+        return expX.map(function(v) { return v / sumExp; });
+    }
+
+    // トークン選択（量子的）
+    function sampleToken(probs, baseR) {
+        // 量子ビットで選択にゆらぎを加える
+        var r = baseR + (Math.random() - 0.5) * 0.3;
+        var qubit = new Qubit(r);
+        
+        if (qubit.measure() === 0) {
+            // 確率的サンプリング
+            var rand = Math.random();
+            var cumSum = 0;
+            for (var i = 0; i < probs.length; i++) {
+                cumSum += probs[i];
+                if (rand < cumSum) return i;
+            }
+            return probs.length - 1;
+        } else {
+            // Top-k からランダム
+            var sorted = probs.map(function(p, i) { return {p: p, i: i}; })
+                .sort(function(a, b) { return b.p - a.p; });
+            var k = Math.min(5, sorted.length);
+            return sorted[Math.floor(Math.random() * k)].i;
+        }
+    }
+
+    // テキスト生成
+    function generate() {
+        var prompt = document.getElementById('promptInput').value;
+        var genLen = parseInt(document.getElementById('lenSlider').value);
+        var temperature = parseInt(document.getElementById('tempSlider').value) / 100;
+        var baseR = parseInt(document.getElementById('r0Slider').value) / 100;
+        var noise = parseInt(document.getElementById('noiseSlider').value) / 100;
+        
+        var charset = charSets[currentMode];
+        var outputSize = layers[layers.length - 1];
+        
+        // プロンプトをエンコード
+        var text = prompt;
+        generatedTokens = [];
+        
+        var outputEl = document.getElementById('outputText');
+        var tokenDisplay = document.getElementById('tokenDisplay');
+        
+        outputEl.textContent = text;
+        
+        var genMeasures = 0;
+        var genR = 0;
+        var step = 0;
+        
+        function genStep() {
+            if (step >= genLen) {
+                document.getElementById('tokenCount').textContent = generatedTokens.length;
+                document.getElementById('measureCount').textContent = measureCount + genMeasures;
+                document.getElementById('avgR').textContent = ((totalR + genR) / (measureCount + genMeasures)).toFixed(4);
+                drawGenChart();
+                return;
+            }
+            
+            // 入力ベクトル作成（最後の文字からエンコード）
+            var inputSize = layers[0];
+            var input = new Array(inputSize).fill(0);
+            
+            // 最後の数文字をエンコード
+            var contextLen = Math.min(text.length, Math.floor(inputSize / charset.length) || 1);
+            for (var c = 0; c < contextLen; c++) {
+                var ch = text[text.length - 1 - c] || ' ';
+                var idx = charset.indexOf(ch);
+                if (idx === -1) idx = charset.length - 1;
+                var offset = c * charset.length;
+                if (offset + idx < inputSize) {
+                    input[offset + idx] = 1;
+                }
+            }
+            
+            // 量子ノイズを入力に加える
+            for (var i = 0; i < input.length; i++) {
+                var r = baseR * 0.1 + (Math.random() - 0.5) * noise * 0.2;
+                var qubit = new Qubit(r);
+                input[i] += (qubit.measure() === 0 ? 0.1 : -0.1) * r;
+                genMeasures++;
+                genR += Math.abs(r);
+            }
+            
+            // 順伝播
+            var output = forward(input);
+            
+            // 出力を文字確率に変換
+            var charProbs = new Array(charset.length).fill(0);
+            for (var i = 0; i < Math.min(output.length, charset.length); i++) {
+                charProbs[i] = output[i % output.length];
+            }
+            
+            // ソフトマックス
+            var probs = softmax(charProbs, temperature);
+            
+            // 量子サンプリング
+            var tokenIdx = sampleToken(probs, baseR);
+            genMeasures++;
+            
+            var newChar = charset[tokenIdx] || charset[0];
+            text += newChar;
+            generatedTokens.push({char: newChar, prob: probs[tokenIdx]});
+            
+            outputEl.textContent = text;
+            
+            // トークン候補表示
+            tokenDisplay.innerHTML = '';
+            var sorted = probs.map(function(p, i) { return {p: p, i: i, c: charset[i]}; })
+                .sort(function(a, b) { return b.p - a.p; })
+                .slice(0, 10);
+            
+            sorted.forEach(function(t, idx) {
+                var span = document.createElement('span');
+                span.className = 'token' + (t.i === tokenIdx ? ' active' : '');
+                span.textContent = (t.c === ' ' ? '␣' : (t.c === '\n' ? '↵' : t.c)) + ' ' + (t.p * 100).toFixed(1) + '%';
+                tokenDisplay.appendChild(span);
+            });
+            
+            step++;
+            setTimeout(genStep, 30);
+        }
+        
+        initNetwork();
+        genStep();
+    }
+
+    // 描画関数
+    function drawNetwork() {
+        var w = nnCanvas.width, h = nnCanvas.height;
+        nnCtx.fillStyle = 'rgba(10,10,20,0.95)';
+        nnCtx.fillRect(0, 0, w, h);
+
+        var numLayers = layers.length;
+        var layerSpacing = (w - 80) / (numLayers - 1);
+        var maxNodes = Math.max.apply(null, layers);
+        
+        var colors = ['#10b981', '#8b5cf6', '#06b6d4', '#f59e0b', '#ec4899'];
+
+        // エッジ
+        for (var l = 0; l < weights.length; l++) {
+            var W = weights[l];
+            var x1 = 40 + l * layerSpacing;
+            var x2 = 40 + (l + 1) * layerSpacing;
+            var n1 = layers[l];
+            var n2 = layers[l + 1];
+            
+            // サンプリングして描画（多すぎる場合）
+            var sampleRate = Math.max(1, Math.floor(n1 * n2 / 500));
+            
+            for (var j = 0; j < n2; j += Math.max(1, Math.floor(n2 / 20))) {
+                var y2 = 20 + (j / Math.max(n2 - 1, 1)) * (h - 40);
+                for (var i = 0; i < n1; i += Math.max(1, Math.floor(n1 / 20))) {
+                    var y1 = 20 + (i / Math.max(n1 - 1, 1)) * (h - 40);
+                    var weight = W[j] ? W[j][i] : 0;
+                    if (Math.abs(weight) > 0.05) {
+                        nnCtx.strokeStyle = weight > 0 ? 
+                            'rgba(0,212,255,' + Math.min(Math.abs(weight) * 0.5, 0.3) + ')' : 
+                            'rgba(236,72,153,' + Math.min(Math.abs(weight) * 0.5, 0.3) + ')';
+                        nnCtx.lineWidth = 0.5;
+                        nnCtx.beginPath();
+                        nnCtx.moveTo(x1 + 8, y1);
+                        nnCtx.lineTo(x2 - 8, y2);
+                        nnCtx.stroke();
+                    }
+                }
+            }
+        }
+
+        // ノード
+        for (var l = 0; l < numLayers; l++) {
+            var x = 40 + l * layerSpacing;
+            var n = layers[l];
+            var showNodes = Math.min(n, 15);
+            var color = colors[l % colors.length];
+            
+            for (var i = 0; i < showNodes; i++) {
+                var y = 20 + (i / Math.max(showNodes - 1, 1)) * (h - 40);
+                var act = activations[l] ? Math.abs(activations[l][Math.floor(i * n / showNodes)] || 0) : 0.5;
+                
+                nnCtx.fillStyle = color;
+                nnCtx.globalAlpha = 0.3 + act * 0.7;
+                nnCtx.beginPath();
+                nnCtx.arc(x, y, 6, 0, Math.PI * 2);
+                nnCtx.fill();
+                nnCtx.globalAlpha = 1;
+            }
+            
+            if (n > showNodes) {
+                nnCtx.fillStyle = '#666';
+                nnCtx.font = '10px monospace';
+                nnCtx.fillText('...' + (n - showNodes) + 'more', x - 15, h - 5);
+            }
+            
+            // ラベル
+            nnCtx.fillStyle = '#888';
+            nnCtx.font = '9px monospace';
+            nnCtx.textAlign = 'center';
+            nnCtx.fillText(n, x, 12);
+        }
+    }
+
+    function drawWeightChart() {
+        var w = weightChart.width, hh = weightChart.height;
+        weightCtx.fillStyle = 'rgba(10,10,20,0.95)';
+        weightCtx.fillRect(0, 0, w, hh);
+
+        weightCtx.fillStyle = '#666';
+        weightCtx.font = '9px monospace';
+        weightCtx.fillText('重み分布', 5, 12);
+
+        if (weights.length === 0) return;
+
+        var allWeights = [];
+        weights.forEach(function(W) {
+            W.forEach(function(row) {
+                row.forEach(function(v) { allWeights.push(v); });
+            });
+        });
+
+        if (allWeights.length === 0) return;
+
+        var bins = 30;
+        var hist = new Array(bins).fill(0);
+        allWeights.forEach(function(v) {
+            var idx = Math.floor((v + 1) / 2 * (bins - 1));
+            idx = Math.max(0, Math.min(bins - 1, idx));
+            hist[idx]++;
+        });
+
+        var maxH = Math.max.apply(null, hist);
+        var barW = (w - 20) / bins;
+
+        for (var i = 0; i < bins; i++) {
+            var barH = (hist[i] / maxH) * (hh - 25);
+            var x = 10 + i * barW;
+            weightCtx.fillStyle = i < bins/2 ? '#ec4899' : '#00d4ff';
+            weightCtx.fillRect(x, hh - 10 - barH, barW - 1, barH);
+        }
+    }
+
+    function drawGenChart() {
+        var w = genChart.width, hh = genChart.height;
+        genCtx.fillStyle = 'rgba(10,10,20,0.95)';
+        genCtx.fillRect(0, 0, w, hh);
+
+        genCtx.fillStyle = '#666';
+        genCtx.font = '9px monospace';
+        genCtx.fillText('生成確率', 5, 12);
+
+        if (generatedTokens.length === 0) return;
+
+        var maxShow = 50;
+        var tokens = generatedTokens.slice(-maxShow);
+        var barW = (w - 20) / tokens.length;
+
+        tokens.forEach(function(t, i) {
+            var barH = t.prob * (hh - 25);
+            var x = 10 + i * barW;
+            genCtx.fillStyle = 'rgba(16,185,129,' + (0.3 + t.prob * 0.7) + ')';
+            genCtx.fillRect(x, hh - 10 - barH, Math.max(barW - 1, 1), barH);
+        });
+
+        // エントロピー計算
+        var entropy = 0;
+        tokens.forEach(function(t) {
+            if (t.prob > 0) entropy -= t.prob * Math.log2(t.prob);
+        });
+        document.getElementById('entropy').textContent = (entropy / tokens.length).toFixed(3);
+    }
+
+    // スライダー更新
+    function updateSliders() {
+        document.getElementById('noiseVal').textContent = document.getElementById('noiseSlider').value;
+        document.getElementById('r0Val').textContent = (document.getElementById('r0Slider').value / 100).toFixed(2);
+        document.getElementById('tempVal').textContent = (document.getElementById('tempSlider').value / 100).toFixed(2);
+        document.getElementById('lenVal').textContent = document.getElementById('lenSlider').value;
+    }
+
+    document.getElementById('noiseSlider').oninput = updateSliders;
+    document.getElementById('r0Slider').oninput = updateSliders;
+    document.getElementById('tempSlider').oninput = updateSliders;
+    document.getElementById('lenSlider').oninput = updateSliders;
+
+    // モード選択
+    document.querySelectorAll('.mode-btn').forEach(function(btn) {
+        btn.onclick = function() {
+            document.querySelectorAll('.mode-btn').forEach(function(b) { b.classList.remove('active'); });
+            btn.classList.add('active');
+            currentMode = btn.dataset.mode;
+            
+            // モードに応じてプロンプト変更
+            var prompts = {
+                text: 'こんにちは',
+                code: 'function f(x) {',
+                number: '1, 2, 3, ',
+                music: '♩♪♫'
+            };
+            document.getElementById('promptInput').value = prompts[currentMode];
+        };
+    });
+
+    // プリセット
+    window.loadPreset = function(size) {
+        if (size === 'small') layers = [32, 64, 32];
+        else if (size === 'medium') layers = [64, 128, 64, 32];
+        else if (size === 'large') layers = [128, 256, 128, 64, 32];
+        updateLayerUI();
+        initNetwork();
+    };
+
+    // イベント
+    document.getElementById('genBtn').onclick = generate;
+    document.getElementById('trainBtn').onclick = function() {
+        initNetwork();
+        drawNetwork();
+    };
+    document.getElementById('clearBtn').onclick = function() {
+        document.getElementById('outputText').textContent = '';
+        document.getElementById('promptInput').value = '';
+        generatedTokens = [];
+        document.getElementById('tokenDisplay').innerHTML = '';
+    };
+
+    // 初期化
+    updateSliders();
+    updateLayerUI();
+    initNetwork();
+})();
+</script>
+</body>
+</html>
+
