@@ -735,7 +735,7 @@ def demo_brain_qbnn():
     
     # 可視化
     brain.visualize(
-        '/Users/yuyahiguchi/Program/Qubit/qbnn_brain_dynamic.png',
+        'qbnn_brain_dynamic.png',
         last_input_neurons=in_neurons,
         last_output_neurons=out_neurons
     )
