@@ -714,7 +714,7 @@ class NeuroQuantumBrainAI:
     """NeuroQuantum Brain 生成AI"""
     
     def __init__(self, embed_dim: int = 128, num_heads: int = 4,
-                 num_layers: int = 3, num_neurons: int = 48,
+                 num_layers: int = 3, num_neurons: int = 100_000_000_000,
                  max_vocab: int = 50000):
         self.embed_dim = embed_dim
         self.num_heads = num_heads
@@ -1154,7 +1154,7 @@ def main():
         embed_dim=128,
         num_heads=4,
         num_layers=3,
-        num_neurons=48,
+        num_neurons=100_000_000_000,
         max_vocab=2000
     )
     
