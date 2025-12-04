@@ -60,6 +60,44 @@ DEFAULT_CONFIG = {
     "lambda_entangle_layered": float(os.environ.get("NEUROQ_LAMBDA_LAYERED", "0.5")),
 }
 
+# デフォルトの学習設定
+DEFAULT_TRAINING_CONFIG = {
+    # エポック・ステップ関連
+    "epochs": int(os.environ.get("NEUROQ_EPOCHS", "10")),
+    "batch_size": int(os.environ.get("NEUROQ_BATCH_SIZE", "32")),
+    "gradient_accumulation_steps": int(os.environ.get("NEUROQ_GRAD_ACCUM_STEPS", "1")),
+    
+    # 学習率関連
+    "learning_rate": float(os.environ.get("NEUROQ_LEARNING_RATE", "1e-4")),
+    "min_learning_rate": float(os.environ.get("NEUROQ_MIN_LR", "1e-6")),
+    "weight_decay": float(os.environ.get("NEUROQ_WEIGHT_DECAY", "0.01")),
+    "warmup_steps": int(os.environ.get("NEUROQ_WARMUP_STEPS", "100")),
+    "lr_scheduler": os.environ.get("NEUROQ_LR_SCHEDULER", "cosine"),  # cosine, linear, constant
+    
+    # Temperature関連（生成時のサンプリング温度スケジューリング）
+    "max_temperature": float(os.environ.get("NEUROQ_MAX_TEMPERATURE", "1.5")),
+    "min_temperature": float(os.environ.get("NEUROQ_MIN_TEMPERATURE", "0.1")),
+    "temperature_decay": os.environ.get("NEUROQ_TEMP_DECAY", "linear"),  # linear, exponential, cosine
+    
+    # 正則化・最適化
+    "max_grad_norm": float(os.environ.get("NEUROQ_MAX_GRAD_NORM", "1.0")),
+    "label_smoothing": float(os.environ.get("NEUROQ_LABEL_SMOOTHING", "0.1")),
+    
+    # 評価・保存
+    "eval_steps": int(os.environ.get("NEUROQ_EVAL_STEPS", "500")),
+    "save_steps": int(os.environ.get("NEUROQ_SAVE_STEPS", "1000")),
+    "logging_steps": int(os.environ.get("NEUROQ_LOGGING_STEPS", "100")),
+    
+    # 早期停止
+    "early_stopping_patience": int(os.environ.get("NEUROQ_EARLY_STOPPING", "3")),
+    "early_stopping_threshold": float(os.environ.get("NEUROQ_EARLY_STOPPING_THRESHOLD", "0.001")),
+    
+    # データ関連
+    "train_split": float(os.environ.get("NEUROQ_TRAIN_SPLIT", "0.9")),
+    "shuffle": True,
+    "seed": int(os.environ.get("NEUROQ_SEED", "42")),
+}
+
 # デバイス選択
 if torch.cuda.is_available():
     DEVICE = "cuda"
@@ -219,6 +257,28 @@ def handler(job):
             // 共通
             "embed_dim": 128,         // 埋め込み次元
             "num_layers": 3,          // レイヤー数
+            
+            // === 学習パラメータ ===
+            "epochs": 10,             // エポック数（デフォルト: 10）
+            "batch_size": 32,         // バッチサイズ（デフォルト: 32）
+            "learning_rate": 1e-4,    // 学習率（デフォルト: 1e-4）
+            "min_learning_rate": 1e-6, // 最小学習率（デフォルト: 1e-6）
+            "weight_decay": 0.01,     // 重み減衰（デフォルト: 0.01）
+            "warmup_steps": 100,      // ウォームアップステップ（デフォルト: 100）
+            "lr_scheduler": "cosine", // LRスケジューラー: cosine, linear, constant
+            "max_temperature": 1.5,   // 最大温度（デフォルト: 1.5）
+            "min_temperature": 0.1,   // 最小温度（デフォルト: 0.1）
+            "temperature_decay": "linear", // 温度減衰: linear, exponential, cosine
+            "max_grad_norm": 1.0,     // 勾配クリッピング（デフォルト: 1.0）
+            "label_smoothing": 0.1,   // ラベルスムージング（デフォルト: 0.1）
+            "gradient_accumulation_steps": 1, // 勾配累積ステップ
+            "eval_steps": 500,        // 評価間隔ステップ
+            "save_steps": 1000,       // 保存間隔ステップ
+            "logging_steps": 100,     // ログ間隔ステップ
+            "early_stopping_patience": 3,    // 早期停止patience
+            "early_stopping_threshold": 0.001, // 早期停止閾値
+            "train_split": 0.9,       // 学習/検証分割比率
+            "seed": 42,               // 乱数シード
         }
     }
     
@@ -270,6 +330,65 @@ def handler(job):
         if "lambda_entangle" in job_input and mode == "layered":
             config_params["lambda_entangle_layered"] = float(job_input["lambda_entangle"])
         
+        # 学習パラメータを抽出
+        training_params = {}
+        
+        # エポック・バッチ関連
+        if "epochs" in job_input:
+            training_params["epochs"] = int(job_input["epochs"])
+        if "batch_size" in job_input:
+            training_params["batch_size"] = int(job_input["batch_size"])
+        if "gradient_accumulation_steps" in job_input:
+            training_params["gradient_accumulation_steps"] = int(job_input["gradient_accumulation_steps"])
+        
+        # 学習率関連
+        if "learning_rate" in job_input:
+            training_params["learning_rate"] = float(job_input["learning_rate"])
+        if "min_learning_rate" in job_input:
+            training_params["min_learning_rate"] = float(job_input["min_learning_rate"])
+        if "weight_decay" in job_input:
+            training_params["weight_decay"] = float(job_input["weight_decay"])
+        if "warmup_steps" in job_input:
+            training_params["warmup_steps"] = int(job_input["warmup_steps"])
+        if "lr_scheduler" in job_input:
+            training_params["lr_scheduler"] = str(job_input["lr_scheduler"])
+        
+        # Temperature関連
+        if "max_temperature" in job_input:
+            training_params["max_temperature"] = float(job_input["max_temperature"])
+        if "min_temperature" in job_input:
+            training_params["min_temperature"] = float(job_input["min_temperature"])
+        if "temperature_decay" in job_input:
+            training_params["temperature_decay"] = str(job_input["temperature_decay"])
+        
+        # 正則化・最適化
+        if "max_grad_norm" in job_input:
+            training_params["max_grad_norm"] = float(job_input["max_grad_norm"])
+        if "label_smoothing" in job_input:
+            training_params["label_smoothing"] = float(job_input["label_smoothing"])
+        
+        # 評価・保存
+        if "eval_steps" in job_input:
+            training_params["eval_steps"] = int(job_input["eval_steps"])
+        if "save_steps" in job_input:
+            training_params["save_steps"] = int(job_input["save_steps"])
+        if "logging_steps" in job_input:
+            training_params["logging_steps"] = int(job_input["logging_steps"])
+        
+        # 早期停止
+        if "early_stopping_patience" in job_input:
+            training_params["early_stopping_patience"] = int(job_input["early_stopping_patience"])
+        if "early_stopping_threshold" in job_input:
+            training_params["early_stopping_threshold"] = float(job_input["early_stopping_threshold"])
+        
+        # データ関連
+        if "train_split" in job_input:
+            training_params["train_split"] = float(job_input["train_split"])
+        if "shuffle" in job_input:
+            training_params["shuffle"] = bool(job_input["shuffle"])
+        if "seed" in job_input:
+            training_params["seed"] = int(job_input["seed"])
+        
         # モデルをロード
         gen = load_model(mode, config_params if config_params else None)
         
@@ -298,6 +417,8 @@ def handler(job):
         print(f"   Temperature: {temperature}")
         if config_params:
             print(f"   Custom config: {json.dumps(config_params)}")
+        if training_params:
+            print(f"   Training params: {json.dumps(training_params)}")
         
         # テキスト生成
         output_text = gen.generate(
@@ -311,6 +432,10 @@ def handler(job):
         
         print(f"✅ 生成完了: {len(output_text)} 文字")
         
+        # 学習パラメータをデフォルト値とマージ
+        merged_training_params = DEFAULT_TRAINING_CONFIG.copy()
+        merged_training_params.update(training_params)
+        
         # レスポンス
         return {
             "prompt": prompt,
@@ -319,11 +444,133 @@ def handler(job):
             "config": {
                 "mode": mode,
                 **config_params
-            }
+            },
+            "training_config": merged_training_params
         }
         
     except Exception as e:
         error_msg = f"Error: {str(e)}\n{traceback.format_exc()}"
+        print(f"❌ {error_msg}")
+        return {"error": error_msg}
+
+
+# ========================================
+# 学習エンドポイント
+# ========================================
+
+def train_handler(job):
+    """
+    モデル学習用ハンドラー
+    
+    入力JSON形式:
+    {
+        "input": {
+            "training_data": ["テキスト1", "テキスト2", ...],  // 必須: 学習テキストのリスト
+            "mode": "layered",        // オプション: "brain" or "layered"
+            
+            // 学習パラメータ
+            "epochs": 10,
+            "batch_size": 32,
+            "learning_rate": 1e-4,
+            "min_learning_rate": 1e-6,
+            "warmup_steps": 100,
+            "lr_scheduler": "cosine",
+            "max_temperature": 1.5,
+            "min_temperature": 0.1,
+            "temperature_decay": "linear",
+            "max_grad_norm": 1.0,
+            "label_smoothing": 0.1,
+            ...
+        }
+    }
+    """
+    try:
+        job_input = job.get("input", {})
+        
+        # 学習データを取得
+        training_data = job_input.get("training_data", [])
+        if not training_data:
+            return {"error": "training_data is required"}
+        
+        mode = job_input.get("mode", DEFAULT_MODE)
+        
+        # 学習パラメータを抽出してマージ
+        training_config = DEFAULT_TRAINING_CONFIG.copy()
+        
+        training_param_keys = [
+            "epochs", "batch_size", "gradient_accumulation_steps",
+            "learning_rate", "min_learning_rate", "weight_decay", "warmup_steps", "lr_scheduler",
+            "max_temperature", "min_temperature", "temperature_decay",
+            "max_grad_norm", "label_smoothing",
+            "eval_steps", "save_steps", "logging_steps",
+            "early_stopping_patience", "early_stopping_threshold",
+            "train_split", "shuffle", "seed"
+        ]
+        
+        for key in training_param_keys:
+            if key in job_input:
+                value = job_input[key]
+                # 型変換
+                if key in ["epochs", "batch_size", "gradient_accumulation_steps", "warmup_steps", 
+                           "eval_steps", "save_steps", "logging_steps", "early_stopping_patience", "seed"]:
+                    training_config[key] = int(value)
+                elif key in ["learning_rate", "min_learning_rate", "weight_decay", 
+                             "max_temperature", "min_temperature", "max_grad_norm", 
+                             "label_smoothing", "early_stopping_threshold", "train_split"]:
+                    training_config[key] = float(value)
+                elif key == "shuffle":
+                    training_config[key] = bool(value)
+                else:
+                    training_config[key] = str(value)
+        
+        print(f"🎓 学習リクエスト:")
+        print(f"   Mode: {mode}")
+        print(f"   Training data size: {len(training_data)} samples")
+        print(f"   Epochs: {training_config['epochs']}")
+        print(f"   Batch size: {training_config['batch_size']}")
+        print(f"   Learning rate: {training_config['learning_rate']}")
+        print(f"   Max/Min temperature: {training_config['max_temperature']}/{training_config['min_temperature']}")
+        print(f"   Temperature decay: {training_config['temperature_decay']}")
+        print(f"   LR scheduler: {training_config['lr_scheduler']}")
+        print(f"   Warmup steps: {training_config['warmup_steps']}")
+        
+        # モデル設定パラメータを抽出
+        config_params = {}
+        model_param_keys = [
+            "embed_dim", "num_layers", "dropout", "max_seq_len",
+            "num_neurons", "connection_density", "hidden_dim", "num_heads"
+        ]
+        for key in model_param_keys:
+            if key in job_input:
+                if key in ["dropout", "connection_density"]:
+                    config_params[key] = float(job_input[key])
+                else:
+                    config_params[key] = int(job_input[key])
+        
+        if "lambda_entangle" in job_input:
+            if mode == "brain":
+                config_params["lambda_entangle_brain"] = float(job_input["lambda_entangle"])
+            else:
+                config_params["lambda_entangle_layered"] = float(job_input["lambda_entangle"])
+        
+        # モデルをロード
+        gen = load_model(mode, config_params if config_params else None)
+        
+        # 注: 実際の学習処理はNeuroQGeneratorに実装が必要
+        # ここでは学習パラメータの受け渡しと設定の確認のみ
+        
+        return {
+            "status": "training_config_ready",
+            "message": "Training parameters received and validated",
+            "mode": mode,
+            "training_data_count": len(training_data),
+            "model_config": config_params if config_params else DEFAULT_CONFIG,
+            "training_config": training_config,
+            "model_info": gen.get_model_info(),
+        }
+        
+    except Exception as e:
+        error_msg = f"Training Error: {str(e)}\n{traceback.format_exc()}"
         print(f"❌ {error_msg}")
         return {"error": error_msg}
 
@@ -368,6 +615,7 @@ def model_config(job):
             "status": "success",
             "default_mode": DEFAULT_MODE,
             "default_config": DEFAULT_CONFIG,
+            "default_training_config": DEFAULT_TRAINING_CONFIG,
             "device": DEVICE,
             "cached_models": list(model_cache.keys()),
             "available_options": {
@@ -387,6 +635,29 @@ def model_config(job):
                     "num_heads": "アテンションヘッド数（デフォルト: 4）",
                     "lambda_entangle": "量子もつれ強度（デフォルト: 0.5）",
                 },
+                "training": {
+                    "epochs": "エポック数（デフォルト: 10）",
+                    "batch_size": "バッチサイズ（デフォルト: 32）",
+                    "gradient_accumulation_steps": "勾配累積ステップ数（デフォルト: 1）",
+                    "learning_rate": "学習率（デフォルト: 1e-4）",
+                    "min_learning_rate": "最小学習率（デフォルト: 1e-6）",
+                    "weight_decay": "重み減衰（デフォルト: 0.01）",
+                    "warmup_steps": "ウォームアップステップ数（デフォルト: 100）",
+                    "lr_scheduler": "学習率スケジューラー: cosine, linear, constant（デフォルト: cosine）",
+                    "max_temperature": "最大サンプリング温度（デフォルト: 1.5）",
+                    "min_temperature": "最小サンプリング温度（デフォルト: 0.1）",
+                    "temperature_decay": "温度減衰方式: linear, exponential, cosine（デフォルト: linear）",
+                    "max_grad_norm": "勾配クリッピング閾値（デフォルト: 1.0）",
+                    "label_smoothing": "ラベルスムージング係数（デフォルト: 0.1）",
+                    "eval_steps": "評価間隔ステップ数（デフォルト: 500）",
+                    "save_steps": "モデル保存間隔ステップ数（デフォルト: 1000）",
+                    "logging_steps": "ログ出力間隔ステップ数（デフォルト: 100）",
+                    "early_stopping_patience": "早期停止patience（デフォルト: 3）",
+                    "early_stopping_threshold": "早期停止閾値（デフォルト: 0.001）",
+                    "train_split": "学習データ分割比率（デフォルト: 0.9）",
+                    "shuffle": "データシャッフル有効化（デフォルト: true）",
+                    "seed": "乱数シード（デフォルト: 42）",
+                },
             },
             "example_request": {
                 "input": {
@@ -396,6 +667,20 @@ def model_config(job):
                     "connection_density": 0.3,
                     "max_tokens": 64,
                     "temperature": 0.7
+                }
+            },
+            "example_training_request": {
+                "input": {
+                    "action": "train",
+                    "training_data": ["テキスト1", "テキスト2", "..."],
+                    "mode": "layered",
+                    "epochs": 20,
+                    "batch_size": 16,
+                    "learning_rate": 5e-5,
+                    "max_temperature": 1.2,
+                    "min_temperature": 0.3,
+                    "warmup_steps": 200,
+                    "early_stopping_patience": 5
                 }
             }
         }
@@ -438,9 +723,13 @@ if __name__ == "__main__":
     print("   Brain Mode: 脳型散在QBNN")
     print("   Layered Mode: 層状QBNN-Transformer")
     print("=" * 60)
-    print("\n📋 デフォルト設定:")
+    print("\n📋 デフォルトモデル設定:")
     print(f"   Mode: {DEFAULT_MODE}")
     for key, value in DEFAULT_CONFIG.items():
+        print(f"   {key}: {value}")
+    
+    print("\n📚 デフォルト学習設定:")
+    for key, value in DEFAULT_TRAINING_CONFIG.items():
         print(f"   {key}: {value}")
     print()
     
@@ -450,4 +739,5 @@ if __name__ == "__main__":
     # RunPod Serverless を開始
     runpod.serverless.start({
         "handler": handler,
+        "train": train_handler,
     })
