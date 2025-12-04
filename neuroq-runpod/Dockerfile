@@ -12,9 +12,9 @@ COPY handler.py /app/
 COPY neuroq_model.py /app/
 COPY requirements.txt /app/
 
-# モデルファイルをコピー（存在する場合）
-COPY neuroq_*.pt /app/ 2>/dev/null || true
-COPY neuroq_*.json /app/ 2>/dev/null || true
+# モデルファイルとトークナイザーをコピー
+# （ビルド前に学習済みモデルを配置してください）
+COPY . /app/
 
 # 依存関係をインストール
 RUN pip install --no-cache-dir -r requirements.txt
