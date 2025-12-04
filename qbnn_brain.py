@@ -498,6 +498,16 @@ class QBNNBrain:
 # PyTorch版（学習可能、動的入出力対応）
 # ========================================
 
+def get_device():
+    """デバイス選択: MPS (Apple Silicon) > CUDA > CPU"""
+    if torch.backends.mps.is_available():
+        return torch.device("mps")
+    elif torch.cuda.is_available():
+        return torch.device("cuda")
+    else:
+        return torch.device("cpu")
+
+
 class QBNNBrainTorch(nn.Module):
     """
     PyTorch版 脳型QBNN（学習可能、動的入出力）
@@ -508,12 +518,19 @@ class QBNNBrainTorch(nn.Module):
     def __init__(self, num_neurons: int = 50, 
                  max_input_size: int = 20, 
                  max_output_size: int = 10,
-                 connection_density: float = 0.2):
+                 connection_density: float = 0.2,
+                 device: torch.device = None):
         super().__init__()
         
         self.num_neurons = num_neurons
         self.max_input_size = max_input_size
         self.max_output_size = max_output_size
+        
+        # デバイス設定
+        if device is None:
+            self.device = get_device()
+        else:
+            self.device = device
         
         # 各ニューロンの量子状態パラメータ θ
         self.theta = nn.Parameter(torch.rand(num_neurons) * 1.0 + 0.25)
@@ -674,19 +691,31 @@ class QBNNBrainTorch(nn.Module):
 # デモ
 # ========================================
 
-def demo_brain_qbnn():
-    """脳型QBNNのデモ（動的入出力版）"""
+def demo_brain_qbnn(num_neurons: int = 50):
+    """
+    脳型QBNNのデモ（動的入出力版）
+    
+    Args:
+        num_neurons: ニューロン数（デフォルト: 50）
+    """
+    # デバイス選択
+    device = get_device()
+    device_name = "Apple Silicon GPU (MPS)" if device.type == "mps" else \
+                  "NVIDIA GPU (CUDA)" if device.type == "cuda" else "CPU"
+    
     print("=" * 60)
     print("🧠 QBNN Brain - 脳型散在量子ビットネットワーク")
     print("   入力/出力が動的に変化する本物の脳のようなモデル")
+    print(f"   デバイス: {device_name}")
+    print(f"   ニューロン数: {num_neurons}")
     print("=" * 60)
     
     # 純粋Python版
-    print("\n📌 純粋Python版（50ニューロン、動的入出力）")
+    print(f"\n📌 純粋Python版（{num_neurons}ニューロン、動的入出力）")
     print("-" * 40)
     
     brain = QBNNBrain(
-        num_neurons=50,
+        num_neurons=num_neurons,
         connection_density=0.15,
         plasticity=0.1
     )
@@ -742,18 +771,19 @@ def demo_brain_qbnn():
     
     # PyTorch版
     print("\n" + "=" * 60)
-    print("📌 PyTorch版（学習可能、動的入出力）")
+    print(f"📌 PyTorch版（{num_neurons}ニューロン、学習可能、動的入出力）")
     print("-" * 40)
     
     model = QBNNBrainTorch(
-        num_neurons=40,
+        num_neurons=num_neurons,
         max_input_size=10,
         max_output_size=5,
-        connection_density=0.2
-    )
+        connection_density=0.2,
+        device=device
+    ).to(device)
     
     # 推論テスト
-    x = torch.tensor([[0.5, -0.3, 0.8, -0.1, 0.6]], dtype=torch.float32)
+    x = torch.tensor([[0.5, -0.3, 0.8, -0.1, 0.6]], dtype=torch.float32).to(device)
     output, in_idx, out_idx = model(x, input_size=5, output_size=3, time_steps=3)
     
     print(f"\n入力: {x[0].tolist()}")
@@ -786,14 +816,14 @@ def demo_brain_qbnn():
         [0, 1, 0, 0, 0],
         [1, 0, 0, 0, 0],
         [1, 1, 0, 0, 0],
-    ], dtype=torch.float32)
+    ], dtype=torch.float32).to(device)
     
     y = torch.tensor([
         [0, 0, 0],
         [1, 0, 0],
         [1, 0, 0],
         [0, 0, 0],
-    ], dtype=torch.float32)
+    ], dtype=torch.float32).to(device)
     
     optimizer = torch.optim.Adam(model.parameters(), lr=0.01)
     criterion = nn.MSELoss()
@@ -876,6 +906,12 @@ def compare_architectures():
 
 
 if __name__ == '__main__':
+    import argparse
+    
+    parser = argparse.ArgumentParser(description='QBNN Brain - 脳型散在量子ビットネットワーク')
+    parser.add_argument('--neurons', type=int, default=50, help='ニューロン数 (デフォルト: 50)')
+    args = parser.parse_args()
+    
     compare_architectures()
-    brain, model = demo_brain_qbnn()
+    brain, model = demo_brain_qbnn(num_neurons=args.neurons)
 

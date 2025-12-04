@@ -663,15 +663,30 @@ class EQBNNGenerativeAI:
     """Entangled QBNN 生成AI"""
     
     def __init__(self, embed_dim=128, hidden_dims=[256, 256], 
-                 entangle_strength=0.5, max_vocab_size=3000):
+                 entangle_strength=0.5, max_vocab_size=3000,
+                 num_neurons: int = None):  # ニューロン数指定可能
         self.embed_dim = embed_dim
-        self.hidden_dims = hidden_dims
+        # num_neuronsが指定されたらhidden_dimsを上書き
+        if num_neurons is not None:
+            self.hidden_dims = [num_neurons, num_neurons]
+        else:
+            self.hidden_dims = hidden_dims
         self.entangle_strength = entangle_strength
         self.max_vocab_size = max_vocab_size
         
         self.tokenizer = SimpleTokenizer(max_vocab_size)
         self.model = None
-        self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+        
+        # デバイス選択: MPS (Apple Silicon) > CUDA > CPU
+        if torch.backends.mps.is_available():
+            self.device = torch.device("mps")
+            print("🍎 Apple Silicon GPU (MPS) を使用")
+        elif torch.cuda.is_available():
+            self.device = torch.device("cuda")
+            print("🎮 NVIDIA GPU (CUDA) を使用")
+        else:
+            self.device = torch.device("cpu")
+            print("💻 CPU を使用")
     
     def train(self, texts, epochs=10, batch_size=32, lr=0.001, seq_length=64):
         """モデルを学習"""
@@ -886,16 +901,24 @@ def visualize_entanglement(ai, save_path=None):
 # 10. メイン実行
 # ========================================================================
 
-def main(lang='en'):
+def main(lang='en', num_neurons: int = 128):
+    """
+    メイン関数
+    
+    Args:
+        lang: 言語 ('en' or 'ja')
+        num_neurons: ニューロン数 (デフォルト: 128)
+    """
     print("\n🔧 E-QBNN 生成AI を構築中...")
+    print(f"   ニューロン数: {num_neurons}")
     
     # 1. データ取得
     texts = fetch_common_crawl_sample(max_samples=500, min_length=30, lang=lang)
     
-    # 2. AI構築
+    # 2. AI構築（ニューロン数を指定）
     ai = EQBNNGenerativeAI(
         embed_dim=64,
-        hidden_dims=[128, 128, 64],  # 3層の隠れ層
+        num_neurons=num_neurons,  # ニューロン数を指定
         entangle_strength=0.5,
         max_vocab_size=2000
     )
@@ -1122,12 +1145,18 @@ def chat_mode(lang='en'):
 
 if __name__ == "__main__":
     import sys
+    import argparse
     
-    # 言語オプション
-    lang = 'ja' if '--ja' in sys.argv else 'en'
+    parser = argparse.ArgumentParser(description='E-QBNN 生成AI')
+    parser.add_argument('--neurons', type=int, default=128, help='ニューロン数 (デフォルト: 128)')
+    parser.add_argument('--ja', action='store_true', help='日本語モード')
+    parser.add_argument('--chat', action='store_true', help='チャットモード')
+    args = parser.parse_args()
     
-    if '--chat' in sys.argv:
+    lang = 'ja' if args.ja else 'en'
+    
+    if args.chat:
         chat_mode(lang=lang)
     else:
-        main(lang=lang)
+        main(lang=lang, num_neurons=args.neurons)
 

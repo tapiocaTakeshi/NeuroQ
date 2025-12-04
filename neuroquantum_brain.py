@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-NeuroQuantum Brain - 脳型散在QBNNによる生成AI
-=============================================
+ニューロQ Brain - 脳型散在QBNNによる生成AI
+==========================================
 qbnn_brain.py を基盤とした生成AI実装
 
 従来の層状構造ではなく、ニューロン（量子ビット）が
@@ -49,7 +49,7 @@ except ImportError:
 
 
 print("=" * 70)
-print("🧠⚛️ NeuroQuantum Brain")
+print("🧠⚛️ ニューロQ Brain")
 print("   脳型散在量子ビットネットワークによる生成AI")
 print("   (qbnn_brain.py ベース)")
 print("=" * 70)
@@ -395,12 +395,12 @@ class BrainQuantumBlock(nn.Module):
 
 
 # ========================================
-# NeuroQuantum Brain モデル
+# ニューロQ Brain モデル
 # ========================================
 
 class NeuroQuantumBrain(nn.Module):
     """
-    NeuroQuantum Brain - 脳型散在QBNNによるLLM
+    ニューロQ Brain - 脳型散在QBNNによるLLM
     """
     
     def __init__(self, vocab_size: int, embed_dim: int = 128,
@@ -707,14 +707,14 @@ class BrainTokenizer:
 
 
 # ========================================
-# NeuroQuantum Brain AI
+# ニューロQ Brain AI
 # ========================================
 
 class NeuroQuantumBrainAI:
-    """NeuroQuantum Brain 生成AI"""
+    """ニューロQ Brain 生成AI"""
     
     def __init__(self, embed_dim: int = 128, num_heads: int = 4,
-                 num_layers: int = 3, num_neurons: int = 100_000_000_000,
+                 num_layers: int = 3, num_neurons: int = 75,
                  max_vocab: int = 50000):
         self.embed_dim = embed_dim
         self.num_heads = num_heads
@@ -724,7 +724,17 @@ class NeuroQuantumBrainAI:
         
         self.tokenizer = BrainTokenizer(max_vocab)
         self.model = None
-        self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+        
+        # デバイス選択: MPS (Apple Silicon) > CUDA > CPU
+        if torch.backends.mps.is_available():
+            self.device = torch.device("mps")
+            print("🍎 Apple Silicon GPU (MPS) を使用")
+        elif torch.cuda.is_available():
+            self.device = torch.device("cuda")
+            print("🎮 NVIDIA GPU (CUDA) を使用")
+        else:
+            self.device = torch.device("cpu")
+            print("💻 CPU を使用")
     
     def train(self, texts: List[str], epochs: int = 20, batch_size: int = 16,
               lr: float = 0.001, seq_length: int = 64):
@@ -1074,7 +1084,7 @@ def get_training_data(use_huggingface: bool = False) -> List[str]:
 def chat_mode(ai: NeuroQuantumBrainAI):
     """対話モード"""
     print("\n" + "=" * 60)
-    print("💬 NeuroQuantum Brain チャットモード")
+    print("💬 ニューロQ Brain チャットモード")
     print("=" * 60)
     print("コマンド:")
     print("  /quit, /exit      - 終了")
@@ -1129,7 +1139,7 @@ def chat_mode(ai: NeuroQuantumBrainAI):
             # 生成（温度範囲制約）
             response = ai.generate(user_input, max_length=max_length, 
                                    temperature_min=temp_min, temperature_max=temp_max)
-            print(f"\n🧠 Brain: {response}")
+            print(f"\n🧠 ニューロQ: {response}")
             
         except KeyboardInterrupt:
             print("\n\n👋 さようなら！")
@@ -1142,8 +1152,15 @@ def chat_mode(ai: NeuroQuantumBrainAI):
 # メイン
 # ========================================
 
-def main():
-    print("\n🔧 NeuroQuantum Brain を構築中...")
+def main(num_neurons: int = 100):
+    """
+    メイン関数
+    
+    Args:
+        num_neurons: ニューロン数（デフォルト: 100）
+    """
+    print("\n🔧 ニューロQ Brain を構築中...")
+    print(f"   ニューロン数: {num_neurons}")
     
     # 学習データ取得
     texts = get_training_data()
@@ -1154,7 +1171,7 @@ def main():
         embed_dim=128,
         num_heads=4,
         num_layers=3,
-        num_neurons=100_000_000_000,
+        num_neurons=num_neurons,  # ニューロン数を指定
         max_vocab=2000
     )
     
@@ -1185,9 +1202,15 @@ def main():
     if response == 'y':
         chat_mode(ai)
     
-    print("\n✅ NeuroQuantum Brain 完成！")
+    print("\n✅ ニューロQ Brain 完成！")
 
 
 if __name__ == '__main__':
-    main()
+    import argparse
+    parser = argparse.ArgumentParser(description='ニューロQ Brain - 脳型散在QBNNによる生成AI')
+    parser.add_argument('--neurons', type=int, default=100, help='ニューロン数 (デフォルト: 100)')
+    parser.add_argument('--chat', action='store_true', help='チャットモードで起動')
+    args = parser.parse_args()
+    
+    main(num_neurons=args.neurons)
 
