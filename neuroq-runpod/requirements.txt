@@ -1,0 +1,15 @@
+# NeuroQ RunPod Serverless Requirements
+# =====================================
+
+# RunPod SDK
+runpod>=1.6.0
+
+# PyTorch (CUDA対応版)
+torch>=2.0.0
+
+# 数値計算
+numpy>=1.24.0
+
+# その他ユーティリティ
+typing_extensions>=4.0.0
+

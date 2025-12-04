@@ -1,0 +1,5 @@
+{
+  "mode": "brain",
+  "model_file": "neuroq_brain_model.pt",
+  "tokenizer_file": "neuroq_tokenizer.json"
+}

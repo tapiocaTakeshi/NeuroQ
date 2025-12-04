@@ -16,7 +16,7 @@
 ║   ╚██████╔╝╚██████╔╝██║  ██║██║ ╚████║   ██║   ╚██████╔╝██║ ╚═╝ ██║          ║
 ║    ╚══▀▀═╝  ╚═════╝ ╚═╝  ╚═╝╚═╝  ╚═══╝   ╚═╝    ╚═════╝ ╚═╝     ╚═╝          ║
 ║                                                                               ║
-║   QBNN-LLM: Quantum-Bit Neural Network Language Model                        ║
+║   ニューロQ: Quantum-Bit Neural Network Language Model                       ║
 ║   独自の量子もつれニューラルネットワークによる生成AI                          ║
 ║                                                                               ║
 ║   参照元: qbnn_layered.py                                                     ║
@@ -58,7 +58,7 @@ except ImportError:
 # ========================================
 
 class NeuroQuantumConfig:
-    """NeuroQuantum設定"""
+    """ニューロQ設定"""
     def __init__(
         self,
         vocab_size: int = 8000,
@@ -331,7 +331,7 @@ class QBNNTransformerBlock(nn.Module):
 
 class NeuroQuantumEmbedding(nn.Module):
     """
-    NeuroQuantum 埋め込み層
+    ニューロQ 埋め込み層
     
     Token → ベクトル変換 + 位置エンコーディング
     """
@@ -374,7 +374,7 @@ class NeuroQuantumEmbedding(nn.Module):
 
 class NeuroQuantumHead(nn.Module):
     """
-    NeuroQuantum 出力ヘッド
+    ニューロQ 出力ヘッド
     
     ベクトル → 語彙確率への変換
     """
@@ -395,12 +395,12 @@ class NeuroQuantumHead(nn.Module):
 
 
 # ========================================
-# Part 6: NeuroQuantum モデル本体
+# Part 6: ニューロQ モデル本体
 # ========================================
 
 class NeuroQuantum(nn.Module):
     """
-    NeuroQuantum: QBNN-LLM
+    ニューロQ: QBNN-LLM
     
     完全なアーキテクチャ:
     [Token] → [Embedding] → [QBNN-Transformer × N] → [Output Head] → [確率]
@@ -477,7 +477,7 @@ class NeuroQuantum(nn.Module):
 
 class NeuroQuantumTokenizer:
     """
-    NeuroQuantum トークナイザー
+    ニューロQ トークナイザー
     
     文字レベル + サブワード対応
     """
@@ -570,27 +570,38 @@ class NeuroQuantumTokenizer:
 
 
 # ========================================
-# Part 8: NeuroQuantum AI（生成AI本体）
+# Part 8: ニューロQ AI（生成AI本体）
 # ========================================
 
 class NeuroQuantumAI:
     """
-    NeuroQuantum AI
+    ニューロQ AI
     
     QBNN-LLM による生成AI
+    
+    ニューロン数（hidden_dim）を指定可能
     """
     
     def __init__(
         self,
-        embed_dim: int = 256,
-        hidden_dim: int = 512,
-        num_heads: int = 8,
-        num_layers: int = 6,
-        max_seq_len: int = 512,
+        embed_dim: int = 48,
+        hidden_dim: int = 96,       # ニューロン数（FFN層の次元）
+        num_heads: int = 4,
+        num_layers: int = 2,
+        max_seq_len: int = 128,
         dropout: float = 0.1,
         lambda_entangle: float = 0.5,
     ):
-        self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+        # デバイス選択: MPS (Apple Silicon) > CUDA > CPU
+        if torch.backends.mps.is_available():
+            self.device = torch.device("mps")
+            print("🍎 Apple Silicon GPU (MPS) を使用")
+        elif torch.cuda.is_available():
+            self.device = torch.device("cuda")
+            print("🎮 NVIDIA GPU (CUDA) を使用")
+        else:
+            self.device = torch.device("cpu")
+            print("💻 CPU を使用")
         
         self.embed_dim = embed_dim
         self.hidden_dim = hidden_dim
@@ -608,7 +619,7 @@ class NeuroQuantumAI:
               lr: float = 0.001, seq_len: int = 64):
         """学習"""
         print("\n" + "=" * 70)
-        print("📚 NeuroQuantum 学習開始")
+        print("📚 ニューロQ 学習開始")
         print("=" * 70)
         
         # トークナイザー構築
@@ -618,7 +629,7 @@ class NeuroQuantumAI:
         print(f"   語彙サイズ: {self.tokenizer.actual_vocab_size}")
         
         # モデル構築
-        print("\n🧠 NeuroQuantumモデル構築...")
+        print("\n🧠 ニューロQモデル構築...")
         self.config = NeuroQuantumConfig(
             vocab_size=self.tokenizer.actual_vocab_size,
             embed_dim=self.embed_dim,
@@ -809,7 +820,7 @@ class NeuroQuantumAI:
     def chat(self):
         """対話モード"""
         print("\n" + "=" * 70)
-        print("💬 NeuroQuantum チャットモード")
+        print("💬 ニューロQ チャットモード")
         print("=" * 70)
         print("\nコマンド:")
         print("  /quit         - 終了")
@@ -861,7 +872,7 @@ class NeuroQuantumAI:
                     continue
                 
                 if user_input == '/info':
-                    print(f"\n📊 NeuroQuantum モデル情報:")
+                    print(f"\n📊 ニューロQ モデル情報:")
                     print(f"   語彙サイズ: {self.tokenizer.actual_vocab_size}")
                     print(f"   埋め込み次元: {self.embed_dim}")
                     print(f"   隠れ層次元: {self.hidden_dim}")
@@ -877,7 +888,7 @@ class NeuroQuantumAI:
                     continue
                 
                 # 生成
-                print(f"\n🤖 NeuroQuantum: ", end="", flush=True)
+                print(f"\n🤖 ニューロQ: ", end="", flush=True)
                 response = self.generate(
                     prompt=user_input,
                     max_length=max_length,
@@ -1054,14 +1065,14 @@ def get_training_data() -> List[str]:
         # ========================================
         # 日本語 - 挨拶（バリエーション多数）
         # ========================================
-        ("こんにちは", "こんにちは！私はNeuroQuantumです。何かお手伝いできることはありますか？"),
+        ("こんにちは", "こんにちは！私はニューロQです。何かお手伝いできることはありますか？"),
         ("こんにちは！", "こんにちは！今日はどのようなご用件でしょうか？"),
         ("こんにちわ", "こんにちは！何かご質問がありますか？"),
         ("おはよう", "おはようございます！今日も良い一日になりますように。何かお手伝いしましょうか？"),
         ("おはようございます", "おはようございます！今日はどのようなご用件でしょうか？"),
         ("こんばんは", "こんばんは！夜遅くまでお疲れ様です。何かお手伝いできることはありますか？"),
         ("やあ", "やあ！何か質問がありますか？お気軽にどうぞ。"),
-        ("ハロー", "ハロー！私はNeuroQuantumです。何でも聞いてください！"),
+        ("ハロー", "ハロー！私はニューロQです。何でも聞いてください！"),
         ("どうも", "どうも！何かお手伝いしましょうか？"),
         ("ありがとう", "どういたしまして！お役に立てて嬉しいです。"),
         ("ありがとうございます", "どういたしまして！他にご質問がありましたら、お気軽にどうぞ。"),
@@ -1073,15 +1084,15 @@ def get_training_data() -> List[str]:
         # ========================================
         # 日本語 - 自己紹介
         # ========================================
-        ("あなたは誰ですか", "私はNeuroQuantumです。QBNNという独自の量子ニューラルネットワーク技術を使った生成AIです。"),
-        ("あなたは誰", "私はNeuroQuantumという名前の生成AIです。よろしくお願いします。"),
-        ("誰ですか", "私はNeuroQuantumです。量子インスパイアードな技術で動いています。"),
-        ("名前は", "私の名前はNeuroQuantumです。よろしくお願いします。"),
-        ("名前を教えて", "私の名前はNeuroQuantumです。QBNNベースの生成AIとして作られました。"),
-        ("あなたの名前は何ですか", "私の名前はNeuroQuantumです。量子ビットニューラルネットワークを使っています。"),
+        ("あなたは誰ですか", "私はニューロQです。QBNNという独自の量子ニューラルネットワーク技術を使った生成AIです。"),
+        ("あなたは誰", "私はニューロQという名前の生成AIです。よろしくお願いします。"),
+        ("誰ですか", "私はニューロQです。量子インスパイアードな技術で動いています。"),
+        ("名前は", "私の名前はニューロQです。よろしくお願いします。"),
+        ("名前を教えて", "私の名前はニューロQです。QBNNベースの生成AIとして作られました。"),
+        ("あなたの名前は何ですか", "私の名前はニューロQです。量子ビットニューラルネットワークを使っています。"),
         ("何ができますか", "私は質問に答えたり、情報を提供したりすることができます。量子コンピューティングやAIについて詳しいです。"),
         ("何ができるの", "私は様々な質問に答えることができます。特に量子コンピューティングやAI、科学技術について詳しいです。"),
-        ("自己紹介して", "私はNeuroQuantumです。QBNNという独自技術を使った生成AIで、量子もつれを模倣した計算を行います。"),
+        ("自己紹介して", "私はニューロQです。QBNNという独自技術を使った生成AIで、量子もつれを模倣した計算を行います。"),
         ("どんなAIですか", "私はQBNNベースの生成AIです。量子もつれを模倣した独自の技術で動作しています。"),
         
         # ========================================
@@ -1133,8 +1144,8 @@ def get_training_data() -> List[str]:
         ("QBNNとは何ですか", "QBNNは量子ビットニューラルネットワークの略称です。量子もつれを模倣した独自の技術で、通常のニューラルネットワークを拡張しています。"),
         ("QBNNとは", "QBNNは、量子的な概念をニューラルネットワークに取り入れた独自のアーキテクチャです。"),
         ("QBNNって何", "QBNNは、量子もつれを模倣したニューラルネットワークです。従来のNNに量子的な相互作用を追加しています。"),
-        ("NeuroQuantumとは", "NeuroQuantumは、QBNNを使った最先端の生成AIシステムです。私がそのNeuroQuantumです！"),
-        ("NeuroQuantumって何", "NeuroQuantumは私の名前です。QBNNという独自技術を使った生成AIとして作られました。"),
+        ("ニューロQとは", "ニューロQは、QBNNを使った最先端の生成AIシステムです。私がそのニューロQです！"),
+        ("ニューロQって何", "ニューロQは私の名前です。QBNNという独自技術を使った生成AIとして作られました。"),
         ("APQBとは", "APQBは調整可能擬似量子ビットの略称で、量子状態を古典的なコンピュータ上で模倣する技術です。"),
         ("もつれテンソルとは", "もつれテンソルJは、ニューラルネットワークの層間の量子的な結合を表現するパラメータです。QBNNの独自技術です。"),
         ("ラムダパラメータとは", "ラムダパラメータ（λ）は、QBNNにおける量子もつれの強度を制御する学習可能な値です。"),
@@ -1164,7 +1175,7 @@ def get_training_data() -> List[str]:
         # ========================================
         # 英語 - Greetings
         # ========================================
-        ("Hello", "Hello! I'm NeuroQuantum. How can I help you today?"),
+        ("Hello", "Hello! I'm NeuroQ. How can I help you today?"),
         ("Hi", "Hi there! What can I do for you?"),
         ("Hey", "Hey! How can I assist you today?"),
         ("Good morning", "Good morning! I hope you have a wonderful day. How can I help?"),
@@ -1179,11 +1190,11 @@ def get_training_data() -> List[str]:
         # ========================================
         # 英語 - About self
         # ========================================
-        ("Who are you", "I am NeuroQuantum, a generative AI system based on QBNN technology."),
-        ("What is your name", "My name is NeuroQuantum. Nice to meet you!"),
-        ("What are you", "I am NeuroQuantum, an AI assistant powered by Quantum-Bit Neural Network technology."),
+        ("Who are you", "I am NeuroQ, a generative AI system based on QBNN technology."),
+        ("What is your name", "My name is NeuroQ. Nice to meet you!"),
+        ("What are you", "I am NeuroQ, an AI assistant powered by Quantum-Bit Neural Network technology."),
         ("What can you do", "I can answer questions, provide information, and have conversations about various topics, especially AI and quantum computing."),
-        ("Tell me about yourself", "I am NeuroQuantum, a QBNN-based generative AI. I use quantum-inspired technology to process and generate text."),
+        ("Tell me about yourself", "I am NeuroQ, a QBNN-based generative AI. I use quantum-inspired technology to process and generate text."),
         
         # ========================================
         # 英語 - Quantum
@@ -1194,7 +1205,7 @@ def get_training_data() -> List[str]:
         ("What is quantum entanglement", "Quantum entanglement is a phenomenon where two or more qubits become correlated. Measuring one instantly affects the others."),
         ("What is superposition", "Superposition is a quantum property where particles can exist in multiple states at once until measured."),
         ("What is QBNN", "QBNN stands for Quantum-Bit Neural Network. It's a unique technology that extends neural networks with quantum-inspired entanglement."),
-        ("What is NeuroQuantum", "NeuroQuantum is a generative AI system based on QBNN technology. That's me!"),
+        ("What is NeuroQ", "NeuroQ is a generative AI system based on QBNN technology. That's me!"),
         
         # ========================================
         # 英語 - AI
@@ -1220,7 +1231,7 @@ def get_training_data() -> List[str]:
         ("コンピュータとは", "コンピュータは、プログラムに従って計算や処理を行う電子機械です。"),
         ("インターネットとは", "インターネットは、世界中のコンピュータをつなぐネットワークです。"),
         ("How are you", "I'm doing great, thank you for asking! How can I help you today?"),
-        ("Are you a robot", "I am an AI, specifically a QBNN-based generative model called NeuroQuantum."),
+        ("Are you a robot", "I am an AI, specifically a QBNN-based generative model called NeuroQ."),
         ("Can you help me", "Of course! What do you need help with?"),
         ("I have a question", "Sure, go ahead and ask! I'll do my best to help."),
         ("Tell me a joke", "Why did the quantum physicist break up with the biologist? Because there was no chemistry, only uncertainty!"),
@@ -1327,7 +1338,7 @@ def get_training_data() -> List[str]:
         ("How does quantum computing work", "Quantum computing uses quantum bits that can exist in multiple states to perform parallel calculations."),
         ("Why is AI important", "AI is important because it can automate tasks, analyze data, and solve complex problems efficiently."),
         ("Why study programming", "Programming enables you to create software, automate tasks, and understand how technology works."),
-        ("Tell me about yourself", "I am NeuroQuantum, an AI assistant built using QBNN technology. I'm here to help answer your questions."),
+        ("Tell me about yourself", "I am NeuroQ, an AI assistant built using QBNN technology. I'm here to help answer your questions."),
         ("What makes you special", "I use a unique Quantum-Bit Neural Network architecture that incorporates quantum-inspired entanglement."),
         ("Are you smart", "I can process information and provide helpful responses, but I don't have consciousness like humans do."),
         ("Do you learn", "I was trained on data, but I don't continue learning from our conversation in real-time."),
@@ -1353,7 +1364,13 @@ def get_training_data() -> List[str]:
 # メイン
 # ========================================
 
-def main():
+def main(num_neurons: int = 128):
+    """
+    メイン関数
+    
+    Args:
+        num_neurons: ニューロン数（hidden_dim、デフォルト: 128）
+    """
     print("""
 ╔═══════════════════════════════════════════════════════════════════════════════╗
 ║                                                                               ║
@@ -1367,18 +1384,22 @@ def main():
 ╚═══════════════════════════════════════════════════════════════════════════════╝
     """)
     
-    print("🧠⚛️ NeuroQuantum - QBNN-LLM 生成AI")
+    print("🧠⚛️ ニューロQ - QBNN-LLM 生成AI")
     print("=" * 70)
+    print(f"   ニューロン数: {num_neurons}")
     
-    # NeuroQuantum AI 作成（バランス版 - 速度と品質の両立）
+    # ニューロQ AI 作成（ニューロン数を指定）
+    # embed_dim は num_neurons / 2 程度に設定
+    embed_dim = max(32, num_neurons // 2)
+    
     ai = NeuroQuantumAI(
-        embed_dim=128,          # 適度なサイズ
-        hidden_dim=256,         
+        embed_dim=embed_dim,
+        hidden_dim=num_neurons,  # ニューロン数
         num_heads=4,            
-        num_layers=4,           
+        num_layers=2,
         max_seq_len=128,
         dropout=0.1,
-        lambda_entangle=0.35,   # θが動ける範囲
+        lambda_entangle=0.35,
     )
     
     # データ取得（ローカルデータ使用 - 高品質・安定）
@@ -1406,7 +1427,7 @@ def main():
     for question in questions:
         print(f"\n👤 User: {question}")
         response = ai.generate(question, max_length=80, temp_min=0.4, temp_max=0.8)
-        print(f"🤖 NeuroQuantum: {response}")
+        print(f"🤖 ニューロQ: {response}")
     
     # チャットモード
     print("\n" + "=" * 70)
@@ -1420,9 +1441,15 @@ def main():
     except:
         pass
     
-    print("\n✅ NeuroQuantum 完了！")
+    print("\n✅ ニューロQ 完了！")
 
 
 if __name__ == "__main__":
-    main()
+    import argparse
+    parser = argparse.ArgumentParser(description='ニューロQ - QBNN-LLM 生成AI')
+    parser.add_argument('--neurons', type=int, default=128, help='ニューロン数 (デフォルト: 128)')
+    parser.add_argument('--chat', action='store_true', help='チャットモードで起動')
+    args = parser.parse_args()
+    
+    main(num_neurons=args.neurons)
 
