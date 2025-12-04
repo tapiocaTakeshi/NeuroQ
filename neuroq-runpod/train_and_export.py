@@ -113,10 +113,12 @@ def train_layered_model(
     hidden_dim: int = 256,
     num_heads: int = 4,
     num_layers: int = 3,
+    lambda_entangle: float = 0.5,
     epochs: int = 50,
     batch_size: int = 16,
     lr: float = 0.001,
     seq_len: int = 64,
+    dropout: float = 0.1,
 ):
     """Layeredモデルを学習"""
     
@@ -161,14 +163,15 @@ def train_layered_model(
     # モデル構築
     print("\n🧠 Layeredモデル構築...")
     config = NeuroQConfig(
+        mode='layered',
         vocab_size=tokenizer.actual_vocab_size,
         embed_dim=embed_dim,
         hidden_dim=hidden_dim,
         num_heads=num_heads,
         num_layers=num_layers,
         max_seq_len=256,
-        dropout=0.1,
-        lambda_entangle=0.5,
+        dropout=dropout,
+        lambda_entangle=lambda_entangle,
     )
     
     model = NeuroQModel(config).to(device)
@@ -177,6 +180,7 @@ def train_layered_model(
     print(f"   隠れ層次元: {hidden_dim}")
     print(f"   アテンションヘッド: {num_heads}")
     print(f"   レイヤー数: {num_layers}")
+    print(f"   量子もつれ強度: {lambda_entangle}")
     print(f"   総パラメータ数: {model.num_params:,}")
     
     # 学習
@@ -231,10 +235,14 @@ def train_layered_model(
 def train_brain_model(
     num_neurons: int = 1000,
     embed_dim: int = 128,
+    num_layers: int = 3,
+    connection_density: float = 0.25,
+    lambda_entangle: float = 0.35,
     epochs: int = 50,
     batch_size: int = 16,
     lr: float = 0.001,
     seq_len: int = 64,
+    dropout: float = 0.1,
 ):
     """Brainモデルを学習"""
     
@@ -285,17 +293,20 @@ def train_brain_model(
         embed_dim=embed_dim,
         hidden_dim=num_neurons * 2,  # Brainモードでも使用
         num_heads=4,
-        num_layers=3,
+        num_layers=num_layers,
         max_seq_len=256,
-        dropout=0.1,
-        connection_density=0.25,
+        dropout=dropout,
+        connection_density=connection_density,
+        lambda_entangle=lambda_entangle,
     )
     
     model = NeuroQModel(config).to(device)
     
     print(f"   ニューロン数: {num_neurons}")
     print(f"   埋め込み次元: {embed_dim}")
-    print(f"   レイヤー数: {config.num_layers}")
+    print(f"   レイヤー数: {num_layers}")
+    print(f"   接続密度: {connection_density}")
+    print(f"   量子もつれ強度: {lambda_entangle}")
     print(f"   総パラメータ数: {model.num_params:,}")
     
     # 学習
@@ -432,38 +443,82 @@ def test_generation(model, tokenizer, mode: str, device):
 # ========================================
 
 def main():
-    parser = argparse.ArgumentParser(description='NeuroQ 学習＆エクスポート')
+    parser = argparse.ArgumentParser(
+        description='NeuroQ 学習＆エクスポート',
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+使用例:
+  # Layered モード
+  python train_and_export.py --mode layered --hidden_dim 256 --heads 4 --layers 3
+
+  # Brain モード
+  python train_and_export.py --mode brain --num_neurons 1000 --connection_density 0.3
+
+  # 両モード共通オプション
+  python train_and_export.py --mode brain --epochs 100 --batch_size 32 --lr 0.0005
+        """
+    )
+    
+    # 共通オプション
     parser.add_argument('--mode', type=str, default='layered', choices=['brain', 'layered'],
                         help='モード: brain (脳型散在) または layered (層状)')
     parser.add_argument('--embed_dim', type=int, default=128, help='埋め込み次元')
-    parser.add_argument('--neurons', type=int, default=256, 
-                        help='ニューロン数 (brainモード) または隠れ層次元 (layeredモード)')
-    parser.add_argument('--heads', type=int, default=4, help='アテンションヘッド数 (layeredモードのみ)')
-    parser.add_argument('--layers', type=int, default=3, help='レイヤー数 (layeredモードのみ)')
+    parser.add_argument('--layers', type=int, default=3, help='レイヤー数')
     parser.add_argument('--epochs', type=int, default=50, help='エポック数')
     parser.add_argument('--batch_size', type=int, default=16, help='バッチサイズ')
     parser.add_argument('--lr', type=float, default=0.001, help='学習率')
+    parser.add_argument('--dropout', type=float, default=0.1, help='ドロップアウト率')
+    parser.add_argument('--seq_len', type=int, default=64, help='シーケンス長')
     parser.add_argument('--output_dir', type=str, default='.', help='出力ディレクトリ')
+    
+    # Brain モード専用オプション
+    brain_group = parser.add_argument_group('Brain Mode Options', '脳型散在QBNNの設定')
+    brain_group.add_argument('--num_neurons', type=int, default=100, 
+                             help='ニューロン数（Brainモード）')
+    brain_group.add_argument('--connection_density', type=float, default=0.25, 
+                             help='接続密度 0.0-1.0（Brainモード）')
+    brain_group.add_argument('--time_steps', type=int, default=3, 
+                             help='信号伝播ステップ数（Brainモード）')
+    brain_group.add_argument('--lambda_entangle', type=float, default=0.35, 
+                             help='量子もつれ強度（Brainモード）')
+    
+    # Layered モード専用オプション
+    layered_group = parser.add_argument_group('Layered Mode Options', '層状QBNN-Transformerの設定')
+    layered_group.add_argument('--hidden_dim', type=int, default=256, 
+                               help='隠れ層次元（Layeredモード）')
+    layered_group.add_argument('--heads', type=int, default=4, 
+                               help='アテンションヘッド数（Layeredモード）')
+    layered_group.add_argument('--lambda_layered', type=float, default=0.5, 
+                               help='量子もつれ強度（Layeredモード）')
+    
     args = parser.parse_args()
     
     # モードに応じて学習
     if args.mode == 'brain':
         model, tokenizer, config = train_brain_model(
-            num_neurons=args.neurons,
+            num_neurons=args.num_neurons,
             embed_dim=args.embed_dim,
+            num_layers=args.layers,
+            connection_density=args.connection_density,
+            lambda_entangle=args.lambda_entangle,
             epochs=args.epochs,
             batch_size=args.batch_size,
             lr=args.lr,
+            seq_len=args.seq_len,
+            dropout=args.dropout,
         )
     else:  # layered
         model, tokenizer, config = train_layered_model(
             embed_dim=args.embed_dim,
-            hidden_dim=args.neurons,
+            hidden_dim=args.hidden_dim,
             num_heads=args.heads,
             num_layers=args.layers,
+            lambda_entangle=args.lambda_layered,
             epochs=args.epochs,
             batch_size=args.batch_size,
             lr=args.lr,
+            seq_len=args.seq_len,
+            dropout=args.dropout,
         )
     
     # デバイス
