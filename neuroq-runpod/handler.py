@@ -31,6 +31,7 @@ import xml.etree.ElementTree as ET
 from typing import List, Dict, Optional, Generator
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import time
+import argparse
 
 from neuroq_model import (
     NeuroQGenerator, 
@@ -1409,15 +1410,112 @@ def health_check(job):
 
 
 # ========================================
+# コマンドライン引数
+# ========================================
+
+def parse_args():
+    """コマンドライン引数をパース"""
+    parser = argparse.ArgumentParser(
+        description="NeuroQ RunPod Serverless Worker - QBNN-LLM",
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter
+    )
+    
+    # 生成パラメータ
+    parser.add_argument(
+        "--max-tokens", "-m",
+        type=int,
+        default=128,
+        help="生成する最大トークン数"
+    )
+    parser.add_argument(
+        "--temperature", "-t",
+        type=float,
+        default=0.7,
+        help="サンプリング温度 (0.1-2.0)"
+    )
+    parser.add_argument(
+        "--top-k",
+        type=int,
+        default=40,
+        help="Top-K サンプリングのK値"
+    )
+    parser.add_argument(
+        "--top-p",
+        type=float,
+        default=0.9,
+        help="Top-P (Nucleus) サンプリングのP値"
+    )
+    
+    # モデル設定
+    parser.add_argument(
+        "--mode",
+        type=str,
+        choices=["brain", "layered"],
+        default=DEFAULT_MODE,
+        help="モデルモード: brain (脳型散在QBNN) or layered (層状QBNN-Transformer)"
+    )
+    parser.add_argument(
+        "--embed-dim",
+        type=int,
+        default=DEFAULT_CONFIG["embed_dim"],
+        help="埋め込み次元"
+    )
+    parser.add_argument(
+        "--num-layers",
+        type=int,
+        default=DEFAULT_CONFIG["num_layers"],
+        help="レイヤー数"
+    )
+    parser.add_argument(
+        "--num-neurons",
+        type=int,
+        default=DEFAULT_CONFIG["num_neurons"],
+        help="ニューロン数 (Brain Mode用)"
+    )
+    parser.add_argument(
+        "--hidden-dim",
+        type=int,
+        default=DEFAULT_CONFIG["hidden_dim"],
+        help="隠れ層次元 (Layered Mode用)"
+    )
+    
+    # 実行モード
+    parser.add_argument(
+        "--test",
+        action="store_true",
+        help="テストモードで実行（RunPodサーバーを起動せず、テスト生成を行う）"
+    )
+    parser.add_argument(
+        "--prompt", "-p",
+        type=str,
+        default="こんにちは",
+        help="テストモード時の入力プロンプト"
+    )
+    
+    return parser.parse_args()
+
+
+# ========================================
 # メイン
 # ========================================
 
 if __name__ == "__main__":
+    # コマンドライン引数をパース
+    args = parse_args()
+    
     print("=" * 60)
     print("🧠⚛️ NeuroQ RunPod Serverless Worker")
     print("   Brain Mode: 脳型散在QBNN")
     print("   Layered Mode: 層状QBNN-Transformer")
     print("=" * 60)
+    
+    print("\n📋 コマンドライン引数:")
+    print(f"   --max-tokens: {args.max_tokens}")
+    print(f"   --temperature: {args.temperature}")
+    print(f"   --top-k: {args.top_k}")
+    print(f"   --top-p: {args.top_p}")
+    print(f"   --mode: {args.mode}")
+    
     print("\n📋 デフォルトモデル設定:")
     print(f"   Mode: {DEFAULT_MODE}")
     for key, value in DEFAULT_CONFIG.items():
@@ -1441,13 +1539,42 @@ if __name__ == "__main__":
             print(f"     max_records: {config.get('max_records')}")
     print()
     
-    # 起動時にデフォルトモデルをプリロード
-    load_model()
+    # モデル設定を引数から構築
+    config_params = {
+        "embed_dim": args.embed_dim,
+        "num_layers": args.num_layers,
+        "num_neurons": args.num_neurons,
+        "hidden_dim": args.hidden_dim,
+    }
     
-    # RunPod Serverless を開始
-    runpod.serverless.start({
-        "handler": handler,
-        "train": train_handler,
-        "fetch_data": fetch_data_handler,
-        "data_source_config": data_source_config_handler,
-    })
+    # 起動時にモデルをプリロード
+    gen = load_model(args.mode, config_params)
+    
+    if args.test:
+        # テストモード: 生成テストを実行
+        print("\n🧪 テストモード: 生成テストを実行")
+        print(f"   Prompt: {args.prompt}")
+        print(f"   Max tokens: {args.max_tokens}")
+        print(f"   Temperature: {args.temperature}")
+        print()
+        
+        output = gen.generate(
+            prompt=args.prompt,
+            max_tokens=args.max_tokens,
+            temperature=args.temperature,
+            top_k=args.top_k,
+            top_p=args.top_p,
+        )
+        
+        print("📝 生成結果:")
+        print("-" * 40)
+        print(output)
+        print("-" * 40)
+    else:
+        # RunPod Serverless を開始
+        runpod.serverless.start({
+            "handler": handler,
+            "train": train_handler,
+            "fetch_data": fetch_data_handler,
+            "data_source_config": data_source_config_handler,
+        })
