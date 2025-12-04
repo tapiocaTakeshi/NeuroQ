@@ -23,6 +23,14 @@ import torch
 import os
 import traceback
 import json
+import requests
+import gzip
+import io
+import re
+import xml.etree.ElementTree as ET
+from typing import List, Dict, Optional, Generator
+from concurrent.futures import ThreadPoolExecutor, as_completed
+import time
 
 from neuroq_model import (
     NeuroQGenerator, 
@@ -97,6 +105,429 @@ DEFAULT_TRAINING_CONFIG = {
     "shuffle": True,
     "seed": int(os.environ.get("NEUROQ_SEED", "42")),
 }
+
+# デフォルトのデータソース設定
+DEFAULT_DATA_SOURCE_CONFIG = {
+    # Common Crawl設定
+    "common_crawl": {
+        "enabled": True,
+        "index_url": "https://index.commoncrawl.org",
+        "data_url": "https://data.commoncrawl.org",
+        "crawl_id": os.environ.get("COMMONCRAWL_ID", "CC-MAIN-2024-10"),  # 最新のクロールID
+        "max_records": int(os.environ.get("COMMONCRAWL_MAX_RECORDS", "1000")),
+        "languages": ["ja", "en"],  # 日本語と英語
+        "min_content_length": 100,
+        "max_content_length": 10000,
+    },
+    # PubMed設定
+    "pubmed": {
+        "enabled": True,
+        "base_url": "https://eutils.ncbi.nlm.nih.gov/entrez/eutils",
+        "api_key": os.environ.get("PUBMED_API_KEY", ""),  # オプション: レート制限緩和用
+        "max_records": int(os.environ.get("PUBMED_MAX_RECORDS", "1000")),
+        "search_terms": ["quantum computing", "neural network", "machine learning", "artificial intelligence"],
+        "retmax": 100,  # 1回のリクエストで取得する最大件数
+        "include_abstract": True,
+        "include_mesh_terms": True,
+    },
+}
+
+
+# ========================================
+# データローダークラス
+# ========================================
+
+class CommonCrawlLoader:
+    """
+    Common Crawlからテキストデータを取得するローダー
+    https://commoncrawl.org/
+    """
+    
+    def __init__(self, config: dict = None):
+        self.config = config or DEFAULT_DATA_SOURCE_CONFIG["common_crawl"]
+        self.index_url = self.config["index_url"]
+        self.data_url = self.config["data_url"]
+        self.crawl_id = self.config["crawl_id"]
+        
+    def search_index(self, query: str, limit: int = 100) -> List[dict]:
+        """
+        Common Crawl Indexを検索
+        """
+        try:
+            url = f"{self.index_url}/{self.crawl_id}-index"
+            params = {
+                "url": query,
+                "output": "json",
+                "limit": limit
+            }
+            response = requests.get(url, params=params, timeout=30)
+            
+            if response.status_code == 200:
+                results = []
+                for line in response.text.strip().split('\n'):
+                    if line:
+                        try:
+                            results.append(json.loads(line))
+                        except json.JSONDecodeError:
+                            continue
+                return results
+            return []
+        except Exception as e:
+            print(f"⚠️ Common Crawl Index検索エラー: {e}")
+            return []
+    
+    def fetch_warc_record(self, record: dict) -> Optional[str]:
+        """
+        WARCレコードからコンテンツを取得
+        """
+        try:
+            filename = record.get("filename")
+            offset = int(record.get("offset", 0))
+            length = int(record.get("length", 0))
+            
+            if not filename or length == 0:
+                return None
+            
+            url = f"{self.data_url}/{filename}"
+            headers = {"Range": f"bytes={offset}-{offset + length - 1}"}
+            
+            response = requests.get(url, headers=headers, timeout=60)
+            
+            if response.status_code in [200, 206]:
+                # gzip解凍
+                try:
+                    decompressed = gzip.decompress(response.content)
+                    content = decompressed.decode('utf-8', errors='ignore')
+                    
+                    # HTMLからテキストを抽出（簡易版）
+                    text = self._extract_text_from_html(content)
+                    return text
+                except:
+                    return None
+            return None
+        except Exception as e:
+            print(f"⚠️ WARCレコード取得エラー: {e}")
+            return None
+    
+    def _extract_text_from_html(self, html: str) -> str:
+        """
+        HTMLからテキストを抽出（簡易版）
+        """
+        # WARCヘッダーをスキップ
+        if "\r\n\r\n" in html:
+            parts = html.split("\r\n\r\n")
+            if len(parts) > 2:
+                html = "\r\n\r\n".join(parts[2:])
+        
+        # スクリプトとスタイルを除去
+        html = re.sub(r'<script[^>]*>.*?</script>', '', html, flags=re.DOTALL | re.IGNORECASE)
+        html = re.sub(r'<style[^>]*>.*?</style>', '', html, flags=re.DOTALL | re.IGNORECASE)
+        
+        # HTMLタグを除去
+        text = re.sub(r'<[^>]+>', ' ', html)
+        
+        # 特殊文字をデコード
+        text = re.sub(r'&nbsp;', ' ', text)
+        text = re.sub(r'&amp;', '&', text)
+        text = re.sub(r'&lt;', '<', text)
+        text = re.sub(r'&gt;', '>', text)
+        text = re.sub(r'&quot;', '"', text)
+        
+        # 余分な空白を整理
+        text = re.sub(r'\s+', ' ', text).strip()
+        
+        return text
+    
+    def load_data(self, domains: List[str] = None, max_records: int = None) -> List[str]:
+        """
+        Common Crawlからデータをロード
+        
+        Args:
+            domains: 検索するドメインのリスト（例: ["*.wikipedia.org", "*.news.yahoo.co.jp"]）
+            max_records: 取得する最大レコード数
+        """
+        if max_records is None:
+            max_records = self.config["max_records"]
+        
+        if domains is None:
+            domains = ["*.wikipedia.org", "*.news.yahoo.co.jp", "*.nhk.or.jp"]
+        
+        print(f"📥 Common Crawlからデータをロード中...")
+        print(f"   Crawl ID: {self.crawl_id}")
+        print(f"   対象ドメイン: {domains}")
+        print(f"   最大レコード数: {max_records}")
+        
+        texts = []
+        records_per_domain = max_records // len(domains)
+        
+        for domain in domains:
+            print(f"   🔍 検索中: {domain}")
+            records = self.search_index(domain, limit=records_per_domain)
+            
+            for record in records[:records_per_domain]:
+                text = self.fetch_warc_record(record)
+                if text:
+                    # 長さフィルター
+                    if self.config["min_content_length"] <= len(text) <= self.config["max_content_length"]:
+                        texts.append(text)
+                
+                if len(texts) >= max_records:
+                    break
+            
+            if len(texts) >= max_records:
+                break
+            
+            time.sleep(0.5)  # レート制限対策
+        
+        print(f"✅ Common Crawl: {len(texts)}件のテキストを取得")
+        return texts
+
+
+class PubMedLoader:
+    """
+    PubMedから論文データを取得するローダー
+    https://pubmed.ncbi.nlm.nih.gov/
+    """
+    
+    def __init__(self, config: dict = None):
+        self.config = config or DEFAULT_DATA_SOURCE_CONFIG["pubmed"]
+        self.base_url = self.config["base_url"]
+        self.api_key = self.config.get("api_key", "")
+        
+    def search(self, term: str, retmax: int = 100) -> List[str]:
+        """
+        PubMedを検索してPMIDのリストを取得
+        """
+        try:
+            url = f"{self.base_url}/esearch.fcgi"
+            params = {
+                "db": "pubmed",
+                "term": term,
+                "retmax": retmax,
+                "retmode": "json",
+                "sort": "relevance"
+            }
+            if self.api_key:
+                params["api_key"] = self.api_key
+            
+            response = requests.get(url, params=params, timeout=30)
+            
+            if response.status_code == 200:
+                data = response.json()
+                return data.get("esearchresult", {}).get("idlist", [])
+            return []
+        except Exception as e:
+            print(f"⚠️ PubMed検索エラー: {e}")
+            return []
+    
+    def fetch_abstracts(self, pmids: List[str]) -> List[dict]:
+        """
+        PMIDリストから論文情報を取得
+        """
+        if not pmids:
+            return []
+        
+        try:
+            url = f"{self.base_url}/efetch.fcgi"
+            params = {
+                "db": "pubmed",
+                "id": ",".join(pmids),
+                "rettype": "abstract",
+                "retmode": "xml"
+            }
+            if self.api_key:
+                params["api_key"] = self.api_key
+            
+            response = requests.get(url, params=params, timeout=60)
+            
+            if response.status_code == 200:
+                return self._parse_pubmed_xml(response.text)
+            return []
+        except Exception as e:
+            print(f"⚠️ PubMed論文取得エラー: {e}")
+            return []
+    
+    def _parse_pubmed_xml(self, xml_text: str) -> List[dict]:
+        """
+        PubMed XMLをパース
+        """
+        articles = []
+        try:
+            root = ET.fromstring(xml_text)
+            
+            for article in root.findall(".//PubmedArticle"):
+                try:
+                    # タイトル
+                    title_elem = article.find(".//ArticleTitle")
+                    title = title_elem.text if title_elem is not None and title_elem.text else ""
+                    
+                    # アブストラクト
+                    abstract_parts = []
+                    for abstract_text in article.findall(".//AbstractText"):
+                        if abstract_text.text:
+                            label = abstract_text.get("Label", "")
+                            if label:
+                                abstract_parts.append(f"{label}: {abstract_text.text}")
+                            else:
+                                abstract_parts.append(abstract_text.text)
+                    abstract = " ".join(abstract_parts)
+                    
+                    # MeSH Terms
+                    mesh_terms = []
+                    if self.config.get("include_mesh_terms", True):
+                        for mesh in article.findall(".//MeshHeading/DescriptorName"):
+                            if mesh.text:
+                                mesh_terms.append(mesh.text)
+                    
+                    # PMID
+                    pmid_elem = article.find(".//PMID")
+                    pmid = pmid_elem.text if pmid_elem is not None else ""
+                    
+                    # 著者
+                    authors = []
+                    for author in article.findall(".//Author"):
+                        lastname = author.find("LastName")
+                        forename = author.find("ForeName")
+                        if lastname is not None and lastname.text:
+                            name = lastname.text
+                            if forename is not None and forename.text:
+                                name = f"{forename.text} {lastname.text}"
+                            authors.append(name)
+                    
+                    # 出版年
+                    year_elem = article.find(".//PubDate/Year")
+                    year = year_elem.text if year_elem is not None else ""
+                    
+                    if title or abstract:
+                        articles.append({
+                            "pmid": pmid,
+                            "title": title,
+                            "abstract": abstract,
+                            "authors": authors,
+                            "year": year,
+                            "mesh_terms": mesh_terms
+                        })
+                except Exception as e:
+                    continue
+                    
+        except ET.ParseError as e:
+            print(f"⚠️ XML解析エラー: {e}")
+        
+        return articles
+    
+    def load_data(self, search_terms: List[str] = None, max_records: int = None) -> List[str]:
+        """
+        PubMedからデータをロード
+        
+        Args:
+            search_terms: 検索キーワードのリスト
+            max_records: 取得する最大レコード数
+        """
+        if max_records is None:
+            max_records = self.config["max_records"]
+        
+        if search_terms is None:
+            search_terms = self.config["search_terms"]
+        
+        print(f"📥 PubMedからデータをロード中...")
+        print(f"   検索キーワード: {search_terms}")
+        print(f"   最大レコード数: {max_records}")
+        
+        texts = []
+        records_per_term = max_records // len(search_terms)
+        retmax = min(self.config["retmax"], records_per_term)
+        
+        for term in search_terms:
+            print(f"   🔍 検索中: {term}")
+            pmids = self.search(term, retmax=retmax)
+            
+            if pmids:
+                articles = self.fetch_abstracts(pmids)
+                
+                for article in articles:
+                    # タイトルとアブストラクトを結合してテキスト化
+                    text_parts = []
+                    
+                    if article["title"]:
+                        text_parts.append(f"Title: {article['title']}")
+                    
+                    if article["abstract"] and self.config.get("include_abstract", True):
+                        text_parts.append(f"Abstract: {article['abstract']}")
+                    
+                    if article["mesh_terms"] and self.config.get("include_mesh_terms", True):
+                        text_parts.append(f"Keywords: {', '.join(article['mesh_terms'][:10])}")
+                    
+                    if text_parts:
+                        texts.append("\n".join(text_parts))
+                
+                if len(texts) >= max_records:
+                    break
+            
+            time.sleep(0.34)  # NCBI API制限: 1秒あたり3リクエスト
+        
+        print(f"✅ PubMed: {len(texts)}件のテキストを取得")
+        return texts[:max_records]
+
+
+class DataSourceManager:
+    """
+    複数のデータソースを管理するマネージャー
+    """
+    
+    def __init__(self, config: dict = None):
+        self.config = config or DEFAULT_DATA_SOURCE_CONFIG
+        self.loaders = {}
+        
+        # ローダーを初期化
+        if self.config.get("common_crawl", {}).get("enabled", True):
+            self.loaders["common_crawl"] = CommonCrawlLoader(self.config.get("common_crawl"))
+        
+        if self.config.get("pubmed", {}).get("enabled", True):
+            self.loaders["pubmed"] = PubMedLoader(self.config.get("pubmed"))
+    
+    def load_all(self, sources: List[str] = None, **kwargs) -> Dict[str, List[str]]:
+        """
+        指定されたすべてのデータソースからデータをロード
+        
+        Args:
+            sources: ロードするソースのリスト（None=全て）
+            **kwargs: 各ローダーへの追加パラメータ
+        
+        Returns:
+            ソース名をキーとしたテキストリストの辞書
+        """
+        if sources is None:
+            sources = list(self.loaders.keys())
+        
+        results = {}
+        
+        for source in sources:
+            if source in self.loaders:
+                try:
+                    loader = self.loaders[source]
+                    source_kwargs = kwargs.get(source, {})
+                    texts = loader.load_data(**source_kwargs)
+                    results[source] = texts
+                except Exception as e:
+                    print(f"⚠️ {source}のロードに失敗: {e}")
+                    results[source] = []
+        
+        return results
+    
+    def load_combined(self, sources: List[str] = None, **kwargs) -> List[str]:
+        """
+        すべてのソースからデータをロードして結合
+        """
+        all_data = self.load_all(sources, **kwargs)
+        combined = []
+        for source, texts in all_data.items():
+            combined.extend(texts)
+        return combined
+    
+    def get_available_sources(self) -> List[str]:
+        """利用可能なデータソースのリストを取得"""
+        return list(self.loaders.keys())
+
 
 # デバイス選択
 if torch.cuda.is_available():
@@ -465,7 +896,22 @@ def train_handler(job):
     入力JSON形式:
     {
         "input": {
-            "training_data": ["テキスト1", "テキスト2", ...],  // 必須: 学習テキストのリスト
+            // === データソース（いずれか必須） ===
+            "training_data": ["テキスト1", "テキスト2", ...],  // 直接テキストを指定
+            // または
+            "data_sources": ["common_crawl", "pubmed"],  // データソースから取得
+            
+            // === データソース設定（オプション） ===
+            "common_crawl_config": {
+                "domains": ["*.wikipedia.org", "*.news.yahoo.co.jp"],
+                "max_records": 500,
+                "crawl_id": "CC-MAIN-2024-10"
+            },
+            "pubmed_config": {
+                "search_terms": ["quantum computing", "neural network"],
+                "max_records": 500
+            },
+            
             "mode": "layered",        // オプション: "brain" or "layered"
             
             // 学習パラメータ
@@ -487,10 +933,67 @@ def train_handler(job):
     try:
         job_input = job.get("input", {})
         
-        # 学習データを取得
+        # 学習データを取得（直接指定またはデータソースから）
         training_data = job_input.get("training_data", [])
+        data_sources = job_input.get("data_sources", [])
+        
+        # データソースからロード
+        loaded_data_info = {}
+        if data_sources:
+            print(f"📊 データソースからデータをロード中...")
+            print(f"   ソース: {data_sources}")
+            
+            # データソース設定を構築
+            data_source_config = DEFAULT_DATA_SOURCE_CONFIG.copy()
+            
+            # Common Crawl設定をマージ
+            if "common_crawl_config" in job_input:
+                cc_config = job_input["common_crawl_config"]
+                data_source_config["common_crawl"].update(cc_config)
+            
+            # PubMed設定をマージ
+            if "pubmed_config" in job_input:
+                pm_config = job_input["pubmed_config"]
+                data_source_config["pubmed"].update(pm_config)
+            
+            # データローダーマネージャーを作成
+            manager = DataSourceManager(data_source_config)
+            
+            # 各ソースからロード
+            source_kwargs = {}
+            
+            if "common_crawl" in data_sources:
+                cc_kwargs = {}
+                if "common_crawl_config" in job_input:
+                    if "domains" in job_input["common_crawl_config"]:
+                        cc_kwargs["domains"] = job_input["common_crawl_config"]["domains"]
+                    if "max_records" in job_input["common_crawl_config"]:
+                        cc_kwargs["max_records"] = job_input["common_crawl_config"]["max_records"]
+                source_kwargs["common_crawl"] = cc_kwargs
+            
+            if "pubmed" in data_sources:
+                pm_kwargs = {}
+                if "pubmed_config" in job_input:
+                    if "search_terms" in job_input["pubmed_config"]:
+                        pm_kwargs["search_terms"] = job_input["pubmed_config"]["search_terms"]
+                    if "max_records" in job_input["pubmed_config"]:
+                        pm_kwargs["max_records"] = job_input["pubmed_config"]["max_records"]
+                source_kwargs["pubmed"] = pm_kwargs
+            
+            # データをロード
+            loaded_data = manager.load_all(sources=data_sources, **source_kwargs)
+            
+            # ロード結果を記録
+            for source, texts in loaded_data.items():
+                loaded_data_info[source] = len(texts)
+                training_data.extend(texts)
+            
+            print(f"✅ データソースからのロード完了:")
+            for source, count in loaded_data_info.items():
+                print(f"   {source}: {count}件")
+        
         if not training_data:
-            return {"error": "training_data is required"}
+            return {"error": "training_data or data_sources is required"}
         
         mode = job_input.get("mode", DEFAULT_MODE)
         
@@ -564,6 +1067,7 @@ def train_handler(job):
             "message": "Training parameters received and validated",
             "mode": mode,
             "training_data_count": len(training_data),
+            "data_sources_used": loaded_data_info if loaded_data_info else None,
             "model_config": config_params if config_params else DEFAULT_CONFIG,
             "training_config": training_config,
             "model_info": gen.get_model_info(),
@@ -573,6 +1077,157 @@ def train_handler(job):
         error_msg = f"Training Error: {str(e)}\n{traceback.format_exc()}"
         print(f"❌ {error_msg}")
         return {"error": error_msg}
+
+
+# ========================================
+# データソースエンドポイント
+# ========================================
+
+def fetch_data_handler(job):
+    """
+    データソースからデータを取得するハンドラー
+    
+    入力JSON形式:
+    {
+        "input": {
+            "sources": ["common_crawl", "pubmed"],  // 取得するソース
+            
+            // Common Crawl設定
+            "common_crawl_config": {
+                "domains": ["*.wikipedia.org", "*.news.yahoo.co.jp"],
+                "max_records": 100,
+                "crawl_id": "CC-MAIN-2024-10"
+            },
+            
+            // PubMed設定
+            "pubmed_config": {
+                "search_terms": ["quantum computing", "neural network"],
+                "max_records": 100
+            }
+        }
+    }
+    """
+    try:
+        job_input = job.get("input", {})
+        sources = job_input.get("sources", ["common_crawl", "pubmed"])
+        
+        print(f"📊 データソースからデータを取得中...")
+        print(f"   ソース: {sources}")
+        
+        # データソース設定を構築
+        data_source_config = DEFAULT_DATA_SOURCE_CONFIG.copy()
+        
+        if "common_crawl_config" in job_input:
+            data_source_config["common_crawl"].update(job_input["common_crawl_config"])
+        
+        if "pubmed_config" in job_input:
+            data_source_config["pubmed"].update(job_input["pubmed_config"])
+        
+        # データローダーマネージャーを作成
+        manager = DataSourceManager(data_source_config)
+        
+        # 各ソースからロード
+        source_kwargs = {}
+        
+        if "common_crawl" in sources:
+            cc_kwargs = {}
+            if "common_crawl_config" in job_input:
+                if "domains" in job_input["common_crawl_config"]:
+                    cc_kwargs["domains"] = job_input["common_crawl_config"]["domains"]
+                if "max_records" in job_input["common_crawl_config"]:
+                    cc_kwargs["max_records"] = job_input["common_crawl_config"]["max_records"]
+            source_kwargs["common_crawl"] = cc_kwargs
+        
+        if "pubmed" in sources:
+            pm_kwargs = {}
+            if "pubmed_config" in job_input:
+                if "search_terms" in job_input["pubmed_config"]:
+                    pm_kwargs["search_terms"] = job_input["pubmed_config"]["search_terms"]
+                if "max_records" in job_input["pubmed_config"]:
+                    pm_kwargs["max_records"] = job_input["pubmed_config"]["max_records"]
+            source_kwargs["pubmed"] = pm_kwargs
+        
+        # データをロード
+        loaded_data = manager.load_all(sources=sources, **source_kwargs)
+        
+        # 結果を整理
+        results = {}
+        total_count = 0
+        for source, texts in loaded_data.items():
+            results[source] = {
+                "count": len(texts),
+                "sample": texts[:3] if texts else [],  # 最初の3件をサンプルとして
+            }
+            total_count += len(texts)
+        
+        print(f"✅ データ取得完了: 合計 {total_count}件")
+        
+        return {
+            "status": "success",
+            "total_count": total_count,
+            "sources": results,
+            "available_sources": manager.get_available_sources(),
+        }
+        
+    except Exception as e:
+        error_msg = f"Data Fetch Error: {str(e)}\n{traceback.format_exc()}"
+        print(f"❌ {error_msg}")
+        return {"error": error_msg}
+
+
+def data_source_config_handler(job):
+    """
+    データソース設定を取得するハンドラー
+    """
+    try:
+        manager = DataSourceManager()
+        
+        return {
+            "status": "success",
+            "available_sources": manager.get_available_sources(),
+            "default_config": DEFAULT_DATA_SOURCE_CONFIG,
+            "usage_examples": {
+                "fetch_from_common_crawl": {
+                    "input": {
+                        "sources": ["common_crawl"],
+                        "common_crawl_config": {
+                            "domains": ["*.wikipedia.org"],
+                            "max_records": 100
+                        }
+                    }
+                },
+                "fetch_from_pubmed": {
+                    "input": {
+                        "sources": ["pubmed"],
+                        "pubmed_config": {
+                            "search_terms": ["quantum computing", "machine learning"],
+                            "max_records": 100
+                        }
+                    }
+                },
+                "train_with_data_sources": {
+                    "input": {
+                        "data_sources": ["common_crawl", "pubmed"],
+                        "common_crawl_config": {
+                            "domains": ["*.wikipedia.org"],
+                            "max_records": 500
+                        },
+                        "pubmed_config": {
+                            "search_terms": ["neural network"],
+                            "max_records": 500
+                        },
+                        "epochs": 10,
+                        "batch_size": 32,
+                        "learning_rate": 1e-4
+                    }
+                }
+            }
+        }
+    except Exception as e:
+        return {
+            "status": "error",
+            "error": str(e),
+        }
 
 
 # ========================================
@@ -611,11 +1266,15 @@ def model_config(job):
     現在のモデル設定と利用可能なオプションを取得
     """
     try:
+        manager = DataSourceManager()
+        
         return {
             "status": "success",
             "default_mode": DEFAULT_MODE,
             "default_config": DEFAULT_CONFIG,
             "default_training_config": DEFAULT_TRAINING_CONFIG,
+            "default_data_source_config": DEFAULT_DATA_SOURCE_CONFIG,
+            "available_data_sources": manager.get_available_sources(),
             "device": DEVICE,
             "cached_models": list(model_cache.keys()),
             "available_options": {
@@ -658,6 +1317,23 @@ def model_config(job):
                     "shuffle": "データシャッフル有効化（デフォルト: true）",
                     "seed": "乱数シード（デフォルト: 42）",
                 },
+                "data_sources": {
+                    "common_crawl": {
+                        "description": "Common Crawl - 大規模ウェブクロールデータセット (https://commoncrawl.org/)",
+                        "domains": "検索するドメインのリスト（例: *.wikipedia.org）",
+                        "max_records": "取得する最大レコード数",
+                        "crawl_id": "クロールID（例: CC-MAIN-2024-10）",
+                        "languages": "対象言語（デフォルト: ja, en）",
+                    },
+                    "pubmed": {
+                        "description": "PubMed - 医学・生命科学論文データベース (https://pubmed.ncbi.nlm.nih.gov/)",
+                        "search_terms": "検索キーワードのリスト",
+                        "max_records": "取得する最大レコード数",
+                        "api_key": "NCBI API Key（オプション、レート制限緩和用）",
+                        "include_abstract": "アブストラクトを含める（デフォルト: true）",
+                        "include_mesh_terms": "MeSHタームを含める（デフォルト: true）",
+                    },
+                },
             },
             "example_request": {
                 "input": {
@@ -681,6 +1357,25 @@ def model_config(job):
                     "min_temperature": 0.3,
                     "warmup_steps": 200,
                     "early_stopping_patience": 5
+                }
+            },
+            "example_training_with_data_sources": {
+                "input": {
+                    "data_sources": ["common_crawl", "pubmed"],
+                    "common_crawl_config": {
+                        "domains": ["*.wikipedia.org", "*.news.yahoo.co.jp"],
+                        "max_records": 500
+                    },
+                    "pubmed_config": {
+                        "search_terms": ["quantum computing", "neural network", "machine learning"],
+                        "max_records": 500
+                    },
+                    "mode": "layered",
+                    "epochs": 20,
+                    "batch_size": 16,
+                    "learning_rate": 5e-5,
+                    "max_temperature": 1.2,
+                    "min_temperature": 0.3
                 }
             }
         }
@@ -731,6 +1426,19 @@ if __name__ == "__main__":
     print("\n📚 デフォルト学習設定:")
     for key, value in DEFAULT_TRAINING_CONFIG.items():
         print(f"   {key}: {value}")
+    
+    print("\n📊 データソース設定:")
+    print("   利用可能なソース:")
+    print("   - common_crawl: Common Crawl (https://commoncrawl.org/)")
+    print("   - pubmed: PubMed (https://pubmed.ncbi.nlm.nih.gov/)")
+    for source, config in DEFAULT_DATA_SOURCE_CONFIG.items():
+        print(f"   [{source}]")
+        if source == "common_crawl":
+            print(f"     crawl_id: {config.get('crawl_id')}")
+            print(f"     max_records: {config.get('max_records')}")
+        elif source == "pubmed":
+            print(f"     search_terms: {config.get('search_terms')}")
+            print(f"     max_records: {config.get('max_records')}")
     print()
     
     # 起動時にデフォルトモデルをプリロード
@@ -740,4 +1448,6 @@ if __name__ == "__main__":
     runpod.serverless.start({
         "handler": handler,
         "train": train_handler,
+        "fetch_data": fetch_data_handler,
+        "data_source_config": data_source_config_handler,
     })
