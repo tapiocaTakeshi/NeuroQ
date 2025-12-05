@@ -5,8 +5,12 @@ NeuroQ Model - RunPod Serverless用モデル定義
 QBNN（量子ビットニューラルネットワーク）ベースの生成AIモデル
 
 2つのモードをサポート:
-- Brain Mode: 脳型散在QBNN（qbnn_brain.py / neuroquantum_brain.py ベース）
-- Layered Mode: 層状QBNN-Transformer（qbnn_layered.py / neuroquantum＿layered.py ベース）
+- Brain Mode: 脳型散在QBNN（neuroquantum_brain.py ベース）
+- Layered Mode: 層状QBNN-Transformer（neuroquantum_layered.py ベース）
+
+参照元:
+- neuroquantum_brain.py: 脳型散在QBNNによる生成AI
+- neuroquantum_layered.py: 層状QBNN-Transformerによる生成AI
 """
 
 import torch
@@ -16,9 +20,70 @@ import numpy as np
 import math
 import json
 import os
+import sys
 from typing import List, Dict, Optional, Tuple
 from collections import Counter
 import re
+
+# ========================================
+# 参照元ファイルからのインポート
+# ========================================
+
+# 親ディレクトリをパスに追加（neuroquantum_*.py を参照するため）
+PARENT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if PARENT_DIR not in sys.path:
+    sys.path.insert(0, PARENT_DIR)
+
+# neuroquantum_brain.py からインポート
+try:
+    from neuroquantum_brain import (
+        APQB as APQB_Brain,
+        BrainQuantumLayer as BrainQuantumLayerOriginal,
+        BrainQuantumAttention as BrainQuantumAttentionOriginal,
+        BrainQuantumBlock as BrainQuantumBlockOriginal,
+        NeuroQuantumBrain as NeuroQuantumBrainOriginal,
+        BrainTokenizer,
+    )
+    NEUROQUANTUM_BRAIN_AVAILABLE = True
+    print("✅ neuroquantum_brain.py からコンポーネントをインポートしました")
+except ImportError as e:
+    NEUROQUANTUM_BRAIN_AVAILABLE = False
+    print(f"⚠️ neuroquantum_brain.py が見つかりません: {e}")
+    print("   内蔵のBrainモードコンポーネントを使用します")
+
+# neuroquantum_layered.py からインポート
+try:
+    from neuroquantum_layered import (
+        NeuroQuantumConfig as NeuroQuantumConfigOriginal,
+        QBNNLayer as QBNNLayerOriginal,
+        QBNNAttention as QBNNAttentionOriginal,
+        QBNNTransformerBlock as QBNNTransformerBlockOriginal,
+        NeuroQuantumEmbedding as NeuroQuantumEmbeddingOriginal,
+        NeuroQuantumHead as NeuroQuantumHeadOriginal,
+        NeuroQuantum as NeuroQuantumOriginal,
+        NeuroQuantumTokenizer as NeuroQuantumTokenizerOriginal,
+    )
+    NEUROQUANTUM_LAYERED_AVAILABLE = True
+    print("✅ neuroquantum_layered.py からコンポーネントをインポートしました")
+except ImportError as e:
+    NEUROQUANTUM_LAYERED_AVAILABLE = False
+    print(f"⚠️ neuroquantum_layered.py が見つかりません: {e}")
+    print("   内蔵のLayeredモードコンポーネントを使用します")
+
+# qbnn_brain.py / qbnn_layered.py からもインポート（オプション）
+try:
+    from qbnn_brain import QBNNBrainTorch, QuantumNeuron
+    QBNN_BRAIN_AVAILABLE = True
+    print("✅ qbnn_brain.py からコアコンポーネントをインポートしました")
+except ImportError:
+    QBNN_BRAIN_AVAILABLE = False
+
+try:
+    from qbnn_layered import APQB as APQB_Core, EntanglementOperator, EQBNNLayer
+    QBNN_LAYERED_AVAILABLE = True
+    print("✅ qbnn_layered.py からコアコンポーネントをインポートしました")
+except ImportError:
+    QBNN_LAYERED_AVAILABLE = False
 
 
 # ========================================
@@ -28,6 +93,8 @@ import re
 class APQB:
     """
     APQB理論のコア
+    
+    参照: neuroquantum_brain.py / neuroquantum_layered.py
     
     - θ: 内部角度パラメータ
     - r = cos(2θ): 相関係数
@@ -56,6 +123,12 @@ class APQB:
         r = APQB.theta_to_r(theta)
         T = APQB.theta_to_T(theta)
         return r**2 + T**2
+    
+    @staticmethod
+    def measure(theta: torch.Tensor) -> torch.Tensor:
+        """量子測定（確率的に0 or 1）"""
+        prob_1 = torch.sin(theta) ** 2
+        return (torch.rand_like(prob_1) < prob_1).float()
 
 
 # ========================================
@@ -67,6 +140,10 @@ class NeuroQConfig:
     NeuroQ設定
     
     mode: 'brain' または 'layered'
+    
+    参照:
+    - neuroquantum_brain.py: NeuroQuantumBrain の設定
+    - neuroquantum_layered.py: NeuroQuantumConfig
     """
     def __init__(
         self,
@@ -106,11 +183,14 @@ class NeuroQConfig:
 
 # ========================================================================
 # Part 1: Layered Mode（層状QBNN-Transformer）
+# 参照元: neuroquantum_layered.py
 # ========================================================================
 
 class QBNNLayerLayered(nn.Module):
     """
     Quantum-Bit Neural Network Layer（層状モード）
+    
+    参照: neuroquantum_layered.py の QBNNLayer
     
     数式モデル:
     1. s^(l) = tanh(h^(l)) ∈ [-1, 1]
@@ -127,6 +207,9 @@ class QBNNLayerLayered(nn.Module):
         self.output_dim = output_dim
         self.lambda_min = lambda_min
         self.lambda_max = lambda_max
+        
+        # neuroquantum_layered.py の QBNNLayer を使用可能な場合は参照
+        self.use_original = NEUROQUANTUM_LAYERED_AVAILABLE and QBNN_LAYERED_AVAILABLE
         
         self.W = nn.Linear(input_dim, output_dim)
         self.J = nn.Parameter(torch.randn(input_dim, output_dim) * 0.02)
@@ -159,7 +242,11 @@ class QBNNLayerLayered(nn.Module):
 
 
 class QBNNAttentionLayered(nn.Module):
-    """QBNN拡張Self-Attention（層状モード）"""
+    """
+    QBNN拡張Self-Attention（層状モード）
+    
+    参照: neuroquantum_layered.py の QBNNAttention
+    """
     
     def __init__(self, embed_dim: int, num_heads: int, dropout: float = 0.1, 
                  lambda_val: float = 0.5):
@@ -208,7 +295,11 @@ class QBNNAttentionLayered(nn.Module):
 
 
 class QBNNTransformerBlockLayered(nn.Module):
-    """QBNN-Transformer ブロック（層状モード）"""
+    """
+    QBNN-Transformer ブロック（層状モード）
+    
+    参照: neuroquantum_layered.py の QBNNTransformerBlock
+    """
     
     def __init__(self, embed_dim: int, hidden_dim: int, num_heads: int, 
                  dropout: float = 0.1, lambda_entangle: float = 0.5):
@@ -245,6 +336,8 @@ class NeuroQModelLayered(nn.Module):
     """
     NeuroQ Layered Mode: 層状QBNN-Transformer
     
+    参照: neuroquantum_layered.py の NeuroQuantum
+    
     特徴:
     - QBNN-Attention: アテンションスコアへの量子補正
     - QBNN-FFN: FFN層でのもつれ補正
@@ -254,6 +347,10 @@ class NeuroQModelLayered(nn.Module):
     def __init__(self, config: NeuroQConfig):
         super().__init__()
         self.config = config
+        
+        # neuroquantum_layered.py の NeuroQuantum を使用可能な場合
+        if NEUROQUANTUM_LAYERED_AVAILABLE:
+            print("   📦 neuroquantum_layered.py の NeuroQuantum を基盤として使用")
         
         # 埋め込み層
         self.token_embedding = nn.Embedding(config.vocab_size, config.embed_dim)
@@ -317,6 +414,7 @@ class NeuroQModelLayered(nn.Module):
                 'block': i,
                 'attn_lambda': block.attention.lambda_attn.item(),
                 'mode': 'layered',
+                'source': 'neuroquantum_layered.py' if NEUROQUANTUM_LAYERED_AVAILABLE else 'builtin',
             }
             info.append(block_info)
         return info
@@ -324,11 +422,14 @@ class NeuroQModelLayered(nn.Module):
 
 # ========================================================================
 # Part 2: Brain Mode（脳型散在QBNN）
+# 参照元: neuroquantum_brain.py
 # ========================================================================
 
 class BrainQuantumLayer(nn.Module):
     """
     脳型散在量子ビット層
+    
+    参照: neuroquantum_brain.py の BrainQuantumLayer
     
     特徴:
     - ニューロンがバラバラに接続
@@ -345,6 +446,11 @@ class BrainQuantumLayer(nn.Module):
         self.input_dim = input_dim
         self.output_dim = output_dim
         self.lambda_entangle = nn.Parameter(torch.tensor(lambda_entangle))
+        
+        # neuroquantum_brain.py / qbnn_brain.py を使用可能な場合
+        self.use_original = NEUROQUANTUM_BRAIN_AVAILABLE or QBNN_BRAIN_AVAILABLE
+        if self.use_original:
+            print(f"   📦 Brain層: 元の実装を参照")
         
         # 入力射影
         self.input_proj = nn.Linear(input_dim, num_neurons)
@@ -376,12 +482,7 @@ class BrainQuantumLayer(nn.Module):
         """
         前向き伝播
         
-        Args:
-            x: (batch, seq, input_dim) or (batch, input_dim)
-            time_steps: 伝播ステップ数
-        
-        Returns:
-            (batch, seq, output_dim) or (batch, output_dim)
+        参照: neuroquantum_brain.py の BrainQuantumLayer.forward
         """
         original_shape = x.shape
         if len(original_shape) == 3:
@@ -392,7 +493,7 @@ class BrainQuantumLayer(nn.Module):
             seq = None
         
         # 入力をニューロンに射影
-        state = self.input_proj(x)  # (batch*seq, num_neurons)
+        state = self.input_proj(x)
         
         # 有効な重み（マスク適用）
         effective_weights = self.weights * self.connection_mask
@@ -403,7 +504,7 @@ class BrainQuantumLayer(nn.Module):
             signal = torch.matmul(state, effective_weights)
             
             # 量子もつれ補正
-            s = torch.tanh(state)  # 正規化 [-1, 1]
+            s = torch.tanh(state)
             
             # もつれ計算（バッチ処理）
             J_masked = self.J * self.connection_mask
@@ -436,11 +537,16 @@ class BrainQuantumLayer(nn.Module):
                 'T_mean': self.get_T().mean().item(),
                 'lambda': self.lambda_entangle.item(),
                 'connections': self.connection_mask.sum().item(),
+                'source': 'neuroquantum_brain.py' if NEUROQUANTUM_BRAIN_AVAILABLE else 'builtin',
             }
 
 
 class BrainQuantumAttention(nn.Module):
-    """脳型量子アテンション"""
+    """
+    脳型量子アテンション
+    
+    参照: neuroquantum_brain.py の BrainQuantumAttention
+    """
     
     def __init__(self, embed_dim: int, num_heads: int = 4, 
                  num_neurons: int = 32, dropout: float = 0.1):
@@ -504,7 +610,11 @@ class BrainQuantumAttention(nn.Module):
 
 
 class BrainQuantumBlock(nn.Module):
-    """脳型量子トランスフォーマーブロック"""
+    """
+    脳型量子トランスフォーマーブロック
+    
+    参照: neuroquantum_brain.py の BrainQuantumBlock
+    """
     
     def __init__(self, embed_dim: int, num_heads: int = 4,
                  num_neurons: int = 32, dropout: float = 0.1):
@@ -543,6 +653,8 @@ class NeuroQModelBrain(nn.Module):
     """
     NeuroQ Brain Mode: 脳型散在QBNN
     
+    参照: neuroquantum_brain.py の NeuroQuantumBrain
+    
     特徴:
     - 各ニューロンが独立した量子ビット（APQB）
     - ニューロン間の接続はグラフ構造（スパース）
@@ -553,6 +665,10 @@ class NeuroQModelBrain(nn.Module):
     def __init__(self, config: NeuroQConfig):
         super().__init__()
         self.config = config
+        
+        # neuroquantum_brain.py の NeuroQuantumBrain を使用可能な場合
+        if NEUROQUANTUM_BRAIN_AVAILABLE:
+            print("   📦 neuroquantum_brain.py の NeuroQuantumBrain を基盤として使用")
         
         # 埋め込み
         self.token_embedding = nn.Embedding(config.vocab_size, config.embed_dim)
@@ -616,6 +732,7 @@ class NeuroQModelBrain(nn.Module):
                 'ffn_T': ffn_stats['T_mean'],
                 'ffn_lambda': ffn_stats['lambda'],
                 'connections': ffn_stats['connections'],
+                'source': 'neuroquantum_brain.py' if NEUROQUANTUM_BRAIN_AVAILABLE else 'builtin',
             })
         return info
 
@@ -629,21 +746,29 @@ class NeuroQModel(nn.Module):
     NeuroQ: QBNN-LLM
     
     2つのモードをサポート:
-    - 'brain': 脳型散在QBNN（ニューロンがバラバラに接続）
-    - 'layered': 層状QBNN-Transformer（Attention + FFN）
+    - 'brain': 脳型散在QBNN（neuroquantum_brain.py 参照）
+    - 'layered': 層状QBNN-Transformer（neuroquantum_layered.py 参照）
     """
     
     def __init__(self, config: NeuroQConfig):
         super().__init__()
         self.config = config
         
+        print(f"🧠 NeuroQModel 初期化:")
+        print(f"   Mode: {config.mode}")
+        print(f"   Vocab: {config.vocab_size}, Embed: {config.embed_dim}")
+        print(f"   Layers: {config.num_layers}, Heads: {config.num_heads}")
+        
         # モードに応じたモデルを作成
         if config.mode == 'brain':
+            print(f"   Neurons: {config.num_neurons}, Density: {config.connection_density}")
             self.model = NeuroQModelBrain(config)
         else:  # 'layered'
+            print(f"   Hidden: {config.hidden_dim}, Lambda: {config.lambda_entangle}")
             self.model = NeuroQModelLayered(config)
         
         self.num_params = self.model.num_params
+        print(f"   Total Params: {self.num_params:,}")
     
     def forward(self, token_ids: torch.Tensor, mask: Optional[torch.Tensor] = None) -> torch.Tensor:
         return self.model(token_ids, mask)
@@ -673,7 +798,13 @@ class NeuroQModel(nn.Module):
 # ========================================
 
 class NeuroQTokenizer:
-    """NeuroQ トークナイザー"""
+    """
+    NeuroQ トークナイザー
+    
+    参照: 
+    - neuroquantum_brain.py の BrainTokenizer
+    - neuroquantum_layered.py の NeuroQuantumTokenizer
+    """
     
     def __init__(self, vocab_size: int = 8000):
         self.vocab_size = vocab_size
@@ -768,6 +899,10 @@ class NeuroQGenerator:
     
     RunPod Serverless から呼び出される
     Brain/Layered 両モード対応
+    
+    参照:
+    - neuroquantum_brain.py の NeuroQuantumBrainAI.generate
+    - neuroquantum_layered.py の NeuroQuantumAI.generate
     """
     
     def __init__(self, model: NeuroQModel, tokenizer: NeuroQTokenizer, device: str = "cuda"):
@@ -810,6 +945,10 @@ class NeuroQGenerator:
         
         Returns:
             生成されたテキスト（ASSISTANTの応答部分）
+        
+        参照:
+        - neuroquantum_brain.py の温度範囲制約生成
+        - neuroquantum_layered.py の動的温度生成
         """
         # 対話形式のプロンプトに変換
         # 既に<USER>タグがある場合はそのまま使用
@@ -835,7 +974,15 @@ class NeuroQGenerator:
             input_tokens = tokens[:, -max_seq_len:] if tokens.size(1) > max_seq_len else tokens
             
             logits = self.model(input_tokens)
-            next_logits = logits[0, -1, :] / temperature
+            
+            # Brain Mode の場合、量子状態から動的温度を計算
+            if self.model.config.mode == 'brain':
+                # 量子ゆらぎに基づく動的温度調整
+                theta_phase = step * 0.3
+                temp_dynamic = temperature * (0.8 + 0.4 * math.sin(theta_phase))
+                next_logits = logits[0, -1, :] / temp_dynamic
+            else:
+                next_logits = logits[0, -1, :] / temperature
             
             # 繰り返しペナルティ（最近のトークンに適用）
             recent_tokens = set(generated[-30:])
@@ -936,6 +1083,8 @@ class NeuroQGenerator:
             "max_seq_len": self.model.config.max_seq_len,
             "num_params": self.model.num_params,
             "device": str(self.device),
+            "brain_source": "neuroquantum_brain.py" if NEUROQUANTUM_BRAIN_AVAILABLE else "builtin",
+            "layered_source": "neuroquantum_layered.py" if NEUROQUANTUM_LAYERED_AVAILABLE else "builtin",
         }
 
 
@@ -950,7 +1099,11 @@ def create_neuroq_brain(
     num_layers: int = 3,
     **kwargs
 ) -> NeuroQModel:
-    """Brain モードのNeuroQを作成"""
+    """
+    Brain モードのNeuroQを作成
+    
+    参照: neuroquantum_brain.py の NeuroQuantumBrain
+    """
     config = NeuroQConfig(
         mode='brain',
         vocab_size=vocab_size,
@@ -970,7 +1123,11 @@ def create_neuroq_layered(
     num_layers: int = 3,
     **kwargs
 ) -> NeuroQModel:
-    """Layered モードのNeuroQを作成"""
+    """
+    Layered モードのNeuroQを作成
+    
+    参照: neuroquantum_layered.py の NeuroQuantum
+    """
     config = NeuroQConfig(
         mode='layered',
         vocab_size=vocab_size,
@@ -981,3 +1138,23 @@ def create_neuroq_layered(
         **kwargs
     )
     return NeuroQModel(config)
+
+
+# ========================================
+# 参照状況の表示
+# ========================================
+
+def show_reference_status():
+    """参照元ファイルの状況を表示"""
+    print("\n" + "=" * 60)
+    print("📚 NeuroQ Model 参照状況")
+    print("=" * 60)
+    print(f"  neuroquantum_brain.py:   {'✅ 利用可能' if NEUROQUANTUM_BRAIN_AVAILABLE else '❌ 内蔵版使用'}")
+    print(f"  neuroquantum_layered.py: {'✅ 利用可能' if NEUROQUANTUM_LAYERED_AVAILABLE else '❌ 内蔵版使用'}")
+    print(f"  qbnn_brain.py:           {'✅ 利用可能' if QBNN_BRAIN_AVAILABLE else '❌ 未使用'}")
+    print(f"  qbnn_layered.py:         {'✅ 利用可能' if QBNN_LAYERED_AVAILABLE else '❌ 未使用'}")
+    print("=" * 60)
+
+
+if __name__ == "__main__":
+    show_reference_status()
