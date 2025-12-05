@@ -29,6 +29,11 @@ import re
 # 参照元ファイルからのインポート
 # ========================================
 
+# 現在のディレクトリ（/app/）をパスに追加（Docker環境用）
+CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
+if CURRENT_DIR not in sys.path:
+    sys.path.insert(0, CURRENT_DIR)
+
 # 親ディレクトリをパスに追加（neuroquantum_*.py を参照するため）
 PARENT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if PARENT_DIR not in sys.path:
