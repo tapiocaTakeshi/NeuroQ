@@ -19,17 +19,16 @@ COPY handler.py /app/
 COPY neuroq_model.py /app/
 COPY requirements.txt /app/
 
-# 参照元ファイルをコピー
-# 注意: ビルドコンテキストをプロジェクトルートに設定してビルドしてください
-# docker build -f neuroq-runpod/Dockerfile -t neuroq-runpod .
-# または、neuroq-runpod/ ディレクトリに neuroquantum_*.py をコピーしておいてください
-COPY neuroquantum_brain.py /app/
-COPY neuroquantum_layered.py /app/
+# 参照元ファイルについて
+# RunPodのビルドコンテキストが neuroq-runpod/ の場合、親ディレクトリのファイルにアクセスできません
+# neuroq_model.py は内蔵のコンポーネントを使用するため、ファイルがなくても動作します
+# 必要に応じて、ビルド前に neuroquantum_brain.py と neuroquantum_layered.py を
+# neuroq-runpod/ ディレクトリにコピーしてください
 
 # モデルファイルとトークナイザーをコピー
 # （ビルド前に学習済みモデルを配置してください）
-COPY *.pt /app/
-COPY *.json /app/
+COPY neuroq_*.pt /app/
+COPY neuroq_*.json /app/
 
 # 依存関係をインストール
 RUN pip install --no-cache-dir -r requirements.txt
