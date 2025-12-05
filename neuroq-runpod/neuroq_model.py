@@ -897,12 +897,25 @@ class NeuroQGenerator:
             # フォールバック: プロンプト以降を返す
             response = full_text[len(prompt):] if full_text.startswith(prompt) else full_text
         
-        # <USER>タグより前で切る
+        # <USER>タグより前で切る（部分マッチも含む）
         if "<USER>" in response:
             response = response.split("<USER>")[0]
+        # 部分的なタグも除去（<U, <US, <USE, <USER など）
+        for partial_tag in ["<USER", "<USE", "<US", "<U"]:
+            if response.endswith(partial_tag):
+                response = response[:-len(partial_tag)]
+        
+        # その他の制御タグを除去
+        for tag in ["<ASSISTANT>", "<BOS>", "<EOS>", "<PAD>", "<UNK>"]:
+            response = response.replace(tag, "")
         
         # 余分な空白を削除
         response = response.strip()
+        
+        # 不完全な文末を処理（句読点がない場合は追加しない）
+        # 意味不明な短い出力をフィルタリング
+        if len(response) < 3 or not any(c.isalnum() for c in response):
+            response = ""
         
         # 応答が空の場合はフォールバック
         if not response:
