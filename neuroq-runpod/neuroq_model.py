@@ -797,6 +797,9 @@ class NeuroQGenerator:
         """
         テキスト生成
         
+        対話形式で学習されたモデル用に最適化された生成
+        入力プロンプトを<USER>prompt<ASSISTANT>形式に変換して生成
+        
         Args:
             prompt: 入力プロンプト
             max_tokens: 最大生成トークン数
@@ -806,32 +809,53 @@ class NeuroQGenerator:
             repetition_penalty: 繰り返しペナルティ
         
         Returns:
-            生成されたテキスト
+            生成されたテキスト（ASSISTANTの応答部分）
         """
-        tokens = self.tokenizer.encode(prompt, add_special=True)[:-1]
+        # 対話形式のプロンプトに変換
+        # 既に<USER>タグがある場合はそのまま使用
+        if "<USER>" in prompt:
+            formatted_prompt = prompt
+            if "<ASSISTANT>" not in prompt:
+                formatted_prompt = prompt + "<ASSISTANT>"
+        else:
+            formatted_prompt = f"<USER>{prompt}<ASSISTANT>"
+        
+        # プロンプトをエンコード（EOSトークンを除く）
+        tokens = self.tokenizer.encode(formatted_prompt, add_special=True)[:-1]
         tokens = torch.tensor(tokens, dtype=torch.long).unsqueeze(0).to(self.device)
         
+        prompt_length = len(tokens[0])
         generated = tokens[0].tolist()
         max_seq_len = self.model.config.max_seq_len
         
-        for _ in range(max_tokens):
+        # 生成された文字をトラッキング（終了条件判定用）
+        generated_text_buffer = ""
+        
+        for step in range(max_tokens):
             input_tokens = tokens[:, -max_seq_len:] if tokens.size(1) > max_seq_len else tokens
             
             logits = self.model(input_tokens)
             next_logits = logits[0, -1, :] / temperature
             
-            # 繰り返しペナルティ
+            # 繰り返しペナルティ（最近のトークンに適用）
             recent_tokens = set(generated[-30:])
             for token_id in recent_tokens:
-                next_logits[token_id] /= repetition_penalty
+                if next_logits[token_id] > 0:
+                    next_logits[token_id] /= repetition_penalty
+                else:
+                    next_logits[token_id] *= repetition_penalty
             
-            # Top-K
+            # 特殊トークンをマスク（PAD, UNK）
+            next_logits[self.tokenizer.pad_id] = float('-inf')
+            next_logits[self.tokenizer.unk_id] = float('-inf')
+            
+            # Top-K サンプリング
             if top_k > 0:
                 top_k_vals, _ = torch.topk(next_logits, min(top_k, next_logits.size(-1)))
                 indices_to_remove = next_logits < top_k_vals[-1]
                 next_logits[indices_to_remove] = float('-inf')
             
-            # Top-P
+            # Top-P (Nucleus) サンプリング
             if top_p < 1.0:
                 sorted_logits, sorted_indices = torch.sort(next_logits, descending=True)
                 cumulative_probs = torch.cumsum(F.softmax(sorted_logits, dim=-1), dim=-1)
@@ -843,16 +867,48 @@ class NeuroQGenerator:
                 indices_to_remove = sorted_indices[sorted_indices_to_remove]
                 next_logits[indices_to_remove] = float('-inf')
             
+            # 確率分布を計算してサンプリング
             probs = F.softmax(next_logits, dim=-1)
             next_token = torch.multinomial(probs, num_samples=1)
             
+            # EOSトークンで終了
             if next_token.item() == self.tokenizer.eos_id:
                 break
             
             generated.append(next_token.item())
             tokens = torch.cat([tokens, next_token.unsqueeze(0)], dim=1)
+            
+            # 生成されたテキストをバッファに追加
+            new_char = self.tokenizer.idx_to_char.get(next_token.item(), "")
+            generated_text_buffer += new_char
+            
+            # <USER>タグが出現したら終了（次の対話ターンに入った）
+            if "<USER>" in generated_text_buffer:
+                # <USER>より前の部分だけ残す
+                break
         
-        return self.tokenizer.decode(generated)
+        # デコードして応答部分のみを抽出
+        full_text = self.tokenizer.decode(generated)
+        
+        # <ASSISTANT>以降の部分を抽出
+        if "<ASSISTANT>" in full_text:
+            response = full_text.split("<ASSISTANT>")[-1]
+        else:
+            # フォールバック: プロンプト以降を返す
+            response = full_text[len(prompt):] if full_text.startswith(prompt) else full_text
+        
+        # <USER>タグより前で切る
+        if "<USER>" in response:
+            response = response.split("<USER>")[0]
+        
+        # 余分な空白を削除
+        response = response.strip()
+        
+        # 応答が空の場合はフォールバック
+        if not response:
+            response = "申し訳ございません。もう一度お試しください。"
+        
+        return response
     
     def get_model_info(self) -> dict:
         """モデル情報を取得"""
