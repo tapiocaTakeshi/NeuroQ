@@ -656,6 +656,199 @@ def load_model(mode: str = None, config_params: dict = None):
 
 
 # ========================================
+# 学習実行関数
+# ========================================
+
+def run_training(
+    training_data: List[str],
+    mode: str = "layered",
+    config_params: dict = None,
+    training_params: dict = None,
+) -> dict:
+    """
+    学習を実行する
+    
+    Args:
+        training_data: 学習テキストのリスト
+        mode: 'brain' or 'layered'
+        config_params: モデル設定パラメータ
+        training_params: 学習パラメータ
+    
+    Returns:
+        学習結果の辞書
+    """
+    import random
+    
+    if not training_data:
+        return {"error": "No training data provided"}
+    
+    # デフォルト値を設定
+    if config_params is None:
+        config_params = {}
+    if training_params is None:
+        training_params = {}
+    
+    # 学習パラメータをマージ
+    train_config = DEFAULT_TRAINING_CONFIG.copy()
+    train_config.update(training_params)
+    
+    # モデル設定をマージ
+    model_config = DEFAULT_CONFIG.copy()
+    model_config.update(config_params)
+    
+    print(f"🎓 学習開始: {mode} モード")
+    print(f"   学習データ数: {len(training_data)}")
+    print(f"   エポック数: {train_config['epochs']}")
+    print(f"   バッチサイズ: {train_config['batch_size']}")
+    print(f"   学習率: {train_config['learning_rate']}")
+    
+    # トークナイザー構築
+    tokenizer = NeuroQTokenizer(vocab_size=8000)
+    
+    # 対話形式に変換（まだ変換されていない場合）
+    formatted_data = []
+    for text in training_data:
+        if "<USER>" not in text and "<ASSISTANT>" not in text:
+            # 単純なテキストの場合、質問と回答に分割を試みる
+            # または、そのまま学習データとして使用
+            formatted_data.append(text)
+        else:
+            formatted_data.append(text)
+    
+    tokenizer.build_vocab(formatted_data)
+    print(f"   語彙サイズ: {tokenizer.actual_vocab_size}")
+    
+    # トークン化
+    all_tokens = []
+    for text in formatted_data:
+        tokens = tokenizer.encode(text)
+        if len(tokens) > 2:
+            all_tokens.extend(tokens)
+    
+    all_tokens = torch.tensor(all_tokens, dtype=torch.long)
+    print(f"   総トークン数: {len(all_tokens):,}")
+    
+    # シーケンス作成
+    seq_len = min(64, model_config.get('max_seq_len', 256) // 4)
+    sequences = []
+    for i in range(0, len(all_tokens) - seq_len - 1, seq_len // 2):
+        x = all_tokens[i:i+seq_len]
+        y = all_tokens[i+1:i+seq_len+1]
+        if len(x) == seq_len and len(y) == seq_len:
+            sequences.append((x, y))
+    
+    if len(sequences) == 0:
+        return {"error": "Not enough data for training sequences"}
+    
+    print(f"   シーケンス数: {len(sequences):,}")
+    
+    # モデル構築
+    if mode == 'brain':
+        config = NeuroQConfig(
+            mode='brain',
+            vocab_size=tokenizer.actual_vocab_size,
+            embed_dim=model_config.get('embed_dim', 128),
+            num_neurons=model_config.get('num_neurons', 100),
+            hidden_dim=model_config.get('num_neurons', 100) * 2,
+            num_heads=model_config.get('num_heads', 4),
+            num_layers=model_config.get('num_layers', 3),
+            max_seq_len=model_config.get('max_seq_len', 256),
+            dropout=model_config.get('dropout', 0.1),
+            connection_density=model_config.get('connection_density', 0.25),
+            lambda_entangle=model_config.get('lambda_entangle_brain', 0.35),
+        )
+    else:  # layered
+        config = NeuroQConfig(
+            mode='layered',
+            vocab_size=tokenizer.actual_vocab_size,
+            embed_dim=model_config.get('embed_dim', 128),
+            hidden_dim=model_config.get('hidden_dim', 256),
+            num_heads=model_config.get('num_heads', 4),
+            num_layers=model_config.get('num_layers', 3),
+            max_seq_len=model_config.get('max_seq_len', 256),
+            dropout=model_config.get('dropout', 0.1),
+            lambda_entangle=model_config.get('lambda_entangle_layered', 0.5),
+        )
+    
+    model = NeuroQModel(config).to(DEVICE)
+    print(f"   パラメータ数: {model.num_params:,}")
+    
+    # 学習設定
+    epochs = train_config['epochs']
+    batch_size = train_config['batch_size']
+    lr = train_config['learning_rate']
+    
+    optimizer = torch.optim.AdamW(
+        model.parameters(), 
+        lr=lr, 
+        weight_decay=train_config.get('weight_decay', 0.01)
+    )
+    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=epochs)
+    criterion = torch.nn.CrossEntropyLoss(
+        label_smoothing=train_config.get('label_smoothing', 0.1)
+    )
+    
+    # 学習ループ
+    model.train()
+    training_history = []
+    
+    for epoch in range(epochs):
+        total_loss = 0
+        num_batches = 0
+        random.shuffle(sequences)
+        
+        for i in range(0, len(sequences), batch_size):
+            batch = sequences[i:i+batch_size]
+            if len(batch) == 0:
+                continue
+            
+            x_batch = torch.stack([s[0] for s in batch]).to(DEVICE)
+            y_batch = torch.stack([s[1] for s in batch]).to(DEVICE)
+            
+            optimizer.zero_grad()
+            logits = model(x_batch)
+            
+            loss = criterion(
+                logits.view(-1, tokenizer.actual_vocab_size),
+                y_batch.view(-1)
+            )
+            
+            loss.backward()
+            torch.nn.utils.clip_grad_norm_(
+                model.parameters(), 
+                train_config.get('max_grad_norm', 1.0)
+            )
+            optimizer.step()
+            
+            total_loss += loss.item()
+            num_batches += 1
+        
+        scheduler.step()
+        avg_loss = total_loss / max(1, num_batches)
+        training_history.append({"epoch": epoch + 1, "loss": avg_loss})
+        
+        if (epoch + 1) % max(1, epochs // 5) == 0 or epoch == 0:
+            print(f"   Epoch {epoch+1:3d}/{epochs}: Loss = {avg_loss:.4f}")
+    
+    # モデルを保存
+    model_filename = f"neuroq_{mode}_model.pt"
+    model.save_checkpoint(model_filename)
+    tokenizer.save(TOKENIZER_PATH)
+    
+    print(f"✅ 学習完了: {model_filename}")
+    
+    return {
+        "status": "success",
+        "mode": mode,
+        "epochs_trained": epochs,
+        "final_loss": training_history[-1]["loss"] if training_history else None,
+        "num_params": model.num_params,
+        "vocab_size": tokenizer.actual_vocab_size,
+        "training_history": training_history[-5:],  # 最後の5エポックのみ
+    }
+
+
+# ========================================
 # RunPod Handler
 # ========================================
 
@@ -673,6 +866,10 @@ def handler(job):
             "top_k": 40,              // オプション（デフォルト: 40）
             "top_p": 0.9,             // オプション（デフォルト: 0.9）
             "repetition_penalty": 1.2 // オプション（デフォルト: 1.2）
+            
+            // === 事前学習オプション ===
+            "train_before_generate": false,  // trueで生成前に学習を実行
+            "training_data": ["テキスト1", ...],  // 学習データ（train_before_generate=true時に必要）
             
             // === モデル設定 ===
             "mode": "brain",          // オプション: "brain" or "layered"
@@ -718,6 +915,8 @@ def handler(job):
     {
         "prompt": "入力プロンプト",
         "output": "生成されたテキスト",
+        "training_performed": true/false,  // 学習が実行されたかどうか
+        "training_result": {...},          // 学習結果（学習時のみ）
         "model_info": {
             "mode": "brain" or "layered",
             "num_neurons": 100,
@@ -732,6 +931,11 @@ def handler(job):
         
         # モード設定
         mode = job_input.get("mode", DEFAULT_MODE)
+        
+        # 事前学習フラグ
+        train_before_generate = job_input.get("train_before_generate", False)
+        training_data = job_input.get("training_data", [])
+        training_result = None
         
         # モデル設定パラメータを抽出
         config_params = {}
@@ -821,6 +1025,24 @@ def handler(job):
         if "seed" in job_input:
             training_params["seed"] = int(job_input["seed"])
         
+        # 事前学習を実行（train_before_generate=true の場合）
+        if train_before_generate and training_data:
+            print(f"🎓 事前学習を実行中...")
+            print(f"   学習データ数: {len(training_data)}")
+            
+            training_result = run_training(
+                training_data=training_data,
+                mode=mode,
+                config_params=config_params,
+                training_params=training_params,
+            )
+            
+            print(f"✅ 事前学習完了")
+            
+            # キャッシュをクリアして新しいモデルをロード
+            global model_cache
+            model_cache = {}
+        
         # モデルをロード
         gen = load_model(mode, config_params if config_params else None)
         
@@ -869,7 +1091,7 @@ def handler(job):
         merged_training_params.update(training_params)
         
         # レスポンス
-        return {
+        response = {
             "prompt": prompt,
             "output": output_text,
             "model_info": gen.get_model_info(),
@@ -877,8 +1099,15 @@ def handler(job):
                 "mode": mode,
                 **config_params
             },
-            "training_config": merged_training_params
+            "training_config": merged_training_params,
+            "training_performed": train_before_generate and training_data,
         }
+        
+        # 学習結果を追加（学習が実行された場合）
+        if training_result:
+            response["training_result"] = training_result
+        
+        return response
         
     except Exception as e:
         error_msg = f"Error: {str(e)}\n{traceback.format_exc()}"
