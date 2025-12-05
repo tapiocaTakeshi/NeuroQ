@@ -869,7 +869,17 @@ def handler(job):
             
             // === 事前学習オプション ===
             "train_before_generate": false,  // trueで生成前に学習を実行
-            "training_data": ["テキスト1", ...],  // 学習データ（train_before_generate=true時に必要）
+            "training_data": ["テキスト1", ...],  // 学習データ（直接指定）
+            "data_sources": ["common_crawl", "pubmed"],  // データソースから取得
+            "common_crawl_config": {          // Common Crawl設定
+                "domains": ["*.wikipedia.org", "*.news.yahoo.co.jp"],
+                "max_records": 100,
+                "crawl_id": "CC-MAIN-2024-10"
+            },
+            "pubmed_config": {                // PubMed設定
+                "search_terms": ["quantum computing", "neural network"],
+                "max_records": 100
+            },
             
             // === モデル設定 ===
             "mode": "brain",          // オプション: "brain" or "layered"
@@ -935,7 +945,60 @@ def handler(job):
         # 事前学習フラグ
         train_before_generate = job_input.get("train_before_generate", False)
         training_data = job_input.get("training_data", [])
+        data_sources = job_input.get("data_sources", [])  # ["common_crawl", "pubmed"]
         training_result = None
+        
+        # データソースから学習データをロード
+        if train_before_generate and data_sources:
+            print(f"📊 データソースから学習データをロード中...")
+            print(f"   ソース: {data_sources}")
+            
+            # データソース設定を構築
+            data_source_config = DEFAULT_DATA_SOURCE_CONFIG.copy()
+            
+            # Common Crawl設定をマージ
+            if "common_crawl_config" in job_input:
+                cc_config = job_input["common_crawl_config"]
+                data_source_config["common_crawl"].update(cc_config)
+            
+            # PubMed設定をマージ
+            if "pubmed_config" in job_input:
+                pm_config = job_input["pubmed_config"]
+                data_source_config["pubmed"].update(pm_config)
+            
+            # データローダーマネージャーを作成
+            manager = DataSourceManager(data_source_config)
+            
+            # 各ソースからロード
+            source_kwargs = {}
+            
+            if "common_crawl" in data_sources:
+                cc_kwargs = {}
+                if "common_crawl_config" in job_input:
+                    if "domains" in job_input["common_crawl_config"]:
+                        cc_kwargs["domains"] = job_input["common_crawl_config"]["domains"]
+                    if "max_records" in job_input["common_crawl_config"]:
+                        cc_kwargs["max_records"] = job_input["common_crawl_config"]["max_records"]
+                source_kwargs["common_crawl"] = cc_kwargs
+            
+            if "pubmed" in data_sources:
+                pm_kwargs = {}
+                if "pubmed_config" in job_input:
+                    if "search_terms" in job_input["pubmed_config"]:
+                        pm_kwargs["search_terms"] = job_input["pubmed_config"]["search_terms"]
+                    if "max_records" in job_input["pubmed_config"]:
+                        pm_kwargs["max_records"] = job_input["pubmed_config"]["max_records"]
+                source_kwargs["pubmed"] = pm_kwargs
+            
+            # データをロード
+            loaded_data = manager.load_all(sources=data_sources, **source_kwargs)
+            
+            # ロードしたデータをtraining_dataに追加
+            for source, texts in loaded_data.items():
+                print(f"   {source}: {len(texts)}件取得")
+                training_data.extend(texts)
+            
+            print(f"✅ データソースからのロード完了: 合計 {len(training_data)}件")
         
         # モデル設定パラメータを抽出
         config_params = {}
