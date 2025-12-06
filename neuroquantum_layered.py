@@ -126,7 +126,9 @@ class QBNNLayer(nn.Module):
             )
             # コア層のパラメータを参照
             self.W = self.eqbnn_core.linear
-            self.J = self.eqbnn_core.entangle_op.W_entangle.weight
+            # W_entangle.weightの形状は(output_dim, input_dim)なので、参照として保持
+            # forward内で転置して使用する
+            self.J_source = self.eqbnn_core.entangle_op.W_entangle.weight
         else:
             # W: 通常の重み行列
             self.W = nn.Linear(input_dim, output_dim)
@@ -145,17 +147,32 @@ class QBNNLayer(nn.Module):
     
     def forward(self, h_prev: torch.Tensor) -> torch.Tensor:
         # 1. 正規化（Bloch球のz座標として解釈）
-        s_prev = torch.tanh(h_prev)
+        s_prev = torch.tanh(h_prev)  # (..., input_dim)
         
         # 2. 線形変換
-        h_tilde = self.W(h_prev)
+        h_tilde = self.W(h_prev)  # (..., output_dim)
         
         # 3. 次層の候補を正規化
-        s_raw = torch.tanh(h_tilde)
+        s_raw = torch.tanh(h_tilde)  # (..., output_dim)
         
         # 4. もつれ補正項 Δ
-        # Δ_j = Σ_i J_{ij} s^(l)_i s^(l+1)_{raw,j}
-        delta = torch.einsum('...i,ij,...j->...j', s_prev, self.J, s_raw)
+        # Δ_j = Σ_i J_{ij} s^(l)_i * s^(l+1)_{raw,j}
+        # J: (input_dim, output_dim)
+        # s_prev: (..., input_dim)
+        # s_raw: (..., output_dim)
+        # delta: (..., output_dim)
+        # 各jについて: delta_j = Σ_i (J_{ij} * s_prev_i) * s_raw_j
+        
+        # Jの形状を確認して転置（use_qbnn_layeredの場合、J_sourceは(output_dim, input_dim)）
+        if self.use_qbnn_layered:
+            J = self.J_source.t()  # (input_dim, output_dim)に転置
+        else:
+            J = self.J  # 既に(input_dim, output_dim)
+        
+        # まず J_{ij} * s_prev_i を計算: (..., output_dim)
+        J_s_prev = torch.einsum('...i,ij->...j', s_prev, J)  # (..., output_dim)
+        # 次に s_raw_j を掛ける
+        delta = J_s_prev * s_raw  # (..., output_dim)
         
         # 5. 動的λ: θが動けるように範囲内で変化（量子ゆらぎ）
         # λ_baseをsigmoidで0-1に制限し、範囲にマッピング
@@ -189,13 +206,19 @@ class QBNNLayer(nn.Module):
             lambda_normalized = torch.sigmoid(self.lambda_base).item()
             lambda_eff = self.lambda_min + (self.lambda_max - self.lambda_min) * lambda_normalized
             
+            # Jの形状を確認（use_qbnn_layeredの場合、転置が必要）
+            if self.use_qbnn_layered:
+                J = self.J_source.t()  # (input_dim, output_dim)に転置
+            else:
+                J = self.J  # 既に(input_dim, output_dim)
+            
             info = {
                 'lambda_min': self.lambda_min,
                 'lambda_max': self.lambda_max,
                 'lambda_eff': lambda_eff,
-                'J_mean': self.J.mean().item(),
-                'J_std': self.J.std().item(),
-                'J_max': self.J.max().item(),
+                'J_mean': J.mean().item(),
+                'J_std': J.std().item(),
+                'J_max': J.max().item(),
                 'source': 'qbnn_layered.py' if self.use_qbnn_layered else 'builtin',
             }
             
@@ -240,42 +263,55 @@ class QBNNAttention(nn.Module):
         self.scale = math.sqrt(self.head_dim)
     
     def forward(self, x: torch.Tensor, mask: Optional[torch.Tensor] = None) -> torch.Tensor:
+        """
+        GPT標準: Multi-Head Causal Self-Attention（QBNN拡張版）
+        
+        Args:
+            x: (batch, seq, embed_dim)
+            mask: Optional attention mask (Noneの場合はCausal Maskを自動生成)
+        
+        Returns:
+            (batch, seq, embed_dim)
+        """
         batch_size, seq_len, _ = x.shape
         
-        # Q, K, V 計算
-        Q = self.q_proj(x).view(batch_size, seq_len, self.num_heads, self.head_dim).transpose(1, 2)
+        # GPT標準: Q, K, V 計算
+        Q = self.q_proj(x).view(batch_size, seq_len, self.num_heads, self.head_dim).transpose(1, 2)  # (batch, heads, seq, head_dim)
         K = self.k_proj(x).view(batch_size, seq_len, self.num_heads, self.head_dim).transpose(1, 2)
         V = self.v_proj(x).view(batch_size, seq_len, self.num_heads, self.head_dim).transpose(1, 2)
         
-        # アテンションスコア
-        attn_scores = torch.matmul(Q, K.transpose(-2, -1)) / self.scale
+        # GPT標準: アテンションスコア計算
+        attn_scores = torch.matmul(Q, K.transpose(-2, -1)) / self.scale  # (batch, heads, seq, seq)
         
-        # 量子もつれ補正
-        # Q と K の正規化値
+        # QBNN拡張: 量子もつれ補正
         Q_norm = torch.tanh(Q)
         K_norm = torch.tanh(K)
-        
         # もつれ補正項（ヘッドごと）
-        # delta[b, h, i, j] = sum_d sum_e J[h, d, e] * Q_norm[b, h, i, d] * K_norm[b, h, j, e]
         delta = torch.einsum('bhid,hde,bhje->bhij', Q_norm, self.J_attn, K_norm)
-        
-        # 補正を加える
         attn_scores = attn_scores + self.lambda_attn * delta
         
-        # マスク適用
+        # GPT標準: Causal Mask適用
         if mask is not None:
+            # 提供されたマスクを使用
+            if mask.dim() == 2:
+                mask = mask.unsqueeze(0).unsqueeze(0)  # (1, 1, seq, seq)
             attn_scores = attn_scores.masked_fill(mask == 0, float('-inf'))
+        else:
+            # Causal Mask自動生成（GPT標準）
+            causal_mask = torch.triu(torch.ones(seq_len, seq_len, device=x.device), diagonal=1).bool()
+            causal_mask = causal_mask.unsqueeze(0).unsqueeze(0)  # (1, 1, seq, seq)
+            attn_scores = attn_scores.masked_fill(causal_mask, float('-inf'))
         
-        # Softmax
+        # GPT標準: Softmax + Dropout
         attn_probs = F.softmax(attn_scores, dim=-1)
         attn_probs = self.dropout(attn_probs)
         
-        # 出力
-        output = torch.matmul(attn_probs, V)
+        # GPT標準: アテンション適用
+        output = torch.matmul(attn_probs, V)  # (batch, heads, seq, head_dim)
         output = output.transpose(1, 2).contiguous().view(batch_size, seq_len, self.embed_dim)
-        output = self.out_proj(output)
         
-        return output
+        # GPT標準: 出力射影
+        return self.out_proj(output)
 
 
 # ========================================
@@ -284,15 +320,23 @@ class QBNNAttention(nn.Module):
 
 class QBNNTransformerBlock(nn.Module):
     """
-    QBNN-Transformer ブロック
+    GPTデコーダーブロック（QBNN拡張版）
     
-    構造:
-    1. QBNN-Attention + Residual
-    2. QBNN-FFN + Residual
+    GPT標準構造:
+    1. Pre-norm LayerNorm
+    2. Multi-Head Causal Self-Attention (QBNN拡張)
+    3. Residual Connection
+    4. Pre-norm LayerNorm
+    5. Feed-Forward Network (標準FFN + QBNN拡張)
+    6. Residual Connection
     """
     
     def __init__(self, config: NeuroQuantumConfig):
         super().__init__()
+        
+        # Pre-norm LayerNorm
+        self.norm1 = nn.LayerNorm(config.embed_dim)
+        self.norm2 = nn.LayerNorm(config.embed_dim)
         
         # QBNN-Attention
         self.attention = QBNNAttention(
@@ -301,26 +345,63 @@ class QBNNTransformerBlock(nn.Module):
             dropout=config.dropout,
             lambda_val=config.lambda_entangle
         )
-        self.attn_norm = nn.LayerNorm(config.embed_dim)
         
-        # QBNN-FFN
-        self.ffn = nn.Sequential(
-            QBNNLayer(config.embed_dim, config.hidden_dim, config.lambda_entangle),
+        # GPT標準FFN: Linear → GELU → Linear
+        self.ffn_standard = nn.Sequential(
+            nn.Linear(config.embed_dim, config.hidden_dim),
+            nn.GELU(),
             nn.Dropout(config.dropout),
-            QBNNLayer(config.hidden_dim, config.embed_dim, config.lambda_entangle),
+            nn.Linear(config.hidden_dim, config.embed_dim),
+            nn.Dropout(config.dropout)
         )
-        self.ffn_norm = nn.LayerNorm(config.embed_dim)
+        
+        # QBNN拡張FFN（個別レイヤーにアクセス可能にするため、Sequentialではなく個別に定義）
+        self.ffn_qbnn_layer1 = QBNNLayer(
+            config.embed_dim, config.hidden_dim, 
+            lambda_min=config.lambda_entangle * 0.5,
+            lambda_max=config.lambda_entangle * 1.5
+        )
+        self.ffn_qbnn_dropout = nn.Dropout(config.dropout)
+        self.ffn_qbnn_layer2 = QBNNLayer(
+            config.hidden_dim, config.embed_dim,
+            lambda_min=config.lambda_entangle * 0.5,
+            lambda_max=config.lambda_entangle * 1.5
+        )
         
         self.dropout = nn.Dropout(config.dropout)
     
     def forward(self, x: torch.Tensor, mask: Optional[torch.Tensor] = None) -> torch.Tensor:
-        # Attention + Residual
-        attn_out = self.attention(self.attn_norm(x), mask)
-        x = x + self.dropout(attn_out)
+        """
+        GPTデコーダーフォワード
         
-        # FFN + Residual
-        ffn_out = self.ffn(self.ffn_norm(x))
-        x = x + self.dropout(ffn_out)
+        Args:
+            x: (batch, seq, embed_dim)
+            mask: Optional attention mask
+        
+        Returns:
+            (batch, seq, embed_dim)
+        """
+        # 1. Pre-norm + Multi-Head Causal Self-Attention + Residual
+        residual = x
+        x = self.norm1(x)
+        attn_out = self.attention(x, mask)
+        x = residual + self.dropout(attn_out)
+        
+        # 2. Pre-norm + Feed-Forward Network + Residual
+        residual = x
+        x = self.norm2(x)
+        
+        # 標準FFN + QBNN拡張（ブレンド）
+        ffn_standard_out = self.ffn_standard(x)
+        # QBNN拡張FFN
+        ffn_qbnn_out = self.ffn_qbnn_layer1(x)
+        ffn_qbnn_out = self.ffn_qbnn_dropout(ffn_qbnn_out)
+        ffn_qbnn_out = self.ffn_qbnn_layer2(ffn_qbnn_out)
+        
+        # ブレンド比率: 標準FFN 70% + QBNN拡張 30%
+        ffn_out = 0.7 * ffn_standard_out + 0.3 * ffn_qbnn_out
+        
+        x = residual + ffn_out
         
         return x
 
@@ -400,10 +481,14 @@ class NeuroQuantumHead(nn.Module):
 
 class NeuroQuantum(nn.Module):
     """
-    ニューロQ: QBNN-LLM
+    ニューロQ: GPTデコーダー構造（QBNN拡張版）
     
-    完全なアーキテクチャ:
-    [Token] → [Embedding] → [QBNN-Transformer × N] → [Output Head] → [確率]
+    GPT標準構造:
+    1. Token Embedding + Position Embedding
+    2. Dropout
+    3. N個のGPT Decoder Blocks
+    4. Final LayerNorm
+    5. Output Head (Linear to vocab_size)
     
     独自要素:
     - QBNNLayer: 量子もつれテンソル J による補正
@@ -415,24 +500,32 @@ class NeuroQuantum(nn.Module):
         super().__init__()
         self.config = config
         
-        # 埋め込み層
-        self.embedding = NeuroQuantumEmbedding(config)
+        # GPT標準: Token Embedding + Position Embedding
+        self.token_embedding = nn.Embedding(config.vocab_size, config.embed_dim)
+        self.position_embedding = nn.Embedding(config.max_seq_len, config.embed_dim)
         
-        # QBNN-Transformer ブロック
+        # GPT Decoder Blocks
         self.transformer_blocks = nn.ModuleList([
             QBNNTransformerBlock(config) for _ in range(config.num_layers)
         ])
         
-        # 出力ヘッド
-        self.output_head = NeuroQuantumHead(config)
+        # GPT標準: Final LayerNorm
+        self.final_norm = nn.LayerNorm(config.embed_dim)
         
-        # パラメータ初期化
+        # GPT標準: Output Head (weight tying可能だが、ここでは独立)
+        self.output_head = nn.Linear(config.embed_dim, config.vocab_size, bias=False)
+        
+        # GPT標準: Embedding Dropout
+        self.dropout = nn.Dropout(config.dropout)
+        
+        # パラメータ初期化（GPT標準）
         self.apply(self._init_weights)
         
         # モデル情報
         self.num_params = sum(p.numel() for p in self.parameters())
     
     def _init_weights(self, module):
+        """GPT標準の重み初期化"""
         if isinstance(module, nn.Linear):
             torch.nn.init.normal_(module.weight, mean=0.0, std=0.02)
             if module.bias is not None:
@@ -441,20 +534,38 @@ class NeuroQuantum(nn.Module):
             torch.nn.init.normal_(module.weight, mean=0.0, std=0.02)
     
     def forward(self, token_ids: torch.Tensor, mask: Optional[torch.Tensor] = None) -> torch.Tensor:
-        # 埋め込み
-        hidden_states = self.embedding(token_ids)
+        """
+        GPTデコーダーフォワード
         
-        # Causal Mask（自己回帰用）
+        Args:
+            token_ids: (batch, seq) トークンID
+            mask: Optional attention mask (Noneの場合はCausal Maskを自動生成)
+        
+        Returns:
+            (batch, seq, vocab_size) ロジット
+        """
+        batch, seq = token_ids.shape
+        
+        # GPT標準: Token + Position Embedding
+        token_embeds = self.token_embedding(token_ids)  # (batch, seq, embed_dim)
+        positions = torch.arange(seq, device=token_ids.device).unsqueeze(0).expand(batch, -1)
+        pos_embeds = self.position_embedding(positions)  # (batch, seq, embed_dim)
+        
+        # 埋め込みの合成 + Dropout
+        hidden_states = self.dropout(token_embeds + pos_embeds)
+        
+        # Causal Mask生成（maskがNoneの場合）
         if mask is None:
-            seq_len = token_ids.size(1)
-            mask = torch.tril(torch.ones(seq_len, seq_len, device=token_ids.device))
-            mask = mask.unsqueeze(0).unsqueeze(0)  # (1, 1, seq, seq)
+            mask = torch.tril(torch.ones(seq, seq, device=token_ids.device)).unsqueeze(0).unsqueeze(0)
         
-        # Transformer ブロック
+        # GPT Decoder Blocks
         for block in self.transformer_blocks:
             hidden_states = block(hidden_states, mask)
         
-        # 出力
+        # GPT標準: Final LayerNorm
+        hidden_states = self.final_norm(hidden_states)
+        
+        # GPT標準: Output Head
         logits = self.output_head(hidden_states)
         
         return logits

@@ -301,9 +301,11 @@ class BrainQuantumAttention(nn.Module):
     
     def forward(self, x: torch.Tensor, mask: Optional[torch.Tensor] = None) -> torch.Tensor:
         """
+        GPT標準: Multi-Head Causal Self-Attention（脳型量子拡張版）
+        
         Args:
             x: (batch, seq, embed_dim)
-            mask: オプショナルのマスク
+            mask: Optional attention mask (Noneの場合はCausal Maskを自動生成)
         
         Returns:
             (batch, seq, embed_dim)
@@ -315,36 +317,41 @@ class BrainQuantumAttention(nn.Module):
         K = self.k_proj(x)
         V = self.v_proj(x)
         
-        # 脳型量子処理でQ, K を変調
+        # 脳型量子処理でQ, K を変調（量子拡張）
         Q = Q + 0.1 * self.brain_layer(Q, time_steps=2)
         K = K + 0.1 * self.brain_layer(K, time_steps=2)
         
         # マルチヘッド形式に変換
-        Q = Q.view(batch, seq, self.num_heads, self.head_dim).transpose(1, 2)
+        Q = Q.view(batch, seq, self.num_heads, self.head_dim).transpose(1, 2)  # (batch, heads, seq, head_dim)
         K = K.view(batch, seq, self.num_heads, self.head_dim).transpose(1, 2)
         V = V.view(batch, seq, self.num_heads, self.head_dim).transpose(1, 2)
         
-        # アテンションスコア
-        scores = torch.matmul(Q, K.transpose(-2, -1)) / math.sqrt(self.head_dim)
+        # GPT標準: アテンションスコア計算
+        scores = torch.matmul(Q, K.transpose(-2, -1)) / math.sqrt(self.head_dim)  # (batch, heads, seq, seq)
         
-        # マスク適用
+        # GPT標準: Causal Mask適用
         if mask is not None:
+            # 提供されたマスクを使用
+            if mask.dim() == 2:
+                mask = mask.unsqueeze(0).unsqueeze(0)  # (1, 1, seq, seq)
             scores = scores.masked_fill(mask == 0, float('-inf'))
+        else:
+            # Causal Mask自動生成（GPT標準）
+            causal_mask = torch.triu(torch.ones(seq, seq, device=x.device), diagonal=1).bool()
+            causal_mask = causal_mask.unsqueeze(0).unsqueeze(0)  # (1, 1, seq, seq)
+            scores = scores.masked_fill(causal_mask, float('-inf'))
         
-        # Causalマスク
-        causal_mask = torch.triu(torch.ones(seq, seq, device=x.device), diagonal=1).bool()
-        scores = scores.masked_fill(causal_mask, float('-inf'))
-        
-        # ソフトマックス
+        # GPT標準: Softmax + Dropout
         attn_weights = F.softmax(scores, dim=-1)
         attn_weights = self.dropout(attn_weights)
         
-        # アテンション適用
-        context = torch.matmul(attn_weights, V)
+        # GPT標準: アテンション適用
+        context = torch.matmul(attn_weights, V)  # (batch, heads, seq, head_dim)
         
         # 元の形状に戻す
         context = context.transpose(1, 2).contiguous().view(batch, seq, self.embed_dim)
         
+        # GPT標準: 出力射影
         return self.out_proj(context)
 
 
@@ -353,11 +360,26 @@ class BrainQuantumAttention(nn.Module):
 # ========================================
 
 class BrainQuantumBlock(nn.Module):
-    """脳型量子トランスフォーマーブロック"""
+    """
+    GPTデコーダーブロック（脳型量子拡張版）
+    
+    GPT標準構造:
+    1. Pre-norm LayerNorm
+    2. Multi-Head Causal Self-Attention
+    3. Residual Connection
+    4. Pre-norm LayerNorm
+    5. Feed-Forward Network (標準FFN + 脳型量子拡張)
+    6. Residual Connection
+    """
     
     def __init__(self, embed_dim: int, num_heads: int = 4,
-                 num_neurons: int = 32, dropout: float = 0.1):
+                 num_neurons: int = 32, dropout: float = 0.1,
+                 ffn_expansion: int = 4):
         super().__init__()
+        
+        # Pre-norm LayerNorm
+        self.norm1 = nn.LayerNorm(embed_dim)
+        self.norm2 = nn.LayerNorm(embed_dim)
         
         # 脳型量子アテンション
         self.attention = BrainQuantumAttention(
@@ -367,8 +389,18 @@ class BrainQuantumBlock(nn.Module):
             dropout=dropout
         )
         
-        # 脳型量子FFN
-        self.ffn = BrainQuantumLayer(
+        # GPT標準FFN: Linear → GELU → Linear
+        ffn_hidden = embed_dim * ffn_expansion
+        self.ffn_standard = nn.Sequential(
+            nn.Linear(embed_dim, ffn_hidden),
+            nn.GELU(),
+            nn.Dropout(dropout),
+            nn.Linear(ffn_hidden, embed_dim),
+            nn.Dropout(dropout)
+        )
+        
+        # 脳型量子拡張FFN（オプション）
+        self.ffn_quantum = BrainQuantumLayer(
             num_neurons=num_neurons * 2,
             input_dim=embed_dim,
             output_dim=embed_dim,
@@ -376,20 +408,37 @@ class BrainQuantumBlock(nn.Module):
             lambda_entangle=0.35
         )
         
-        # LayerNorm
-        self.norm1 = nn.LayerNorm(embed_dim)
-        self.norm2 = nn.LayerNorm(embed_dim)
-        
         self.dropout = nn.Dropout(dropout)
     
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        # Self-Attention + Residual
-        attn_out = self.attention(self.norm1(x))
-        x = x + self.dropout(attn_out)
+    def forward(self, x: torch.Tensor, mask: Optional[torch.Tensor] = None) -> torch.Tensor:
+        """
+        GPTデコーダーフォワード
         
-        # FFN + Residual
-        ffn_out = self.ffn(self.norm2(x), time_steps=2)
-        x = x + self.dropout(ffn_out)
+        Args:
+            x: (batch, seq, embed_dim)
+            mask: Optional attention mask
+        
+        Returns:
+            (batch, seq, embed_dim)
+        """
+        # 1. Pre-norm + Multi-Head Causal Self-Attention + Residual
+        residual = x
+        x = self.norm1(x)
+        attn_out = self.attention(x, mask)
+        x = residual + self.dropout(attn_out)
+        
+        # 2. Pre-norm + Feed-Forward Network + Residual
+        residual = x
+        x = self.norm2(x)
+        
+        # 標準FFN + 脳型量子拡張（ブレンド）
+        ffn_standard_out = self.ffn_standard(x)
+        ffn_quantum_out = self.ffn_quantum(x, time_steps=2)
+        
+        # ブレンド比率: 標準FFN 70% + 量子拡張 30%
+        ffn_out = 0.7 * ffn_standard_out + 0.3 * ffn_quantum_out
+        
+        x = residual + ffn_out
         
         return x
 
@@ -400,64 +449,95 @@ class BrainQuantumBlock(nn.Module):
 
 class NeuroQuantumBrain(nn.Module):
     """
-    ニューロQ Brain - 脳型散在QBNNによるLLM
+    ニューロQ Brain - GPTデコーダー構造（脳型量子拡張版）
+    
+    GPT標準構造:
+    1. Token Embedding + Position Embedding
+    2. Dropout
+    3. N個のGPT Decoder Blocks
+    4. Final LayerNorm
+    5. Output Head (Linear to vocab_size)
     """
     
     def __init__(self, vocab_size: int, embed_dim: int = 128,
                  num_heads: int = 4, num_layers: int = 3,
                  num_neurons: int = 48, max_seq_len: int = 256,
-                 dropout: float = 0.1):
+                 dropout: float = 0.1, ffn_expansion: int = 4):
         super().__init__()
         
         self.vocab_size = vocab_size
         self.embed_dim = embed_dim
         self.max_seq_len = max_seq_len
         
-        # 埋め込み
+        # GPT標準: Token Embedding + Position Embedding
         self.token_embedding = nn.Embedding(vocab_size, embed_dim)
-        self.pos_embedding = nn.Parameter(torch.randn(max_seq_len, embed_dim) * 0.02)
+        self.position_embedding = nn.Embedding(max_seq_len, embed_dim)
         
-        # 脳型量子ブロック
+        # GPT Decoder Blocks
         self.blocks = nn.ModuleList([
             BrainQuantumBlock(
                 embed_dim=embed_dim,
                 num_heads=num_heads,
                 num_neurons=num_neurons,
-                dropout=dropout
+                dropout=dropout,
+                ffn_expansion=ffn_expansion
             ) for _ in range(num_layers)
         ])
         
-        # 最終LayerNorm
+        # GPT標準: Final LayerNorm
         self.final_norm = nn.LayerNorm(embed_dim)
         
-        # 出力ヘッド
-        self.output_head = nn.Linear(embed_dim, vocab_size)
+        # GPT標準: Output Head (weight tying可能だが、ここでは独立)
+        self.output_head = nn.Linear(embed_dim, vocab_size, bias=False)
         
+        # GPT標準: Embedding Dropout
         self.dropout = nn.Dropout(dropout)
+        
+        # パラメータ初期化（GPT標準）
+        self.apply(self._init_weights)
     
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
+    def _init_weights(self, module):
+        """GPT標準の重み初期化"""
+        if isinstance(module, nn.Linear):
+            torch.nn.init.normal_(module.weight, mean=0.0, std=0.02)
+            if module.bias is not None:
+                torch.nn.init.zeros_(module.bias)
+        elif isinstance(module, nn.Embedding):
+            torch.nn.init.normal_(module.weight, mean=0.0, std=0.02)
+    
+    def forward(self, x: torch.Tensor, mask: Optional[torch.Tensor] = None) -> torch.Tensor:
         """
+        GPTデコーダーフォワード
+        
         Args:
             x: (batch, seq) トークンID
+            mask: Optional attention mask (Noneの場合はCausal Maskを自動生成)
         
         Returns:
             (batch, seq, vocab_size) ロジット
         """
         batch, seq = x.shape
         
-        # 埋め込み
-        tok_emb = self.token_embedding(x)
-        pos_emb = self.pos_embedding[:seq].unsqueeze(0)
+        # GPT標準: Token + Position Embedding
+        token_embeds = self.token_embedding(x)  # (batch, seq, embed_dim)
+        positions = torch.arange(seq, device=x.device).unsqueeze(0).expand(batch, -1)
+        pos_embeds = self.position_embedding(positions)  # (batch, seq, embed_dim)
         
-        h = self.dropout(tok_emb + pos_emb)
+        # 埋め込みの合成 + Dropout
+        h = self.dropout(token_embeds + pos_embeds)
         
-        # 脳型量子ブロック
+        # Causal Mask生成（maskがNoneの場合）
+        if mask is None:
+            mask = torch.tril(torch.ones(seq, seq, device=x.device)).unsqueeze(0).unsqueeze(0)
+        
+        # GPT Decoder Blocks
         for block in self.blocks:
-            h = block(h)
+            h = block(h, mask)
         
+        # GPT標準: Final LayerNorm
         h = self.final_norm(h)
         
-        # 出力
+        # GPT標準: Output Head
         logits = self.output_head(h)
         
         return logits
@@ -469,8 +549,8 @@ class NeuroQuantumBrain(nn.Module):
         for i, block in enumerate(self.blocks):
             # アテンションの統計
             attn_stats = block.attention.brain_layer.get_quantum_stats()
-            # FFNの統計
-            ffn_stats = block.ffn.get_quantum_stats()
+            # FFNの統計（新しい構造ではffn_quantumを使用）
+            ffn_stats = block.ffn_quantum.get_quantum_stats()
             
             report += f"Block {i}:\n"
             report += f"  Attention: r={attn_stats['r_mean']:.3f}, T={attn_stats['T_mean']:.3f}, λ={attn_stats['lambda']:.3f}\n"
@@ -508,10 +588,10 @@ class NeuroQuantumBrain(nn.Module):
             # 量子状態から温度を動的に計算
             # 2θが45°〜135°の範囲（π/4〜3π/4）になるように制約
             if len(self.blocks) > 0:
-                # ブロックのθから相関係数rを取得
+                # ブロックのθから相関係数rを取得（新しい構造ではffn_quantumを使用）
                 r_vals = []
                 for block in self.blocks:
-                    r_vals.append(block.ffn.get_r().mean().item())
+                    r_vals.append(block.ffn_quantum.get_r().mean().item())
                 r_mean = np.mean(r_vals)
                 
                 # r ∈ [-1, 1] を温度範囲にマッピング
@@ -534,7 +614,7 @@ class NeuroQuantumBrain(nn.Module):
             
             # 量子ゆらぎを追加（制約された範囲で）
             if len(self.blocks) > 0:
-                T_mean = self.blocks[-1].ffn.get_T().mean()
+                T_mean = self.blocks[-1].ffn_quantum.get_T().mean()
                 # T = |sin(2θ)|, 2θ ∈ [45°, 135°] なら T ∈ [0.707, 1.0]
                 T_clamped = max(0.707, min(1.0, T_mean.item()))
                 quantum_noise = torch.randn_like(next_logits) * T_clamped * 0.15
