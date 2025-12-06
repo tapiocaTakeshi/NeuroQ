@@ -34,8 +34,14 @@ import numpy as np
 import math
 import json
 import os
+import sys
 from collections import Counter
 from typing import List, Dict, Optional, Tuple
+
+# 親ディレクトリをパスに追加（qbnn_layered.py を参照するため）
+PARENT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if PARENT_DIR not in sys.path:
+    sys.path.insert(0, PARENT_DIR)
 
 # ========================================
 # qbnn_layered.py からコアコンポーネントをインポート

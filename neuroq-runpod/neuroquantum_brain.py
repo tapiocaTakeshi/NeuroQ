@@ -26,11 +26,18 @@ import torch.nn.functional as F
 import numpy as np
 import math
 import random
+import os
+import sys
 from typing import List, Dict, Tuple, Optional
 from collections import Counter
 import re
 import warnings
 warnings.filterwarnings('ignore')
+
+# 親ディレクトリをパスに追加（qbnn_brain.py を参照するため）
+PARENT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if PARENT_DIR not in sys.path:
+    sys.path.insert(0, PARENT_DIR)
 
 # ========================================
 # qbnn_brain.py からコアコンポーネントをインポート
