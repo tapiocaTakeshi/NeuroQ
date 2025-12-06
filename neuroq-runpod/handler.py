@@ -25,25 +25,45 @@ from typing import Dict, Any, Optional
 PARENT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
 # まず現在のディレクトリを追加（Dockerコンテナ内ではこれで十分）
+# 現在のディレクトリを最初に追加することで、現在のディレクトリのファイルが優先される
 if CURRENT_DIR not in sys.path:
     sys.path.insert(0, CURRENT_DIR)
 # 親ディレクトリも追加（ローカル開発用）
+# ただし、現在のディレクトリの後に追加することで、現在のディレクトリが優先される
 if PARENT_DIR not in sys.path:
-    sys.path.insert(0, PARENT_DIR)
+    sys.path.insert(1, PARENT_DIR)  # インデックス1に挿入して現在のディレクトリを優先
 
 # neuroquantum_layered.py からインポート
 try:
-    from neuroquantum_layered import (
-        NeuroQuantumAI,
-        NeuroQuantumTokenizer,
-        NeuroQuantumConfig,
-        NeuroQuantum,
-    )
-    NEUROQUANTUM_LAYERED_AVAILABLE = True
-    print("✅ neuroquantum_layered.py からコンポーネントをインポートしました")
+    # 現在のディレクトリのファイルを明示的にインポート
+    import importlib.util
+    layered_path = os.path.join(CURRENT_DIR, "neuroquantum_layered.py")
+    if os.path.exists(layered_path):
+        spec = importlib.util.spec_from_file_location("neuroquantum_layered_local", layered_path)
+        layered_module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(layered_module)
+        NeuroQuantumAI = layered_module.NeuroQuantumAI
+        NeuroQuantumTokenizer = layered_module.NeuroQuantumTokenizer
+        NeuroQuantumConfig = layered_module.NeuroQuantumConfig
+        NeuroQuantum = layered_module.NeuroQuantum
+        NEUROQUANTUM_LAYERED_AVAILABLE = True
+        print(f"✅ ローカルの neuroquantum_layered.py からコンポーネントをインポートしました ({layered_path})")
+    else:
+        # フォールバック: 通常のインポート
+        from neuroquantum_layered import (
+            NeuroQuantumAI,
+            NeuroQuantumTokenizer,
+            NeuroQuantumConfig,
+            NeuroQuantum,
+        )
+        NEUROQUANTUM_LAYERED_AVAILABLE = True
+        print("✅ neuroquantum_layered.py からコンポーネントをインポートしました")
 except ImportError as e:
     NEUROQUANTUM_LAYERED_AVAILABLE = False
     print(f"⚠️ neuroquantum_layered.py が見つかりません: {e}")
+except Exception as e:
+    NEUROQUANTUM_LAYERED_AVAILABLE = False
+    print(f"⚠️ neuroquantum_layered.py のインポートでエラーが発生しました: {e}")
 
 # neuroquantum_brain.py からインポート
 try:
