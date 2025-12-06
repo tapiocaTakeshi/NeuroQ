@@ -47,6 +47,25 @@ import re
 import warnings
 warnings.filterwarnings('ignore')
 
+# SentencePiece（トークナイザー用）
+try:
+    import sentencepiece as spm
+    SENTENCEPIECE_AVAILABLE = True
+except ImportError:
+    SENTENCEPIECE_AVAILABLE = False
+    warnings.warn("sentencepieceライブラリがインストールされていません。pip install sentencepiece を実行してください。")
+
+# Transformersライブラリ（アテンション用）
+try:
+    from transformers import (
+        GPT2Config,
+        GPT2Attention,
+    )
+    TRANSFORMERS_AVAILABLE = True
+except ImportError:
+    TRANSFORMERS_AVAILABLE = False
+    # 警告は表示しない（フォールバックモードで動作可能なため）
+
 # OpenAI API（オプション）
 try:
     from openai import OpenAI
@@ -369,22 +388,41 @@ class BrainQuantumLayer(nn.Module):
 # ========================================
 
 class BrainQuantumAttention(nn.Module):
-    """脳型量子アテンション"""
+    """
+    脳型量子アテンション（transformersライブラリベース + QBNN拡張）
+    
+    transformersのGPT2Attentionをベースに、脳型量子もつれ補正を追加
+    """
     
     def __init__(self, embed_dim: int, num_heads: int = 4, 
-                 num_neurons: int = 32, dropout: float = 0.1):
+                 num_neurons: int = 32, dropout: float = 0.1,
+                 max_positions: int = 1024):
         super().__init__()
         
         self.embed_dim = embed_dim
         self.num_heads = num_heads
         self.head_dim = embed_dim // num_heads
         
-        # Q, K, V 射影
-        self.q_proj = nn.Linear(embed_dim, embed_dim)
-        self.k_proj = nn.Linear(embed_dim, embed_dim)
-        self.v_proj = nn.Linear(embed_dim, embed_dim)
+        # transformersのGPT2Attentionを使用
+        if TRANSFORMERS_AVAILABLE:
+            config = GPT2Config(
+                n_embd=embed_dim,
+                n_head=num_heads,
+                attn_pdrop=dropout,
+                resid_pdrop=dropout,
+                max_position_embeddings=max_positions,
+            )
+            self.attention = GPT2Attention(config, layer_idx=None)
+        else:
+            warnings.warn("transformersが利用できないため、簡易アテンションを使用します。")
+            self.attention = None
+            self.q_proj = nn.Linear(embed_dim, embed_dim)
+            self.k_proj = nn.Linear(embed_dim, embed_dim)
+            self.v_proj = nn.Linear(embed_dim, embed_dim)
+            self.out_proj = nn.Linear(embed_dim, embed_dim)
+            self.dropout = nn.Dropout(dropout)
         
-        # 脳型量子層（アテンションスコア用）
+        # 脳型量子層（アテンションスコア用 - QBNN拡張）
         self.brain_layer = BrainQuantumLayer(
             num_neurons=num_neurons,
             input_dim=embed_dim,
@@ -392,65 +430,70 @@ class BrainQuantumAttention(nn.Module):
             connection_density=0.2,
             lambda_entangle=0.3
         )
-        
-        # 出力射影
-        self.out_proj = nn.Linear(embed_dim, embed_dim)
-        self.dropout = nn.Dropout(dropout)
     
     def forward(self, x: torch.Tensor, mask: Optional[torch.Tensor] = None) -> torch.Tensor:
         """
-        GPT標準: Multi-Head Causal Self-Attention（脳型量子拡張版）
+        transformersベースのMulti-Head Causal Self-Attention（脳型量子拡張版）
         
         Args:
             x: (batch, seq, embed_dim)
-            mask: Optional attention mask (Noneの場合はCausal Maskを自動生成)
+            mask: Optional attention mask
         
         Returns:
             (batch, seq, embed_dim)
         """
-        batch, seq, _ = x.shape
-        
-        # Q, K, V 計算
-        Q = self.q_proj(x)
-        K = self.k_proj(x)
-        V = self.v_proj(x)
-        
-        # 脳型量子処理でQ, K を変調（量子拡張）
-        Q = Q + 0.1 * self.brain_layer(Q, time_steps=2)
-        K = K + 0.1 * self.brain_layer(K, time_steps=2)
-        
-        # マルチヘッド形式に変換
-        Q = Q.view(batch, seq, self.num_heads, self.head_dim).transpose(1, 2)  # (batch, heads, seq, head_dim)
-        K = K.view(batch, seq, self.num_heads, self.head_dim).transpose(1, 2)
-        V = V.view(batch, seq, self.num_heads, self.head_dim).transpose(1, 2)
-        
-        # GPT標準: アテンションスコア計算
-        scores = torch.matmul(Q, K.transpose(-2, -1)) / math.sqrt(self.head_dim)  # (batch, heads, seq, seq)
-        
-        # GPT標準: Causal Mask適用
-        if mask is not None:
-            # 提供されたマスクを使用
-            if mask.dim() == 2:
-                mask = mask.unsqueeze(0).unsqueeze(0)  # (1, 1, seq, seq)
-            scores = scores.masked_fill(mask == 0, float('-inf'))
+        if TRANSFORMERS_AVAILABLE and self.attention is not None:
+            # transformersのGPT2Attentionを使用
+            hidden_states = x
+            
+            # 脳型量子処理で入力を変調（QBNN拡張）
+            quantum_modulation = self.brain_layer(hidden_states, time_steps=2)
+            hidden_states = hidden_states + 0.1 * quantum_modulation
+            
+            # アテンション計算（transformersライブラリ）
+            attn_output = self.attention(hidden_states, layer_past=None, use_cache=False, output_attentions=False)[0]
+            
+            return attn_output
         else:
-            # Causal Mask自動生成（GPT標準）
-            causal_mask = torch.triu(torch.ones(seq, seq, device=x.device), diagonal=1).bool()
-            causal_mask = causal_mask.unsqueeze(0).unsqueeze(0)  # (1, 1, seq, seq)
-            scores = scores.masked_fill(causal_mask, float('-inf'))
-        
-        # GPT標準: Softmax + Dropout
-        attn_weights = F.softmax(scores, dim=-1)
-        attn_weights = self.dropout(attn_weights)
-        
-        # GPT標準: アテンション適用
-        context = torch.matmul(attn_weights, V)  # (batch, heads, seq, head_dim)
-        
-        # 元の形状に戻す
-        context = context.transpose(1, 2).contiguous().view(batch, seq, self.embed_dim)
-        
-        # GPT標準: 出力射影
-        return self.out_proj(context)
+            # フォールバック：簡易実装 + 脳型量子拡張
+            batch, seq, _ = x.shape
+            
+            # 脳型量子処理で入力を変調
+            quantum_modulation = self.brain_layer(x, time_steps=2)
+            x_modulated = x + 0.1 * quantum_modulation
+            
+            # Q, K, V 計算
+            Q = self.q_proj(x_modulated)
+            K = self.k_proj(x_modulated)
+            V = self.v_proj(x_modulated)
+            
+            # マルチヘッド形式に変換
+            Q = Q.view(batch, seq, self.num_heads, self.head_dim).transpose(1, 2)
+            K = K.view(batch, seq, self.num_heads, self.head_dim).transpose(1, 2)
+            V = V.view(batch, seq, self.num_heads, self.head_dim).transpose(1, 2)
+            
+            # アテンションスコア計算
+            scores = torch.matmul(Q, K.transpose(-2, -1)) / math.sqrt(self.head_dim)
+            
+            # Causal Mask適用
+            if mask is None:
+                causal_mask = torch.triu(torch.ones(seq, seq, device=x.device), diagonal=1).bool()
+                causal_mask = causal_mask.unsqueeze(0).unsqueeze(0)
+                scores = scores.masked_fill(causal_mask, float('-inf'))
+            else:
+                if mask.dim() == 2:
+                    mask = mask.unsqueeze(0).unsqueeze(0)
+                scores = scores.masked_fill(mask == 0, float('-inf'))
+            
+            # Softmax + Dropout
+            attn_weights = F.softmax(scores, dim=-1)
+            attn_weights = self.dropout(attn_weights)
+            
+            # アテンション適用
+            context = torch.matmul(attn_weights, V)
+            context = context.transpose(1, 2).contiguous().view(batch, seq, self.embed_dim)
+            
+            return self.out_proj(context)
 
 
 # ========================================
@@ -834,157 +877,216 @@ class NeuroQuantumBrain(nn.Module):
 
 
 # ========================================
-# トークナイザー（サブワード対応）
+# トークナイザー（transformersライブラリ使用）
 # ========================================
 
 class BrainTokenizer:
     """
-    サブワード対応トークナイザー（図2-4のトークン化ステップに準拠）
+    SentencePieceトークナイザーを使用
     
-    処理フロー:
-    1. 入力テキスト → トークン化（テキストを個々のトークンに分割）
-    2. トークン → トークンID（各トークンを数値IDに変換）
-    
-    特徴:
-    - 文字単位 + 頻出バイグラム/単語単位
-    - 最大50,000トークン対応
+    - 語彙サイズを指定して学習可能（8000-32000推奨）
+    - BPEアルゴリズムを使用（日本語に適している）
+    - モデルの保存・読み込みが可能
+    - フォールバック: 簡易トークナイザー（SentencePiece未インストール時）
     """
     
-    def __init__(self, max_vocab: int = 50000, use_subword: bool = True):
-        self.max_vocab = max_vocab
-        self.use_subword = use_subword
+    def __init__(self, vocab_size: int = 16000, model_file: str = None):
+        """
+        Args:
+            vocab_size: 語彙サイズ（デフォルト: 16000）
+            model_file: 既存のSentencePieceモデルファイルパス（Noneの場合は新規学習）
+        """
+        self.vocab_size = vocab_size
+        self.actual_vocab_size = None
+        self.model_file = model_file
+        self.sp_model = None
+        
+        # 特殊トークン
+        self.pad_token = '<pad>'
+        self.unk_token = '<unk>'
+        self.bos_token = '<s>'
+        self.eos_token = '</s>'
+        
+        # SentencePieceを使用
+        if SENTENCEPIECE_AVAILABLE:
+            if model_file and os.path.exists(model_file):
+                # 既存モデルを読み込み
+                try:
+                    self.sp_model = spm.SentencePieceProcessor()
+                    self.sp_model.load(model_file)
+                    self.actual_vocab_size = self.sp_model.get_piece_size()
+                    self.vocab_size = self.actual_vocab_size
+                    print(f"   ✅ SentencePieceモデル読み込み: {model_file} (語彙サイズ: {self.actual_vocab_size})")
+                except Exception as e:
+                    warnings.warn(f"SentencePieceモデルの読み込みに失敗: {e}。新規学習します。")
+                    self.sp_model = None
+        else:
+            # SentencePiece未インストール
+            self.sp_model = None
+        
+        # SentencePieceが使えない場合はフォールバック
+        if self.sp_model is None:
+            self._init_fallback()
+    
+    def _init_fallback(self):
+        """フォールバック用の簡易トークナイザー初期化"""
         self.token2idx = {'<PAD>': 0, '<UNK>': 1, '<BOS>': 2, '<EOS>': 3}
         self.idx2token = {0: '<PAD>', 1: '<UNK>', 2: '<BOS>', 3: '<EOS>'}
-        self.vocab_size = 4
-        self.subword_list = []
-    
-    def fit(self, texts: List[str]):
-        """語彙を構築（文字 + サブワード）"""
+        # vocab_sizeは設定されている値を保持（上書きしない）
+        if not hasattr(self, 'vocab_size') or self.vocab_size is None:
+            self.vocab_size = 4
+        self.actual_vocab_size = None  # fit()で設定される
         
-        # 1. 文字カウント
+        # 特殊トークンID
+        self.pad_id = 0
+        self.unk_id = 1
+        self.bos_id = 2
+        self.eos_id = 3
+    
+    def fit(self, texts: List[str], character_coverage: float = 0.9995, model_prefix: str = "spm_model_brain"):
+        """
+        SentencePieceで語彙を学習
+        
+        Args:
+            texts: 学習テキストのリスト
+            character_coverage: 文字カバレッジ（0.9995が推奨、日本語の場合は0.9995-0.99995）
+            model_prefix: モデルファイルのプレフィックス
+        """
+        if not SENTENCEPIECE_AVAILABLE:
+            warnings.warn("SentencePieceが利用できません。フォールバックトークナイザーを使用します。")
+            self._fit_fallback(texts)
+            return
+        
+        print(f"   🔤 SentencePieceで語彙学習中... (目標語彙サイズ: {self.vocab_size})")
+        
+        # 一時ファイルにテキストを保存
+        import tempfile
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.txt', delete=False, encoding='utf-8') as f:
+            temp_file = f.name
+            for text in texts:
+                f.write(text + '\n')
+        
+        try:
+            # SentencePiece学習
+            spm.SentencePieceTrainer.train(
+                input=temp_file,
+                model_prefix=model_prefix,
+                vocab_size=self.vocab_size,
+                character_coverage=character_coverage,
+                model_type='bpe',  # BPEアルゴリズム
+                pad_id=0,
+                unk_id=1,
+                bos_id=2,
+                eos_id=3,
+                pad_piece=self.pad_token,
+                unk_piece=self.unk_token,
+                bos_piece=self.bos_token,
+                eos_piece=self.eos_token,
+            )
+            
+            # モデルを読み込み
+            model_file_path = model_prefix + '.model'
+            self.sp_model = spm.SentencePieceProcessor()
+            self.sp_model.load(model_file_path)
+            self.actual_vocab_size = self.sp_model.get_piece_size()
+            self.vocab_size = self.actual_vocab_size
+            self.model_file = model_file_path
+            
+            # 特殊トークンIDを取得
+            self.pad_id = self.sp_model.pad_id()
+            self.unk_id = self.sp_model.unk_id()
+            self.bos_id = self.sp_model.bos_id()
+            self.eos_id = self.sp_model.eos_id()
+            
+            print(f"   ✅ SentencePiece語彙学習完了 (語彙サイズ: {self.actual_vocab_size})")
+            
+        except Exception as e:
+            warnings.warn(f"SentencePiece学習に失敗: {e}。フォールバックを使用します。")
+            self._fit_fallback(texts)
+        finally:
+            # 一時ファイルを削除
+            if os.path.exists(temp_file):
+                os.unlink(temp_file)
+            # モデルファイル以外の一時ファイルを削除
+            for ext in ['.vocab']:
+                temp_file_ext = model_prefix + ext
+                if os.path.exists(temp_file_ext):
+                    os.unlink(temp_file_ext)
+    
+    def _fit_fallback(self, texts: List[str]):
+        """フォールバック：簡易語彙構築"""
+        print(f"   🔤 フォールバック語彙構築中...")
         char_counts = Counter()
         for text in texts:
             char_counts.update(list(text))
         
-        # 2. 単一文字を追加
-        for char, _ in char_counts.most_common():
+        # vocab_sizeが4以下（特殊トークンのみ）の場合は、デフォルト値を使用
+        target_vocab_size = max(self.vocab_size, 16000) if self.vocab_size <= 4 else self.vocab_size
+        
+        for char, _ in char_counts.most_common(target_vocab_size - 4):
             if char not in self.token2idx:
                 idx = len(self.token2idx)
                 self.token2idx[char] = idx
                 self.idx2token[idx] = char
         
-        # 3. サブワード（バイグラム、トライグラム、頻出単語）
-        if self.use_subword:
-            # バイグラム
-            bigram_counts = Counter()
-            for text in texts:
-                chars = list(text)
-                for i in range(len(chars) - 1):
-                    bigram = chars[i] + chars[i + 1]
-                    bigram_counts[bigram] += 1
-            
-            # トライグラム
-            trigram_counts = Counter()
-            for text in texts:
-                chars = list(text)
-                for i in range(len(chars) - 2):
-                    trigram = chars[i] + chars[i + 1] + chars[i + 2]
-                    trigram_counts[trigram] += 1
-            
-            # 頻出単語（日本語対応）
-            word_counts = Counter()
-            for text in texts:
-                # 簡易的な単語分割（句読点、スペースで分割）
-                words = re.split(r'[、。，．！？\s\n]+', text)
-                for word in words:
-                    if 2 <= len(word) <= 8:
-                        word_counts[word] += 1
-            
-            # サブワードを追加（頻度順）
-            available_slots = self.max_vocab - len(self.token2idx)
-            
-            # 各タイプから均等に追加
-            subwords_to_add = []
-            
-            # 頻出単語（最大40%）
-            for word, cnt in word_counts.most_common(available_slots * 2 // 5):
-                if cnt >= 5 and word not in self.token2idx:
-                    subwords_to_add.append((word, cnt * 3))  # 優先度高め
-            
-            # バイグラム（最大35%）
-            for bigram, cnt in bigram_counts.most_common(available_slots * 7 // 20):
-                if cnt >= 10 and bigram not in self.token2idx:
-                    subwords_to_add.append((bigram, cnt * 2))
-            
-            # トライグラム（最大25%）
-            for trigram, cnt in trigram_counts.most_common(available_slots // 4):
-                if cnt >= 5 and trigram not in self.token2idx:
-                    subwords_to_add.append((trigram, cnt))
-            
-            # 頻度でソートして追加
-            subwords_to_add.sort(key=lambda x: -x[1])
-            
-            for token, _ in subwords_to_add:
-                if len(self.token2idx) >= self.max_vocab:
-                    break
-                if token not in self.token2idx:
-                    idx = len(self.token2idx)
-                    self.token2idx[token] = idx
-                    self.idx2token[idx] = token
-                    self.subword_list.append(token)
-        
         self.vocab_size = len(self.token2idx)
-        print(f"   語彙サイズ: {self.vocab_size} (サブワード: {len(self.subword_list)})")
+        self.actual_vocab_size = self.vocab_size
+        print(f"   ✅ 語彙サイズ: {self.vocab_size}")
     
-    def encode(self, text: str) -> List[int]:
-        """
-        エンコード（図2-4のトークン化ステップ）
-        
-        処理:
-        1. 入力テキスト → トークン化（テキストを個々のトークンに分割）
-        2. トークン → トークンID（各トークンを数値IDに変換）
-        
-        Args:
-            text: 入力テキスト（例: "This is an example."）
-        
-        Returns:
-            トークンIDのリスト（例: [40134, 2052, 133, 389, 12]）
-        """
-        tokens = []
-        i = 0
-        text_len = len(text)
-        
-        # トークン化: テキストを個々のトークンに分割
-        while i < text_len:
-            matched = False
+    def encode(self, text: str, add_special: bool = False) -> List[int]:
+        """エンコード"""
+        if self.sp_model is not None:
+            # SentencePiece使用
+            if add_special:
+                return self.sp_model.encode(text, out_type=int, add_bos=True, add_eos=True)
+            else:
+                return self.sp_model.encode(text, out_type=int, add_bos=False, add_eos=False)
+        else:
+            # フォールバック：最長マッチ方式
+            tokens = []
+            if add_special:
+                tokens.append(self.bos_id)
             
-            # 長いサブワードから優先的にマッチ
-            for length in [8, 7, 6, 5, 4, 3, 2]:
-                if i + length <= text_len:
+            i = 0
+            text_len = len(text)
+            while i < text_len:
+                matched = False
+                for length in range(min(8, text_len - i), 0, -1):
                     substr = text[i:i+length]
                     if substr in self.token2idx:
-                        # トークンID: 各トークンを数値IDに変換
                         tokens.append(self.token2idx[substr])
                         i += length
                         matched = True
                         break
+                
+                if not matched:
+                    tokens.append(self.token2idx.get(text[i], self.unk_id))
+                    i += 1
             
-            if not matched:
-                # 単一文字
-                char = text[i]
-                tokens.append(self.token2idx.get(char, 1))  # UNK
-                i += 1
-        
-        return tokens
+            if add_special:
+                tokens.append(self.eos_id)
+            
+            return tokens
     
-    def decode(self, tokens: List[int]) -> str:
-        """トークンをテキストに変換"""
-        result = []
-        for t in tokens:
-            if t not in [0, 1, 2, 3]:  # 特殊トークンスキップ
+    def decode(self, tokens: List[int], skip_special: bool = True) -> str:
+        """デコード"""
+        if self.sp_model is not None:
+            # SentencePiece使用
+            if skip_special:
+                # 特殊トークンをスキップ
+                special_ids = {self.pad_id, self.eos_id, self.bos_id, self.unk_id}
+                tokens = [t for t in tokens if t not in special_ids]
+            return self.sp_model.decode(tokens)
+        else:
+            # フォールバック
+            result = []
+            special_ids = {self.pad_id, self.unk_id, self.bos_id, self.eos_id}
+            for t in tokens:
+                if skip_special and t in special_ids:
+                    continue
                 token = self.idx2token.get(t, '')
                 result.append(token)
-        return ''.join(result)
+            return ''.join(result)
 
 
 # ========================================
@@ -1023,7 +1125,8 @@ class NeuroQuantumBrainAI:
         self.openai_api_key = openai_api_key or os.getenv("OPENAI_API_KEY")
         self.openai_model = openai_model
         
-        self.tokenizer = BrainTokenizer(max_vocab)
+        # SentencePieceトークナイザー（学習時に構築される）
+        self.tokenizer = None  # train()メソッドで構築される
         self.model = None
         
         # デバイス選択: MPS (Apple Silicon) > CUDA > CPU
@@ -1042,8 +1145,14 @@ class NeuroQuantumBrainAI:
         """学習"""
         print("\n🎓 学習開始...")
         
-        # トークナイザー構築
+        # トークナイザー構築（SentencePiece使用）
+        print("\n🔤 トークナイザー構築...")
+        
+        # SentencePieceで語彙を学習
+        self.tokenizer = BrainTokenizer(vocab_size=self.max_vocab)
         self.tokenizer.fit(texts)
+        
+        print(f"   語彙サイズ: {self.tokenizer.actual_vocab_size}")
         
         # データ準備
         all_tokens = []
@@ -1070,8 +1179,9 @@ class NeuroQuantumBrainAI:
                 self.embed_dim = actual_embed_dim
         
         # モデル構築
+        vocab_size = self.tokenizer.actual_vocab_size if self.tokenizer.actual_vocab_size else self.tokenizer.vocab_size
         self.model = NeuroQuantumBrain(
-            vocab_size=self.tokenizer.vocab_size,
+            vocab_size=vocab_size,
             embed_dim=self.embed_dim,
             num_heads=self.num_heads,
             num_layers=self.num_layers,
@@ -1116,7 +1226,8 @@ class NeuroQuantumBrainAI:
                 
                 optimizer.zero_grad()
                 logits = self.model(x)
-                loss = criterion(logits.view(-1, self.tokenizer.vocab_size), y.view(-1))
+                vocab_size = self.tokenizer.actual_vocab_size if self.tokenizer.actual_vocab_size else self.tokenizer.vocab_size
+                loss = criterion(logits.view(-1, vocab_size), y.view(-1))
                 loss.backward()
                 torch.nn.utils.clip_grad_norm_(self.model.parameters(), 1.0)
                 optimizer.step()
@@ -1495,7 +1606,7 @@ def main(num_neurons: int = 100):
         num_heads=4,
         num_layers=3,
         num_neurons=num_neurons,  # ニューロン数を指定
-        max_vocab=2000
+        max_vocab=16000  # 適切な語彙サイズに変更
     )
     
     # 学習
