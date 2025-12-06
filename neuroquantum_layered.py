@@ -30,6 +30,15 @@ import json
 import os
 from collections import Counter
 from typing import List, Dict, Optional, Tuple
+import warnings
+
+# OpenAI API（オプション）
+try:
+    from openai import OpenAI
+    OPENAI_AVAILABLE = True
+except ImportError:
+    OPENAI_AVAILABLE = False
+    warnings.warn("OpenAI APIが利用できません。openai>=1.0.0をインストールしてください。")
 
 # ========================================
 # qbnn_layered.py からコアコンポーネントをインポート
@@ -404,20 +413,129 @@ class QBNNTransformerBlock(nn.Module):
 # Part 4: Embedding（埋め込み層）
 # ========================================
 
+class OpenAIEmbeddingWrapper:
+    """
+    OpenAI Embedding API ラッパー
+    
+    テキストを直接OpenAI APIに送信してエンベディングを取得
+    """
+    
+    def __init__(self, api_key: Optional[str] = None, model: str = "text-embedding-3-large", dimensions: Optional[int] = None):
+        if not OPENAI_AVAILABLE:
+            raise ImportError("OpenAI APIが利用できません。openai>=1.0.0をインストールしてください。")
+        
+        self.api_key = api_key or os.getenv("OPENAI_API_KEY")
+        if not self.api_key:
+            raise ValueError("OpenAI APIキーが必要です。OPENAI_API_KEY環境変数を設定するか、api_key引数を指定してください。")
+        
+        self.client = OpenAI(api_key=self.api_key)
+        self.model = model
+        
+        # モデルごとのデフォルト次元
+        if dimensions is not None:
+            self.embed_dim = dimensions
+            self.dimensions = dimensions
+        elif "ada-002" in model:
+            self.embed_dim = 1536
+            self.dimensions = None
+        elif "embedding-3-large" in model:
+            self.embed_dim = 3072  # text-embedding-3-largeのデフォルト次元
+            self.dimensions = None
+        elif "embedding-3-small" in model:
+            self.embed_dim = 1536  # text-embedding-3-smallのデフォルト次元
+            self.dimensions = None
+        else:
+            self.embed_dim = 3072  # デフォルト
+            self.dimensions = None
+    
+    def get_embeddings(self, texts: List[str], batch_size: int = 100) -> np.ndarray:
+        """
+        テキストのリストからエンベディングを取得
+        
+        Args:
+            texts: テキストのリスト
+            batch_size: バッチサイズ（API制限を考慮）
+        
+        Returns:
+            (N, embed_dim) エンベディング配列
+        """
+        all_embeddings = []
+        
+        # バッチ処理
+        for i in range(0, len(texts), batch_size):
+            batch = texts[i:i + batch_size]
+            
+            try:
+                # dimensionsパラメータを指定可能（text-embedding-3-large等で使用）
+                params = {
+                    "model": self.model,
+                    "input": batch
+                }
+                if self.dimensions is not None:
+                    params["dimensions"] = self.dimensions
+                
+                response = self.client.embeddings.create(**params)
+                
+                batch_embeddings = [item.embedding for item in response.data]
+                all_embeddings.extend(batch_embeddings)
+            except Exception as e:
+                raise RuntimeError(f"OpenAI APIエラー: {e}")
+        
+        return np.array(all_embeddings)
+
+
 class NeuroQuantumEmbedding(nn.Module):
     """
     ニューロQ 埋め込み層
     
     Token → テキストエンベディング + 位置エンコーディング
+    
+    OpenAI Embedding APIを使用するオプションあり
     """
     
-    def __init__(self, config: NeuroQuantumConfig):
+    def __init__(
+        self, 
+        config: NeuroQuantumConfig,
+        use_openai_embedding: bool = False,
+        openai_api_key: Optional[str] = None,
+        openai_model: str = "text-embedding-3-large",
+        tokenizer = None  # トークン化済みテキストを復元するためのトークナイザー
+    ):
         super().__init__()
         
-        # テキストエンベディング
-        self.text_embedding = nn.Embedding(config.vocab_size, config.embed_dim)
+        self.use_openai_embedding = use_openai_embedding
+        self.config = config
+        self.tokenizer = tokenizer
         
-        # 位置埋め込み（学習可能）
+        if use_openai_embedding:
+            if not OPENAI_AVAILABLE:
+                warnings.warn("OpenAI APIが利用できません。従来の埋め込みを使用します。")
+                self.use_openai_embedding = False
+            
+            if self.use_openai_embedding:
+                self.openai_wrapper = OpenAIEmbeddingWrapper(
+                    api_key=openai_api_key,
+                    model=openai_model
+                )
+                # OpenAIのエンベディング次元に合わせる
+                actual_embed_dim = self.openai_wrapper.embed_dim
+                if actual_embed_dim != config.embed_dim:
+                    warnings.warn(
+                        f"OpenAI Embedding次元({actual_embed_dim})が設定次元({config.embed_dim})と異なります。"
+                        f"射影層を追加します。"
+                    )
+                    self.projection = nn.Linear(actual_embed_dim, config.embed_dim)
+                else:
+                    self.projection = nn.Identity()
+        else:
+            self.openai_wrapper = None
+            self.projection = None
+        
+        if not self.use_openai_embedding:
+            # 従来のテキストエンベディング
+            self.text_embedding = nn.Embedding(config.vocab_size, config.embed_dim)
+        
+        # 位置埋め込み（学習可能）- OpenAI使用時も必要
         self.position_embedding = nn.Embedding(config.max_seq_len, config.embed_dim)
         
         # ドロップアウト
@@ -426,11 +544,52 @@ class NeuroQuantumEmbedding(nn.Module):
         # 埋め込み次元
         self.embed_dim = config.embed_dim
     
-    def forward(self, token_ids: torch.Tensor) -> torch.Tensor:
+    def forward(self, token_ids: torch.Tensor, texts: Optional[List[str]] = None) -> torch.Tensor:
+        """
+        Args:
+            token_ids: (batch, seq) トークンID
+            texts: OpenAI Embedding使用時に必要。トークンIDに対応するテキストのリスト
+        """
         batch_size, seq_len = token_ids.shape
         
-        # テキストエンベディング
-        text_embeds = self.text_embedding(token_ids)
+        if self.use_openai_embedding and self.openai_wrapper is not None:
+            if texts is None:
+                if self.tokenizer is not None:
+                    # トークンIDからテキストを復元
+                    texts = []
+                    for batch_idx in range(batch_size):
+                        token_seq = token_ids[batch_idx].cpu().tolist()
+                        text = self.tokenizer.decode(token_seq)
+                        texts.append(text)
+                else:
+                    raise ValueError(
+                        "OpenAI Embedding使用時は、texts引数またはtokenizerが必要です。"
+                    )
+            
+            # OpenAI APIからエンベディングを取得
+            # 注意: OpenAI APIは文全体のエンベディングを返すため、
+            # トークン単位ではなく文単位で処理
+            embeddings_list = []
+            for text in texts:
+                embedding = self.openai_wrapper.get_embeddings([text])[0]
+                embeddings_list.append(embedding)
+            
+            # テンソルに変換
+            text_embeds = torch.tensor(
+                np.array(embeddings_list), 
+                device=token_ids.device, 
+                dtype=torch.float32
+            )
+            
+            # 次元が異なる場合は射影
+            text_embeds = self.projection(text_embeds)
+            
+            # シーケンス長に合わせて拡張（文全体のエンベディングを各トークンに適用）
+            if text_embeds.dim() == 2:
+                text_embeds = text_embeds.unsqueeze(1).expand(-1, seq_len, -1)
+        else:
+            # 従来のテキストエンベディング
+            text_embeds = self.text_embedding(token_ids)
         
         # 位置埋め込み
         positions = torch.arange(seq_len, device=token_ids.device).unsqueeze(0).expand(batch_size, -1)
@@ -497,13 +656,35 @@ class NeuroQuantum(nn.Module):
     - 学習可能な λ（もつれ強度）
     """
     
-    def __init__(self, config: NeuroQuantumConfig):
+    def __init__(
+        self, 
+        config: NeuroQuantumConfig,
+        use_openai_embedding: bool = False,
+        openai_api_key: Optional[str] = None,
+        openai_model: str = "text-embedding-3-large",
+        tokenizer = None
+    ):
         super().__init__()
         self.config = config
+        self.use_openai_embedding = use_openai_embedding
         
         # GPT標準: Text Embedding + Position Embedding
-        self.text_embedding = nn.Embedding(config.vocab_size, config.embed_dim)  # テキストエンベディング
-        self.position_embedding = nn.Embedding(config.max_seq_len, config.embed_dim)
+        # OpenAI Embeddingを使用する場合はNeuroQuantumEmbeddingクラスを使用
+        if use_openai_embedding:
+            self.embedding = NeuroQuantumEmbedding(
+                config=config,
+                use_openai_embedding=True,
+                openai_api_key=openai_api_key,
+                openai_model=openai_model,
+                tokenizer=tokenizer
+            )
+            # 互換性のため、position_embeddingは保持
+            self.text_embedding = None  # OpenAI Embedding使用時は不要
+            self.position_embedding = self.embedding.position_embedding
+        else:
+            self.text_embedding = nn.Embedding(config.vocab_size, config.embed_dim)  # テキストエンベディング
+            self.position_embedding = nn.Embedding(config.max_seq_len, config.embed_dim)
+            self.embedding = None
         
         # GPT Decoder Blocks
         self.transformer_blocks = nn.ModuleList([
@@ -554,13 +735,17 @@ class NeuroQuantum(nn.Module):
         batch, seq = token_ids.shape
         
         # ステップ1: トークンID → テキストエンベディング
-        # Text Embedding: トークンIDをベクトルに変換（テキストエンベディング）
-        text_embeds = self.text_embedding(token_ids)  # (batch, seq, embed_dim)
-        # Position Embedding: 位置情報を追加
-        positions = torch.arange(seq, device=token_ids.device).unsqueeze(0).expand(batch, -1)
-        pos_embeds = self.position_embedding(positions)  # (batch, seq, embed_dim)
-        # 埋め込みの合成 + Dropout
-        hidden_states = self.dropout(text_embeds + pos_embeds)
+        if self.use_openai_embedding and self.embedding is not None:
+            # OpenAI Embeddingを使用
+            hidden_states = self.embedding(token_ids, texts=None)
+        else:
+            # Text Embedding: トークンIDをベクトルに変換（テキストエンベディング）
+            text_embeds = self.text_embedding(token_ids)  # (batch, seq, embed_dim)
+            # Position Embedding: 位置情報を追加
+            positions = torch.arange(seq, device=token_ids.device).unsqueeze(0).expand(batch, -1)
+            pos_embeds = self.position_embedding(positions)  # (batch, seq, embed_dim)
+            # 埋め込みの合成 + Dropout
+            hidden_states = self.dropout(text_embeds + pos_embeds)
         
         # Causal Mask生成（maskがNoneの場合）
         if mask is None:
@@ -720,6 +905,18 @@ class NeuroQuantumAI:
     QBNN-LLM による生成AI
     
     ニューロン数（hidden_dim）を指定可能
+    
+    OpenAI Embedding使用例:
+        # OpenAI Embeddingを使用する場合
+        ai = NeuroQuantumAI(
+            embed_dim=3072,  # text-embedding-3-largeの次元
+            use_openai_embedding=True,
+            openai_api_key="sk-...",  # または環境変数OPENAI_API_KEY
+            openai_model="text-embedding-3-large"
+        )
+        
+        # 従来の埋め込みを使用する場合（デフォルト）
+        ai = NeuroQuantumAI(embed_dim=48)
     """
     
     def __init__(
@@ -731,6 +928,9 @@ class NeuroQuantumAI:
         max_seq_len: int = 128,
         dropout: float = 0.1,
         lambda_entangle: float = 0.5,
+        use_openai_embedding: bool = False,  # OpenAI Embeddingを使用するか
+        openai_api_key: Optional[str] = None,  # OpenAI APIキー
+        openai_model: str = "text-embedding-3-large",  # OpenAI Embeddingモデル
     ):
         # デバイス選択: MPS (Apple Silicon) > CUDA > CPU
         if torch.backends.mps.is_available():
@@ -750,6 +950,9 @@ class NeuroQuantumAI:
         self.max_seq_len = max_seq_len
         self.dropout = dropout
         self.lambda_entangle = lambda_entangle
+        self.use_openai_embedding = use_openai_embedding
+        self.openai_api_key = openai_api_key or os.getenv("OPENAI_API_KEY")
+        self.openai_model = openai_model
         
         self.tokenizer: Optional[NeuroQuantumTokenizer] = None
         self.model: Optional[NeuroQuantum] = None
@@ -770,6 +973,23 @@ class NeuroQuantumAI:
         
         # モデル構築
         print("\n🧠 ニューロQモデル構築...")
+        
+        # OpenAI Embedding使用時は埋め込み次元を調整
+        if self.use_openai_embedding:
+            # OpenAI Embeddingの次元を使用
+            # モデルごとのデフォルト次元
+            if "ada-002" in self.openai_model:
+                actual_embed_dim = 1536
+            elif "embedding-3-large" in self.openai_model:
+                actual_embed_dim = 3072
+            elif "embedding-3-small" in self.openai_model:
+                actual_embed_dim = 1536
+            else:
+                actual_embed_dim = 3072  # デフォルト
+            if self.embed_dim != actual_embed_dim:
+                print(f"   OpenAI Embedding次元({actual_embed_dim})に合わせて調整")
+                self.embed_dim = actual_embed_dim
+        
         self.config = NeuroQuantumConfig(
             vocab_size=self.tokenizer.actual_vocab_size,
             embed_dim=self.embed_dim,
@@ -781,9 +1001,19 @@ class NeuroQuantumAI:
             lambda_entangle=self.lambda_entangle,
         )
         
-        self.model = NeuroQuantum(self.config).to(self.device)
+        self.model = NeuroQuantum(
+            config=self.config,
+            use_openai_embedding=self.use_openai_embedding,
+            openai_api_key=self.openai_api_key,
+            openai_model=self.openai_model,
+            tokenizer=self.tokenizer
+        ).to(self.device)
         
         print(f"\n📊 モデル構成:")
+        if self.use_openai_embedding:
+            print(f"   埋め込み: OpenAI Embedding ({self.openai_model})")
+        else:
+            print(f"   埋め込み: 従来のEmbedding層")
         print(f"   埋め込み次元: {self.embed_dim}")
         print(f"   隠れ層次元: {self.hidden_dim}")
         print(f"   アテンションヘッド: {self.num_heads}")
@@ -1065,7 +1295,13 @@ class NeuroQuantumAI:
         # モデル
         checkpoint = torch.load(path + '.pt', map_location=self.device)
         self.config = NeuroQuantumConfig(**checkpoint['config'])
-        self.model = NeuroQuantum(self.config).to(self.device)
+        self.model = NeuroQuantum(
+            config=self.config,
+            use_openai_embedding=self.use_openai_embedding,
+            openai_api_key=self.openai_api_key,
+            openai_model=self.openai_model,
+            tokenizer=self.tokenizer
+        ).to(self.device)
         self.model.load_state_dict(checkpoint['model_state'])
         
         print(f"✅ 読み込み: {path}")
