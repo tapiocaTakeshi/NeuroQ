@@ -8,7 +8,7 @@
 #   docker build -f neuroq-runpod/Dockerfile -t neuroq-runpod .
 #
 # または neuroq-runpod/ ディレクトリから実行:
-#   docker build -t neuroq-runpod .
+#   docker build -t neuroq-runpod ..
 
 FROM runpod/pytorch:2.1.0-py3.10-cuda11.8.0-devel
 
@@ -16,19 +16,19 @@ WORKDIR /app
 
 # 必要なファイルをコピー
 COPY handler.py /app/
-COPY neuroq_model.py /app/
 COPY requirements.txt /app/
 
-# 参照元ファイルをコピー（neuroquantum_brain.py と neuroquantum_layered.py）
-# ビルド前に neuroq-runpod/ ディレクトリにこれらのファイルをコピーしておく必要があります
-# または、プロジェクトルートから docker build -f neuroq-runpod/Dockerfile . でビルドしてください
+# 参照元ファイルをコピー（親ディレクトリから）
 COPY neuroquantum_brain.py /app/
 COPY neuroquantum_layered.py /app/
-
+COPY qbnn_layered.py /app/
+COPY qbnn_brain.py /app/
 # モデルファイルとトークナイザーをコピー
 # （ビルド前に学習済みモデルを配置してください）
-COPY neuroq_*.pt /app/
-COPY neuroq_*.json /app/
+# 注意: ファイルが存在しない場合はビルドエラーになります
+# 必要に応じて、ビルド時にファイルを配置するか、RUNコマンドで条件付きコピーを使用してください
+# COPY neuroq_*.pt /app/
+# COPY neuroq_*.json /app/
 
 # 依存関係をインストール
 RUN pip install --no-cache-dir -r requirements.txt
@@ -38,8 +38,8 @@ RUN pip install --no-cache-dir -r requirements.txt
 # ========================================
 
 # モード設定
-ENV NEUROQ_MODE="brain"
-ENV NEUROQ_MODEL_PATH="neuroq_brain_model.pt"
+ENV NEUROQ_MODE="layered"
+ENV NEUROQ_MODEL_PATH="neuroq_layered_model.pt"
 ENV NEUROQ_TOKENIZER_PATH="neuroq_tokenizer.json"
 
 # 共通設定
@@ -58,5 +58,9 @@ ENV NEUROQ_HIDDEN_DIM="256"
 ENV NEUROQ_NUM_HEADS="4"
 ENV NEUROQ_LAMBDA_LAYERED="0.5"
 
+# OpenAI API設定（オプション）
+ENV OPENAI_API_KEY=""
+
 # エントリポイント
 CMD ["python", "handler.py"]
+
