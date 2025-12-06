@@ -14,11 +14,11 @@ FROM runpod/pytorch:2.1.0-py3.10-cuda11.8.0-devel
 
 WORKDIR /app
 
-# 必要なファイルをコピー
-COPY handler.py /app/
-COPY requirements.txt /app/
+# 必要なファイルをコピー（neuroq-runpodディレクトリから）
+COPY neuroq-runpod/handler.py /app/handler.py
+COPY neuroq-runpod/requirements.txt /app/requirements.txt
 
-# 参照元ファイルをコピー（親ディレクトリから）
+# 参照元ファイルをコピー（プロジェクトルートから）
 COPY neuroquantum_brain.py /app/
 COPY neuroquantum_layered.py /app/
 COPY qbnn_layered.py /app/
