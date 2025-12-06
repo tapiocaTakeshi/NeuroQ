@@ -5,20 +5,22 @@
 #
 # ビルド方法:
 # プロジェクトルートから実行:
-#   docker build -f neuroq-runpod/Dockerfile -t neuroq-runpod .
+#   docker build --platform linux/amd64 -f neuroq-runpod/Dockerfile -t neuroq-runpod .
 #
 # または neuroq-runpod/ ディレクトリから実行:
-#   docker build -t neuroq-runpod ..
+#   docker build --platform linux/amd64 -t neuroq-runpod ..
+#
+# 注意: Apple Silicon (M1/M2/M3) Macでは --platform linux/amd64 を指定してください
 
 FROM runpod/pytorch:2.1.0-py3.10-cuda11.8.0-devel
 
 WORKDIR /app
 
 # 必要なファイルをコピー（neuroq-runpodディレクトリから）
-COPY neuroq-runpod/handler.py /app/handler.py
-COPY neuroq-runpod/requirements.txt /app/requirements.txt
+COPY handler.py /app/
+COPY requirements.txt /app/
 
-# 参照元ファイルをコピー（プロジェクトルートから）
+# 参照元ファイルをコピー（neuroq-runpodディレクトリ内に配置）
 COPY neuroquantum_brain.py /app/
 COPY neuroquantum_layered.py /app/
 COPY qbnn_layered.py /app/
@@ -59,7 +61,7 @@ ENV NEUROQ_NUM_HEADS="4"
 ENV NEUROQ_LAMBDA_LAYERED="0.5"
 
 # OpenAI API設定（オプション）
-ENV OPENAI_API_KEY=""
+ENV OPENAI_API_KEY="***REMOVED***IezsldGqhyran77epMkwTM9-BtA7eY_oX72xoDt1yBN09a8twp1cQfSHwo80aJyYa7XDP28WvRT3BlbkFJcBODfXl_fE-RjAH7oIWqPhOdyWAuqiatBhPtT2-7YfMPS9dxC-LG6Q6fRFBLWhugMvLcAAF2cA"
 
 # エントリポイント
 CMD ["python", "handler.py"]
