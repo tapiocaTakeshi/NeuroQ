@@ -76,19 +76,22 @@ except ImportError as e:
     print("   内蔵のLayeredモードコンポーネントを使用します")
 
 # qbnn_brain.py / qbnn_layered.py からもインポート（オプション）
+# これらのファイルはオプションで、見つからなくても内蔵コンポーネントを使用します
 try:
     from qbnn_brain import QBNNBrainTorch, QuantumNeuron
     QBNN_BRAIN_AVAILABLE = True
     print("✅ qbnn_brain.py からコアコンポーネントをインポートしました")
-except ImportError:
+except ImportError as e:
     QBNN_BRAIN_AVAILABLE = False
+    # 警告メッセージを表示しない（オプションなので）
 
 try:
     from qbnn_layered import APQB as APQB_Core, EntanglementOperator, EQBNNLayer
     QBNN_LAYERED_AVAILABLE = True
     print("✅ qbnn_layered.py からコアコンポーネントをインポートしました")
-except ImportError:
+except ImportError as e:
     QBNN_LAYERED_AVAILABLE = False
+    # 警告メッセージを表示しない（オプションなので）
 
 
 # ========================================
