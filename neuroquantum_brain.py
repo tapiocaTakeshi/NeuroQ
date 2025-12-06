@@ -847,8 +847,12 @@ class NeuroQuantumBrain(nn.Module):
             
             # Top-K フィルタリング
             if top_k > 0:
-                indices_to_remove = next_logits < torch.topk(next_logits, top_k)[0][-1]
-                next_logits[indices_to_remove] = float('-inf')
+                # top_kが語彙サイズを超えないように制限
+                vocab_size = next_logits.size(-1)
+                actual_top_k = min(top_k, vocab_size)
+                if actual_top_k > 0:
+                    indices_to_remove = next_logits < torch.topk(next_logits, actual_top_k)[0][-1]
+                    next_logits[indices_to_remove] = float('-inf')
             
             # Top-P フィルタリング
             if top_p < 1.0:
@@ -957,7 +961,9 @@ class BrainTokenizer:
             self._fit_fallback(texts)
             return
         
-        print(f"   🔤 SentencePieceで語彙学習中... (目標語彙サイズ: {self.vocab_size})")
+        # vocab_sizeが4以下（特殊トークンのみ）の場合は、デフォルト値を使用
+        actual_vocab_size = max(self.vocab_size, 16000) if self.vocab_size <= 4 else self.vocab_size
+        print(f"   🔤 SentencePieceで語彙学習中... (目標語彙サイズ: {actual_vocab_size})")
         
         # 一時ファイルにテキストを保存
         import tempfile
@@ -971,7 +977,7 @@ class BrainTokenizer:
             spm.SentencePieceTrainer.train(
                 input=temp_file,
                 model_prefix=model_prefix,
-                vocab_size=self.vocab_size,
+                vocab_size=actual_vocab_size,
                 character_coverage=character_coverage,
                 model_type='bpe',  # BPEアルゴリズム
                 pad_id=0,
@@ -991,6 +997,9 @@ class BrainTokenizer:
             self.actual_vocab_size = self.sp_model.get_piece_size()
             self.vocab_size = self.actual_vocab_size
             self.model_file = model_file_path
+            # vocab_sizeを更新
+            if hasattr(self, 'vocab_size') and self.vocab_size <= 4:
+                self.vocab_size = self.actual_vocab_size
             
             # 特殊トークンIDを取得
             self.pad_id = self.sp_model.pad_id()
