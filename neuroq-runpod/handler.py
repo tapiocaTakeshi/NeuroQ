@@ -118,12 +118,16 @@ def init_model(mode: str = "layered", **kwargs) -> Dict[str, Any]:
             
             # デフォルト設定
             embed_dim = kwargs.get("embed_dim", 64)
-            hidden_dim = kwargs.get("hidden_dim", 128)
+            # num_neuronsが指定されている場合はhidden_dimとして使用
+            hidden_dim = kwargs.get("hidden_dim", kwargs.get("num_neurons", 128))
             num_heads = kwargs.get("num_heads", 4)
             num_layers = kwargs.get("num_layers", 2)
             max_seq_len = kwargs.get("max_seq_len", 128)
             dropout = kwargs.get("dropout", 0.1)
             lambda_entangle = kwargs.get("lambda_entangle", 0.35)
+            use_openai_embedding = kwargs.get("use_openai_embedding", False)
+            openai_api_key = kwargs.get("openai_api_key")
+            openai_model = kwargs.get("openai_model", "text-embedding-3-large")
             
             model_layered = NeuroQuantumAI(
                 embed_dim=embed_dim,
@@ -133,6 +137,9 @@ def init_model(mode: str = "layered", **kwargs) -> Dict[str, Any]:
                 max_seq_len=max_seq_len,
                 dropout=dropout,
                 lambda_entangle=lambda_entangle,
+                use_openai_embedding=use_openai_embedding,
+                openai_api_key=openai_api_key,
+                openai_model=openai_model,
             )
             model_layered.device = DEVICE
             
@@ -173,6 +180,177 @@ def init_model(mode: str = "layered", **kwargs) -> Dict[str, Any]:
     
     except Exception as e:
         return {"error": f"モデル初期化エラー: {str(e)}"}
+
+
+# ========================================
+# データ取得
+# ========================================
+
+def fetch_training_data(
+    data_sources: Optional[list] = None,
+    common_crawl_config: Optional[Dict[str, Any]] = None,
+    max_records: int = 100
+) -> list:
+    """
+    学習データを取得
+    
+    Args:
+        data_sources: データソースのリスト (例: ["common_crawl", "huggingface"])
+        common_crawl_config: Common Crawl設定（将来の拡張用）
+        max_records: 最大レコード数
+    
+    Returns:
+        テキストのリスト
+    """
+    texts = []
+    
+    if data_sources is None:
+        data_sources = ["huggingface"]  # デフォルト
+    
+    # Hugging Faceからデータ取得
+    if "huggingface" in data_sources or "hugging_face" in data_sources:
+        try:
+            from datasets import load_dataset
+            print("   📡 Hugging Faceからデータ取得中...")
+            
+            # 日本語Wikipedia
+            try:
+                ds = load_dataset("range3/wiki40b-ja", split="train", streaming=True)
+                count = 0
+                for item in ds:
+                    if 'text' in item and len(item['text']) > 50:
+                        texts.append(item['text'][:1000])  # 長さ制限
+                        count += 1
+                        if count >= max_records // 3:
+                            break
+            except Exception as e:
+                print(f"   ⚠️ 日本語Wikipedia取得失敗: {e}")
+            
+            # 英語データ
+            try:
+                ds = load_dataset("wikitext", "wikitext-2-raw-v1", split="train")
+                for item in ds[:max_records // 3]:
+                    if 'text' in item and len(item['text']) > 30:
+                        texts.append(item['text'])
+            except Exception as e:
+                print(f"   ⚠️ WikiText取得失敗: {e}")
+            
+            # 日本語対話
+            try:
+                ds = load_dataset("kunishou/databricks-dolly-15k-ja", split="train")
+                for item in ds[:max_records // 3]:
+                    if 'output' in item:
+                        texts.append(item['output'])
+            except Exception as e:
+                print(f"   ⚠️ 日本語対話データ取得失敗: {e}")
+            
+            print(f"   ✅ Hugging Face: {len(texts)} サンプル取得")
+            
+        except ImportError:
+            print("   ⚠️ datasets未インストール")
+        except Exception as e:
+            print(f"   ⚠️ Hugging Face取得失敗: {e}")
+    
+    # Common Crawl（将来の拡張用）
+    if "common_crawl" in data_sources:
+        print("   ⚠️ Common Crawlは現在実装中です。Hugging Faceデータを使用します。")
+        # TODO: Common Crawl API実装
+    
+    # 組み込みデータ（フォールバック）
+    if len(texts) == 0:
+        print("   📝 組み込みデータを使用...")
+        texts = [
+            "量子コンピュータは、量子力学の原理を利用して情報を処理する革新的な計算機です。",
+            "人工知能は、人間の知的活動をコンピュータで実現しようとする技術です。",
+            "機械学習は、データから学習して改善するシステムを実現します。",
+            "深層学習は、多層のニューラルネットワークを用いた機械学習手法です。",
+            "ニューラルネットワークは、人間の脳の神経回路を模倣した計算システムです。",
+        ] * (max_records // 5)
+    
+    return texts[:max_records]
+
+
+# ========================================
+# 学習処理
+# ========================================
+
+def train_model(
+    mode: str = "layered",
+    texts: Optional[list] = None,
+    epochs: int = 20,
+    batch_size: int = 16,
+    learning_rate: float = 0.001,
+    seq_length: int = 64,
+    **kwargs
+) -> Dict[str, Any]:
+    """
+    モデルを学習
+    
+    Args:
+        mode: 'layered' または 'brain'
+        texts: 学習データ（テキストのリスト）
+        epochs: エポック数
+        batch_size: バッチサイズ
+        learning_rate: 学習率
+        seq_length: シーケンス長
+        **kwargs: その他のパラメータ
+    
+    Returns:
+        学習結果
+    """
+    global model_layered, model_brain
+    
+    try:
+        if texts is None or len(texts) == 0:
+            return {"error": "学習データが空です"}
+        
+        if mode == "layered":
+            if model_layered is None:
+                init_result = init_model(mode="layered", **kwargs)
+                if "error" in init_result:
+                    return init_result
+            
+            print(f"   🎓 Layered mode 学習開始: {len(texts)}サンプル, {epochs}エポック")
+            model_layered.train(
+                texts=texts,
+                epochs=epochs,
+                batch_size=batch_size,
+                lr=learning_rate,
+                seq_len=seq_length
+            )
+            
+            return {
+                "status": "success",
+                "mode": "layered",
+                "message": f"学習完了: {epochs}エポック"
+            }
+        
+        elif mode == "brain":
+            if model_brain is None:
+                init_result = init_model(mode="brain", **kwargs)
+                if "error" in init_result:
+                    return init_result
+            
+            print(f"   🎓 Brain mode 学習開始: {len(texts)}サンプル, {epochs}エポック")
+            model_brain.train(
+                texts=texts,
+                epochs=epochs,
+                batch_size=batch_size,
+                lr=learning_rate,
+                seq_length=seq_length
+            )
+            
+            return {
+                "status": "success",
+                "mode": "brain",
+                "message": f"学習完了: {epochs}エポック"
+            }
+        
+        else:
+            return {"error": f"不明なモード: {mode}"}
+    
+    except Exception as e:
+        return {"error": f"学習エラー: {str(e)}"}
 
 
 # ========================================
@@ -311,14 +489,83 @@ def handler(event: Dict[str, Any]) -> Dict[str, Any]:
                 return {"error": "promptが必要です"}
             
             mode = input_data.get("mode", "layered")
-            max_length = input_data.get("max_length", 100)
+            max_length = input_data.get("max_length", input_data.get("max_tokens", 100))
             temperature = input_data.get("temperature", 0.7)
             top_k = input_data.get("top_k", 40)
             top_p = input_data.get("top_p", 0.9)
             
+            # train_before_generate フラグの処理
+            train_before_generate = input_data.get("train_before_generate", False)
+            
+            if train_before_generate:
+                # データ取得
+                data_sources = input_data.get("data_sources", ["huggingface"])
+                common_crawl_config = input_data.get("common_crawl_config", {})
+                max_records = common_crawl_config.get("max_records", 100)
+                
+                print(f"📥 学習データを取得中... (ソース: {data_sources}, 最大{max_records}レコード)")
+                texts = fetch_training_data(
+                    data_sources=data_sources,
+                    common_crawl_config=common_crawl_config,
+                    max_records=max_records
+                )
+                
+                if len(texts) == 0:
+                    return {"error": "学習データの取得に失敗しました"}
+                
+                # 学習パラメータ
+                epochs = input_data.get("epochs", 20)
+                batch_size = input_data.get("batch_size", 16)
+                learning_rate = input_data.get("learning_rate", 0.001)
+                seq_length = input_data.get("seq_length", 64)
+                
+                # モデル設定パラメータを抽出
+                # num_neuronsはbrainモードではnum_neurons、layeredモードではhidden_dimとして使用
+                model_kwargs = {
+                    k: v for k, v in input_data.items()
+                    if k in [
+                        "embed_dim", "hidden_dim", "num_heads", "num_layers",
+                        "num_neurons", "max_vocab", "max_seq_len", "dropout",
+                        "lambda_entangle", "use_openai_embedding", "openai_api_key",
+                        "openai_model"
+                    ]
+                }
+                
+                # num_neuronsが指定されている場合、モードに応じて変換
+                if "num_neurons" in input_data and "num_neurons" not in model_kwargs:
+                    num_neurons = input_data["num_neurons"]
+                    if mode == "layered":
+                        # layeredモードではhidden_dimとして使用
+                        model_kwargs["hidden_dim"] = num_neurons
+                    elif mode == "brain":
+                        # brainモードではnum_neuronsとして使用
+                        model_kwargs["num_neurons"] = num_neurons
+                
+                # 学習実行
+                train_result = train_model(
+                    mode=mode,
+                    texts=texts,
+                    epochs=epochs,
+                    batch_size=batch_size,
+                    learning_rate=learning_rate,
+                    seq_length=seq_length,
+                    **model_kwargs
+                )
+                
+                if "error" in train_result:
+                    return train_result
+                
+                print(f"✅ 学習完了: {train_result.get('message', '')}")
+            
+            # 生成パラメータ
             kwargs = {
                 k: v for k, v in input_data.items()
-                if k not in ["action", "prompt", "mode", "max_length", "temperature", "top_k", "top_p"]
+                if k not in [
+                    "action", "prompt", "mode", "max_length", "max_tokens",
+                    "temperature", "top_k", "top_p", "train_before_generate",
+                    "data_sources", "common_crawl_config", "epochs", "batch_size",
+                    "learning_rate", "seq_length"
+                ]
             }
             
             return generate_text(
