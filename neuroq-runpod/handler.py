@@ -48,7 +48,7 @@ from neuroq_model import (
 
 MODEL_PATH = os.environ.get("NEUROQ_MODEL_PATH", "neuroq_model.pt")
 TOKENIZER_PATH = os.environ.get("NEUROQ_TOKENIZER_PATH", "neuroq_tokenizer.json")
-DEFAULT_MODE = os.environ.get("NEUROQ_MODE", "layered")  # 'brain' or 'layered'
+DEFAULT_MODE = os.environ.get("NEUROQ_MODE", "brain")  # 'brain' or 'layered'
 
 # デフォルトのモデル設定
 DEFAULT_CONFIG = {
