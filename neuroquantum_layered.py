@@ -414,14 +414,14 @@ class NeuroQuantumEmbedding(nn.Module):
     """
     ニューロQ 埋め込み層
     
-    Token → ベクトル変換 + 位置エンコーディング
+    Token → テキストエンベディング + 位置エンコーディング
     """
     
     def __init__(self, config: NeuroQuantumConfig):
         super().__init__()
         
-        # トークン埋め込み
-        self.token_embedding = nn.Embedding(config.vocab_size, config.embed_dim)
+        # テキストエンベディング
+        self.text_embedding = nn.Embedding(config.vocab_size, config.embed_dim)
         
         # 位置埋め込み（学習可能）
         self.position_embedding = nn.Embedding(config.max_seq_len, config.embed_dim)
@@ -435,15 +435,15 @@ class NeuroQuantumEmbedding(nn.Module):
     def forward(self, token_ids: torch.Tensor) -> torch.Tensor:
         batch_size, seq_len = token_ids.shape
         
-        # トークン埋め込み
-        token_embeds = self.token_embedding(token_ids)
+        # テキストエンベディング
+        text_embeds = self.text_embedding(token_ids)
         
         # 位置埋め込み
         positions = torch.arange(seq_len, device=token_ids.device).unsqueeze(0).expand(batch_size, -1)
         pos_embeds = self.position_embedding(positions)
         
         # 合成
-        embeds = token_embeds + pos_embeds
+        embeds = text_embeds + pos_embeds
         embeds = self.dropout(embeds)
         
         return embeds
@@ -481,14 +481,21 @@ class NeuroQuantumHead(nn.Module):
 
 class NeuroQuantum(nn.Module):
     """
-    ニューロQ: GPTデコーダー構造（QBNN拡張版）
+    ニューロQ: GPT型デコーダーのみのTransformer（QBNN拡張版）
+    
+    処理フロー（図2-4に準拠）:
+    1. 入力テキスト → トークン化 → トークンID
+    2. トークンID → テキストエンベディング（Text Embedding + Position Embedding）
+    3. テキストエンベディング → GPT型デコーダーのみのTransformer（N個のDecoder Blocks）
+    4. Transformer出力 → 後処理ステップ（Final LayerNorm + Output Head）
+    5. 後処理ステップ → 出力テキスト（ロジット）
     
     GPT標準構造:
-    1. Token Embedding + Position Embedding
-    2. Dropout
-    3. N個のGPT Decoder Blocks
-    4. Final LayerNorm
-    5. Output Head (Linear to vocab_size)
+    - Text Embedding + Position Embedding（テキストエンベディング）
+    - Dropout
+    - N個のGPT Decoder Blocks（Pre-norm + Attention + FFN）
+    - Final LayerNorm
+    - Output Head (Linear to vocab_size)
     
     独自要素:
     - QBNNLayer: 量子もつれテンソル J による補正
@@ -500,8 +507,8 @@ class NeuroQuantum(nn.Module):
         super().__init__()
         self.config = config
         
-        # GPT標準: Token Embedding + Position Embedding
-        self.token_embedding = nn.Embedding(config.vocab_size, config.embed_dim)
+        # GPT標準: Text Embedding + Position Embedding
+        self.text_embedding = nn.Embedding(config.vocab_size, config.embed_dim)  # テキストエンベディング
         self.position_embedding = nn.Embedding(config.max_seq_len, config.embed_dim)
         
         # GPT Decoder Blocks
@@ -535,39 +542,48 @@ class NeuroQuantum(nn.Module):
     
     def forward(self, token_ids: torch.Tensor, mask: Optional[torch.Tensor] = None) -> torch.Tensor:
         """
-        GPTデコーダーフォワード
+        GPT型デコーダーのみのTransformer フォワード（図2-4のフローに準拠）
+        
+        処理ステップ:
+        1. トークンID → テキストエンベディング（Text Embedding + Position Embedding）
+        2. テキストエンベディング → GPT型デコーダーのみのTransformer
+        3. Transformer出力 → 後処理ステップ（Final LayerNorm + Output Head）
+        4. 後処理ステップ → ロジット（出力テキスト生成用）
         
         Args:
-            token_ids: (batch, seq) トークンID
+            token_ids: (batch, seq) トークンID（トークン化済みのテキスト）
             mask: Optional attention mask (Noneの場合はCausal Maskを自動生成)
         
         Returns:
-            (batch, seq, vocab_size) ロジット
+            (batch, seq, vocab_size) ロジット（後処理ステップ後の出力）
         """
         batch, seq = token_ids.shape
         
-        # GPT標準: Token + Position Embedding
-        token_embeds = self.token_embedding(token_ids)  # (batch, seq, embed_dim)
+        # ステップ1: トークンID → テキストエンベディング
+        # Text Embedding: トークンIDをベクトルに変換（テキストエンベディング）
+        text_embeds = self.text_embedding(token_ids)  # (batch, seq, embed_dim)
+        # Position Embedding: 位置情報を追加
         positions = torch.arange(seq, device=token_ids.device).unsqueeze(0).expand(batch, -1)
         pos_embeds = self.position_embedding(positions)  # (batch, seq, embed_dim)
-        
         # 埋め込みの合成 + Dropout
-        hidden_states = self.dropout(token_embeds + pos_embeds)
+        hidden_states = self.dropout(text_embeds + pos_embeds)
         
         # Causal Mask生成（maskがNoneの場合）
         if mask is None:
             mask = torch.tril(torch.ones(seq, seq, device=token_ids.device)).unsqueeze(0).unsqueeze(0)
         
-        # GPT Decoder Blocks
+        # ステップ2: テキストエンベディング → GPT型デコーダーのみのTransformer
+        # N個のGPT Decoder Blocks（Pre-norm + Multi-Head Causal Self-Attention + FFN）
         for block in self.transformer_blocks:
             hidden_states = block(hidden_states, mask)
         
-        # GPT標準: Final LayerNorm
+        # ステップ3: Transformer出力 → 後処理ステップ
+        # Final LayerNorm
         hidden_states = self.final_norm(hidden_states)
+        # Output Head: ベクトル → 語彙確率への変換
+        logits = self.output_head(hidden_states)  # (batch, seq, vocab_size)
         
-        # GPT標準: Output Head
-        logits = self.output_head(hidden_states)
-        
+        # ステップ4: ロジット（出力テキスト生成用）
         return logits
     
     def get_quantum_info(self) -> List[Dict]:
@@ -588,7 +604,11 @@ class NeuroQuantum(nn.Module):
 
 class NeuroQuantumTokenizer:
     """
-    ニューロQ トークナイザー
+    ニューロQ トークナイザー（図2-4のトークン化ステップに準拠）
+    
+    処理フロー:
+    1. 入力テキスト → トークン化（テキストを個々のトークンに分割）
+    2. トークン → トークンID（各トークンを数値IDに変換）
     
     文字レベル + サブワード対応
     """
@@ -634,12 +654,27 @@ class NeuroQuantumTokenizer:
         return self
     
     def encode(self, text: str, add_special: bool = True) -> List[int]:
-        """エンコード"""
+        """
+        エンコード（図2-4のトークン化ステップ）
+        
+        処理:
+        1. 入力テキスト → トークン化（文字単位で分割）
+        2. トークン → トークンID（各文字を数値IDに変換）
+        
+        Args:
+            text: 入力テキスト（例: "This is an example."）
+            add_special: 特殊トークン（BOS/EOS）を追加するか
+        
+        Returns:
+            トークンIDのリスト（例: [40134, 2052, 133, 389, 12]）
+        """
         tokens = []
         if add_special:
             tokens.append(self.bos_id)
         
+        # トークン化: テキストを個々の文字（トークン）に分割
         for char in text:
+            # トークンID: 各トークンを数値IDに変換
             tokens.append(self.char_to_idx.get(char, self.unk_id))
         
         if add_special:

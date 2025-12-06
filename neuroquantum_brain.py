@@ -463,14 +463,21 @@ class BrainQuantumBlock(nn.Module):
 
 class NeuroQuantumBrain(nn.Module):
     """
-    ニューロQ Brain - GPTデコーダー構造（脳型量子拡張版）
+    ニューロQ Brain - GPT型デコーダーのみのTransformer（脳型量子拡張版）
+    
+    処理フロー（図2-4に準拠）:
+    1. 入力テキスト → トークン化 → トークンID
+    2. トークンID → テキストエンベディング（Text Embedding + Position Embedding）
+    3. テキストエンベディング → GPT型デコーダーのみのTransformer（N個のDecoder Blocks）
+    4. Transformer出力 → 後処理ステップ（Final LayerNorm + Output Head）
+    5. 後処理ステップ → 出力テキスト（ロジット）
     
     GPT標準構造:
-    1. Token Embedding + Position Embedding
-    2. Dropout
-    3. N個のGPT Decoder Blocks
-    4. Final LayerNorm
-    5. Output Head (Linear to vocab_size)
+    - Text Embedding + Position Embedding（テキストエンベディング）
+    - Dropout
+    - N個のGPT Decoder Blocks（Pre-norm + Attention + FFN）
+    - Final LayerNorm
+    - Output Head (Linear to vocab_size)
     """
     
     def __init__(self, vocab_size: int, embed_dim: int = 128,
@@ -483,8 +490,8 @@ class NeuroQuantumBrain(nn.Module):
         self.embed_dim = embed_dim
         self.max_seq_len = max_seq_len
         
-        # GPT標準: Token Embedding + Position Embedding
-        self.token_embedding = nn.Embedding(vocab_size, embed_dim)
+        # GPT標準: Text Embedding + Position Embedding
+        self.text_embedding = nn.Embedding(vocab_size, embed_dim)  # テキストエンベディング
         self.position_embedding = nn.Embedding(max_seq_len, embed_dim)
         
         # GPT Decoder Blocks
@@ -521,39 +528,48 @@ class NeuroQuantumBrain(nn.Module):
     
     def forward(self, x: torch.Tensor, mask: Optional[torch.Tensor] = None) -> torch.Tensor:
         """
-        GPTデコーダーフォワード
+        GPT型デコーダーのみのTransformer フォワード（図2-4のフローに準拠）
+        
+        処理ステップ:
+        1. トークンID → テキストエンベディング（Text Embedding + Position Embedding）
+        2. テキストエンベディング → GPT型デコーダーのみのTransformer
+        3. Transformer出力 → 後処理ステップ（Final LayerNorm + Output Head）
+        4. 後処理ステップ → ロジット（出力テキスト生成用）
         
         Args:
-            x: (batch, seq) トークンID
+            x: (batch, seq) トークンID（トークン化済みのテキスト）
             mask: Optional attention mask (Noneの場合はCausal Maskを自動生成)
         
         Returns:
-            (batch, seq, vocab_size) ロジット
+            (batch, seq, vocab_size) ロジット（後処理ステップ後の出力）
         """
         batch, seq = x.shape
         
-        # GPT標準: Token + Position Embedding
-        token_embeds = self.token_embedding(x)  # (batch, seq, embed_dim)
+        # ステップ1: トークンID → テキストエンベディング
+        # Text Embedding: トークンIDをベクトルに変換（テキストエンベディング）
+        text_embeds = self.text_embedding(x)  # (batch, seq, embed_dim)
+        # Position Embedding: 位置情報を追加
         positions = torch.arange(seq, device=x.device).unsqueeze(0).expand(batch, -1)
         pos_embeds = self.position_embedding(positions)  # (batch, seq, embed_dim)
-        
         # 埋め込みの合成 + Dropout
-        h = self.dropout(token_embeds + pos_embeds)
+        h = self.dropout(text_embeds + pos_embeds)
         
         # Causal Mask生成（maskがNoneの場合）
         if mask is None:
             mask = torch.tril(torch.ones(seq, seq, device=x.device)).unsqueeze(0).unsqueeze(0)
         
-        # GPT Decoder Blocks
+        # ステップ2: テキストエンベディング → GPT型デコーダーのみのTransformer
+        # N個のGPT Decoder Blocks（Pre-norm + Multi-Head Causal Self-Attention + FFN）
         for block in self.blocks:
             h = block(h, mask)
         
-        # GPT標準: Final LayerNorm
+        # ステップ3: Transformer出力 → 後処理ステップ
+        # Final LayerNorm
         h = self.final_norm(h)
+        # Output Head: ベクトル → 語彙確率への変換
+        logits = self.output_head(h)  # (batch, seq, vocab_size)
         
-        # GPT標準: Output Head
-        logits = self.output_head(h)
-        
+        # ステップ4: ロジット（出力テキスト生成用）
         return logits
     
     def get_quantum_report(self) -> str:
@@ -671,8 +687,13 @@ class NeuroQuantumBrain(nn.Module):
 
 class BrainTokenizer:
     """
-    サブワード対応トークナイザー
+    サブワード対応トークナイザー（図2-4のトークン化ステップに準拠）
     
+    処理フロー:
+    1. 入力テキスト → トークン化（テキストを個々のトークンに分割）
+    2. トークン → トークンID（各トークンを数値IDに変換）
+    
+    特徴:
     - 文字単位 + 頻出バイグラム/単語単位
     - 最大50,000トークン対応
     """
@@ -764,11 +785,24 @@ class BrainTokenizer:
         print(f"   語彙サイズ: {self.vocab_size} (サブワード: {len(self.subword_list)})")
     
     def encode(self, text: str) -> List[int]:
-        """テキストをトークンに変換"""
+        """
+        エンコード（図2-4のトークン化ステップ）
+        
+        処理:
+        1. 入力テキスト → トークン化（テキストを個々のトークンに分割）
+        2. トークン → トークンID（各トークンを数値IDに変換）
+        
+        Args:
+            text: 入力テキスト（例: "This is an example."）
+        
+        Returns:
+            トークンIDのリスト（例: [40134, 2052, 133, 389, 12]）
+        """
         tokens = []
         i = 0
         text_len = len(text)
         
+        # トークン化: テキストを個々のトークンに分割
         while i < text_len:
             matched = False
             
@@ -777,6 +811,7 @@ class BrainTokenizer:
                 if i + length <= text_len:
                     substr = text[i:i+length]
                     if substr in self.token2idx:
+                        # トークンID: 各トークンを数値IDに変換
                         tokens.append(self.token2idx[substr])
                         i += length
                         matched = True
