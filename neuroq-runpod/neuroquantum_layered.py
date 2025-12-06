@@ -731,6 +731,9 @@ class NeuroQuantumAI:
         max_seq_len: int = 128,
         dropout: float = 0.1,
         lambda_entangle: float = 0.5,
+        use_openai_embedding: bool = False,  # OpenAI Embeddingを使用するか
+        openai_api_key: Optional[str] = None,  # OpenAI APIキー
+        openai_model: str = "text-embedding-3-large",  # OpenAI Embeddingモデル
     ):
         # デバイス選択: MPS (Apple Silicon) > CUDA > CPU
         if torch.backends.mps.is_available():
@@ -750,6 +753,9 @@ class NeuroQuantumAI:
         self.max_seq_len = max_seq_len
         self.dropout = dropout
         self.lambda_entangle = lambda_entangle
+        self.use_openai_embedding = use_openai_embedding
+        self.openai_api_key = openai_api_key or os.getenv("OPENAI_API_KEY")
+        self.openai_model = openai_model
         
         self.tokenizer: Optional[NeuroQuantumTokenizer] = None
         self.model: Optional[NeuroQuantum] = None
