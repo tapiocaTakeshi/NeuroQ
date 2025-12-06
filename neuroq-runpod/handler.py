@@ -20,7 +20,14 @@ import torch
 from typing import Dict, Any, Optional
 
 # 親ディレクトリをパスに追加（neuroquantum_*.py を参照するため）
+# Dockerコンテナ内では同じディレクトリに配置されるので、親ディレクトリ参照は不要
+# ただし、ローカル開発環境での互換性のため残す
 PARENT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
+# まず現在のディレクトリを追加（Dockerコンテナ内ではこれで十分）
+if CURRENT_DIR not in sys.path:
+    sys.path.insert(0, CURRENT_DIR)
+# 親ディレクトリも追加（ローカル開発用）
 if PARENT_DIR not in sys.path:
     sys.path.insert(0, PARENT_DIR)
 
