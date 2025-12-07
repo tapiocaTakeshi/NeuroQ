@@ -920,6 +920,11 @@ class BrainTokenizer:
                     self.sp_model.load(model_file)
                     self.actual_vocab_size = self.sp_model.get_piece_size()
                     self.vocab_size = self.actual_vocab_size
+                    # 特殊トークンIDを取得
+                    self.pad_id = self.sp_model.pad_id()
+                    self.unk_id = self.sp_model.unk_id()
+                    self.bos_id = self.sp_model.bos_id()
+                    self.eos_id = self.sp_model.eos_id()
                     print(f"   ✅ SentencePieceモデル読み込み: {model_file} (語彙サイズ: {self.actual_vocab_size})")
                 except Exception as e:
                     warnings.warn(f"SentencePieceモデルの読み込みに失敗: {e}。新規学習します。")
