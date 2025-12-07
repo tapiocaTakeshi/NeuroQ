@@ -1381,7 +1381,7 @@ class NeuroQuantumAI:
         temp_max: float = 0.8,       # 温度の上限
         top_k: int = 40,
         top_p: float = 0.9,
-        repetition_penalty: float = 1.15,  # 強化（1.2 → 1.15、より強力に）
+        repetition_penalty: float = 2.0,  # 強化（1.15 → 2.0、より強力に）
         no_repeat_ngram_size: int = 3,  # N-gram重複防止
     ) -> str:
         """
@@ -1417,25 +1417,25 @@ class NeuroQuantumAI:
                 # ⚛️ 量子回路シミュレーションの影響を適用
                 next_logits = self._quantum_circuit_influence(next_logits, step)
 
+                # 強化された繰り返しペナルティ（温度調整の前に適用）
+                # 最近のトークンに対する強力なペナルティ
+                if len(generated) > 0:
+                    # 最近100トークンに重複ペナルティ（50 → 100に拡大）
+                    recent_tokens = generated[-100:]
+                    token_counts = Counter(recent_tokens)
+
+                    for token_id, count in token_counts.items():
+                        # 頻出度に応じてペナルティを増加
+                        penalty = repetition_penalty ** (1 + count * 0.2)  # 0.1 → 0.2 により強く
+                        next_logits[token_id] /= penalty
+
                 # 動的温度: θが動けるように範囲内で変化させる
                 theta_phase = step * 0.2  # 位相（滑らかに）
                 temperature = temp_min + (temp_max - temp_min) * (0.5 + 0.5 * math.sin(theta_phase))
                 temperature = max(temp_min, min(temp_max, temperature))  # 範囲内に制限
-                
+
                 # 温度調整
                 next_logits = next_logits / max(temperature, 0.1)  # ゼロ除算防止
-                
-                # 強化された繰り返しペナルティ
-                # 最近のトークンに対する強力なペナルティ
-                if len(generated) > 0:
-                    # 最近50トークンに重複ペナルティ
-                    recent_tokens = generated[-50:]
-                    token_counts = Counter(recent_tokens)
-                    
-                    for token_id, count in token_counts.items():
-                        # 頻出度に応じてペナルティを増加
-                        penalty = repetition_penalty ** (1 + count * 0.1)
-                        next_logits[token_id] /= penalty
                 
                 # N-gram重複防止
                 if no_repeat_ngram_size > 0 and len(generated) >= no_repeat_ngram_size - 1:

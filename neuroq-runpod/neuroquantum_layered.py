@@ -1161,7 +1161,7 @@ class NeuroQuantumAI:
         temp_max: float = 0.8,       # 温度の上限
         top_k: int = 40,
         top_p: float = 0.9,
-        repetition_penalty: float = 1.2,
+        repetition_penalty: float = 2.0,
     ) -> str:
         """
         テキスト生成（対話形式）
@@ -1195,18 +1195,19 @@ class NeuroQuantumAI:
                 # ⚛️ 量子回路シミュレーションの影響を適用
                 next_logits = self._quantum_circuit_influence(next_logits, step)
 
+                # 繰り返しペナルティ（温度調整の前に適用）
+                # より長い範囲（100トークン）を見て、より強いペナルティを適用
+                recent_tokens = set(generated[-100:])
+                for token_id in recent_tokens:
+                    next_logits[token_id] /= repetition_penalty
+
                 # 動的温度: θが動けるように範囲内で変化させる
                 # sin波で滑らかに変動（量子的な振動をシミュレート）
                 theta_phase = step * 0.3  # 位相
                 temperature = temp_min + (temp_max - temp_min) * (0.5 + 0.5 * math.sin(theta_phase))
-                
+
                 # 温度調整
                 next_logits = next_logits / temperature
-                
-                # 繰り返しペナルティ
-                recent_tokens = set(generated[-30:])
-                for token_id in recent_tokens:
-                    next_logits[token_id] /= repetition_penalty
                 
                 # Top-K
                 if top_k > 0:
