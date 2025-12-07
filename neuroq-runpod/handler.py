@@ -669,9 +669,9 @@ def handler(event: Dict[str, Any]) -> Dict[str, Any]:
                 k: v for k, v in input_data.items()
                 if k not in [
                     "action", "prompt", "mode", "max_length", "max_tokens",
-                    "temperature", "top_k", "top_p", "train_before_generate",
-                    "data_sources", "common_crawl_config", "epochs", "batch_size",
-                    "learning_rate", "seq_length"
+                    "temperature", "top_k", "top_p", "repetition_penalty",
+                    "train_before_generate", "data_sources", "common_crawl_config",
+                    "epochs", "batch_size", "learning_rate", "seq_length"
                 ]
             }
             
