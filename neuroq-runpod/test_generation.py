@@ -12,12 +12,25 @@ import time
 
 RUNPOD_API_KEY = os.getenv("RUNPOD_API_KEY")
 ENDPOINT_ID = os.getenv("RUNPOD_ENDPOINT_ID")
-RUNPOD_URL = f"https://api.runpod.ai/v2/{ENDPOINT_ID}/run"
-STATUS_URL = f"https://api.runpod.ai/v2/{ENDPOINT_ID}/status"
 
 if not RUNPOD_API_KEY or not ENDPOINT_ID:
+    print("=" * 60)
     print("⚠️ 環境変数を設定してください")
+    print("=" * 60)
+    print()
+    print("以下のコマンドで環境変数を設定してください：")
+    print()
+    if not RUNPOD_API_KEY:
+        print("  export RUNPOD_API_KEY='your_api_key_here'")
+    if not ENDPOINT_ID:
+        print("  export RUNPOD_ENDPOINT_ID='your_endpoint_id_here'")
+    print()
+    print("または、.envファイルを作成して設定することもできます。")
+    print("=" * 60)
     exit(1)
+
+RUNPOD_URL = f"https://api.runpod.ai/v2/{ENDPOINT_ID}/run"
+STATUS_URL = f"https://api.runpod.ai/v2/{ENDPOINT_ID}/status"
 
 
 def send_and_wait(input_data: dict, timeout: int = 600) -> dict:

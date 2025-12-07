@@ -50,14 +50,14 @@ try:
         print(f"✅ ローカルの neuroquantum_layered.py からコンポーネントをインポートしました ({layered_path})")
     else:
         # フォールバック: 通常のインポート
-        from neuroquantum_layered import (
-            NeuroQuantumAI,
-            NeuroQuantumTokenizer,
-            NeuroQuantumConfig,
-            NeuroQuantum,
-        )
-        NEUROQUANTUM_LAYERED_AVAILABLE = True
-        print("✅ neuroquantum_layered.py からコンポーネントをインポートしました")
+    from neuroquantum_layered import (
+        NeuroQuantumAI,
+        NeuroQuantumTokenizer,
+        NeuroQuantumConfig,
+        NeuroQuantum,
+    )
+    NEUROQUANTUM_LAYERED_AVAILABLE = True
+    print("✅ neuroquantum_layered.py からコンポーネントをインポートしました")
 except ImportError as e:
     NEUROQUANTUM_LAYERED_AVAILABLE = False
     print(f"⚠️ neuroquantum_layered.py が見つかりません: {e}")
@@ -162,7 +162,7 @@ def init_model(mode: str = "layered", **kwargs) -> Dict[str, Any]:
                 openai_model=openai_model,
             )
             model_layered.device = DEVICE
-
+            
             # vocab数を取得
             vocab_size = None
             if hasattr(model_layered, 'tokenizer'):
@@ -197,7 +197,7 @@ def init_model(mode: str = "layered", **kwargs) -> Dict[str, Any]:
                 max_vocab=max_vocab,
             )
             model_brain.device = DEVICE
-
+            
             # vocab数を取得
             vocab_size = None
             if hasattr(model_brain, 'tokenizer') and hasattr(model_brain.tokenizer, 'vocab_size'):
@@ -486,7 +486,7 @@ def generate_text(
                     vocab_size = model_layered.tokenizer.actual_vocab_size
                 elif hasattr(model_layered.tokenizer, 'vocab_size'):
                     vocab_size = model_layered.tokenizer.vocab_size
-
+            
             return {
                 "status": "success",
                 "mode": "layered",
@@ -514,7 +514,7 @@ def generate_text(
                 top_k=top_k,
                 top_p=top_p,
             )
-
+            
             # vocab数を取得
             vocab_size = None
             if hasattr(model_brain, 'tokenizer') and hasattr(model_brain.tokenizer, 'vocab_size'):
@@ -588,6 +588,62 @@ def handler(event: Dict[str, Any]) -> Dict[str, Any]:
             mode = input_data.get("mode", "layered")
             kwargs = {k: v for k, v in input_data.items() if k != "action" and k != "mode"}
             return init_model(mode=mode, **kwargs)
+        
+        elif action == "train":
+            mode = input_data.get("mode", "layered")
+            
+            # データ取得
+            data_sources = input_data.get("data_sources", ["huggingface"])
+            common_crawl_config = input_data.get("common_crawl_config", {})
+            max_records = common_crawl_config.get("max_records", 100)
+            
+            print(f"📥 学習データを取得中... (ソース: {data_sources}, 最大{max_records}レコード)")
+            texts = fetch_training_data(
+                data_sources=data_sources,
+                common_crawl_config=common_crawl_config,
+                max_records=max_records
+            )
+            
+            if len(texts) == 0:
+                return {"error": "学習データの取得に失敗しました"}
+            
+            # 学習パラメータ
+            epochs = input_data.get("epochs", 20)
+            batch_size = input_data.get("batch_size", 16)
+            learning_rate = input_data.get("learning_rate", 0.001)
+            seq_length = input_data.get("seq_length", 64)
+            
+            # モデル設定パラメータを抽出
+            model_kwargs = {
+                k: v for k, v in input_data.items()
+                if k in [
+                    "embed_dim", "hidden_dim", "num_heads", "num_layers",
+                    "num_neurons", "max_vocab", "max_seq_len", "dropout",
+                    "lambda_entangle", "use_openai_embedding", "openai_api_key",
+                    "openai_model"
+                ]
+            }
+            
+            # num_neuronsが指定されている場合、モードに応じて変換
+            if "num_neurons" in input_data and "num_neurons" not in model_kwargs:
+                num_neurons = input_data["num_neurons"]
+                if mode == "layered":
+                    model_kwargs["hidden_dim"] = num_neurons
+                elif mode == "brain":
+                    model_kwargs["num_neurons"] = num_neurons
+            
+            # 学習実行
+            train_result = train_model(
+                mode=mode,
+                texts=texts,
+                epochs=epochs,
+                batch_size=batch_size,
+                learning_rate=learning_rate,
+                seq_length=seq_length,
+                **model_kwargs
+            )
+            
+            return train_result
         
         elif action == "generate":
             prompt = input_data.get("prompt", "")
