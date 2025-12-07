@@ -50,14 +50,14 @@ try:
         print(f"✅ ローカルの neuroquantum_layered.py からコンポーネントをインポートしました ({layered_path})")
     else:
         # フォールバック: 通常のインポート
-    from neuroquantum_layered import (
-        NeuroQuantumAI,
-        NeuroQuantumTokenizer,
-        NeuroQuantumConfig,
-        NeuroQuantum,
-    )
-    NEUROQUANTUM_LAYERED_AVAILABLE = True
-    print("✅ neuroquantum_layered.py からコンポーネントをインポートしました")
+        from neuroquantum_layered import (
+            NeuroQuantumAI,
+            NeuroQuantumTokenizer,
+            NeuroQuantumConfig,
+            NeuroQuantum,
+        )
+        NEUROQUANTUM_LAYERED_AVAILABLE = True
+        print("✅ neuroquantum_layered.py からコンポーネントをインポートしました")
 except ImportError as e:
     NEUROQUANTUM_LAYERED_AVAILABLE = False
     print(f"⚠️ neuroquantum_layered.py が見つかりません: {e}")
