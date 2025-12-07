@@ -664,15 +664,18 @@ def handler(event: Dict[str, Any]) -> Dict[str, Any]:
                 
                 print(f"✅ 学習完了: {train_result.get('message', '')}")
             
-            # 生成パラメータ
+            # 生成パラメータ（generate_textの明示的なパラメータと学習関連パラメータを除外）
+            exclude_keys = {
+                "action", "prompt", "mode", "max_length", "max_tokens",
+                "temperature", "top_k", "top_p", "repetition_penalty",
+                "train_before_generate", "data_sources", "common_crawl_config",
+                "epochs", "batch_size", "learning_rate", "seq_length"
+            }
+            
+            # generate_text()の明示的なパラメータを除外してkwargsを作成
             kwargs = {
                 k: v for k, v in input_data.items()
-                if k not in [
-                    "action", "prompt", "mode", "max_length", "max_tokens",
-                    "temperature", "top_k", "top_p", "repetition_penalty",
-                    "train_before_generate", "data_sources", "common_crawl_config",
-                    "epochs", "batch_size", "learning_rate", "seq_length"
-                ]
+                if k not in exclude_keys
             }
             
             return generate_text(
