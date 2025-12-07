@@ -437,6 +437,7 @@ def generate_text(
     temperature: float = 0.7,
     top_k: int = 40,
     top_p: float = 0.9,
+    repetition_penalty: float = 2.0,  # デフォルト値を2.0に変更して繰り返しを抑制
     **kwargs
 ) -> Dict[str, Any]:
     """
@@ -470,11 +471,12 @@ def generate_text(
             # テキスト生成
             generated = model_layered.generate(
                 prompt=prompt,
-                max_length=max_length,
+                max_length=min(max_length, 150),  # 最大長を150に制限して繰り返しを防ぐ
                 temp_min=temperature * 0.8,
                 temp_max=temperature * 1.2,
-                top_k=top_k,
+                top_k=min(top_k, 50),  # top_kを50に制限
                 top_p=top_p,
+                repetition_penalty=repetition_penalty,
             )
 
             # vocab数を取得
@@ -597,6 +599,7 @@ def handler(event: Dict[str, Any]) -> Dict[str, Any]:
             temperature = input_data.get("temperature", 0.7)
             top_k = input_data.get("top_k", 40)
             top_p = input_data.get("top_p", 0.9)
+            repetition_penalty = input_data.get("repetition_penalty", 2.0)  # 繰り返しペナルティを強化（デフォルト2.0）
             
             # train_before_generate フラグの処理
             train_before_generate = input_data.get("train_before_generate", False)
@@ -679,6 +682,7 @@ def handler(event: Dict[str, Any]) -> Dict[str, Any]:
                 temperature=temperature,
                 top_k=top_k,
                 top_p=top_p,
+                repetition_penalty=repetition_penalty,
                 **kwargs
             )
         
