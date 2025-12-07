@@ -8,7 +8,7 @@
 
 FROM runpod/pytorch:2.1.0-py3.10-cuda11.8.0-devel
 
-WORKDIR /app
+WORKDIR /app/
 
 # 必要なファイルをコピー（neuroq-runpodディレクトリから）
 COPY neuroq-runpod/handler.py /app/
