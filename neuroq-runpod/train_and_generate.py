@@ -146,20 +146,20 @@ def main():
     print("=" * 60)
     print()
     
-    # 学習パラメータ（最適化済み）
+    # 学習パラメータ（改善版 - 特殊トークンの生成を抑制）
     mode = "layered"
-    epochs = 20  # 推奨値
+    epochs = 30  # 30エポックに増加（より良い学習のため）
     batch_size = 16
-    learning_rate = 0.001
-    max_records = 100  # より多くのデータで学習
+    learning_rate = 0.0005  # より細かい学習率
+    max_records = 300  # より多くのデータで学習（100→300）
     
-    # 生成パラメータ（最適化済み）
+    # 生成パラメータ（改善版 - 特殊トークンを抑制）
     prompt = "ChatGPTについて教えて"
     max_length = 80
-    temperature = 0.7
-    top_k = 40
-    top_p = 0.9
-    repetition_penalty = 2.5  # 繰り返しを強く抑制
+    temperature = 0.6  # 0.7→0.6に下げて一貫性を高める
+    top_k = 30  # 40→30に下げて特殊トークンを抑制
+    top_p = 0.85  # 0.9→0.85に下げて多様性を抑える
+    repetition_penalty = 3.0  # 2.5→3.0に上げて繰り返しと特殊トークンを強く抑制
     
     print(f"📋 学習設定:")
     print(f"   モード: {mode}")
