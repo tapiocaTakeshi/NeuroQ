@@ -25,12 +25,16 @@ COPY neuroquantum_brain.py /app/
 COPY neuroquantum_layered.py /app/
 COPY qbnn_layered.py /app/
 COPY qbnn_brain.py /app/
-# モデルファイルとトークナイザーをコピー
+
+# SentencePiece トークナイザーモデルをコピー
+COPY neuroq_tokenizer.model /app/
+COPY neuroq_tokenizer.vocab /app/
+
+# モデルファイルをコピー（オプション、学習済みモデルがあれば）
 # （ビルド前に学習済みモデルを配置してください）
 # 注意: ファイルが存在しない場合はビルドエラーになります
 # 必要に応じて、ビルド時にファイルを配置するか、RUNコマンドで条件付きコピーを使用してください
 # COPY neuroq_*.pt /app/
-# COPY neuroq_*.json /app/
 
 # 依存関係をインストール
 RUN pip install --no-cache-dir -r requirements.txt
@@ -42,7 +46,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 # モード設定
 ENV NEUROQ_MODE="layered"
 ENV NEUROQ_MODEL_PATH="neuroq_layered_model.pt"
-ENV NEUROQ_TOKENIZER_PATH="neuroq_tokenizer.json"
+ENV NEUROQ_TOKENIZER_PATH="neuroq_tokenizer.model"
 
 # 共通設定
 ENV NEUROQ_EMBED_DIM="128"
