@@ -30,6 +30,16 @@ import json
 import os
 from collections import Counter
 from typing import List, Dict, Optional, Tuple
+import warnings
+warnings.filterwarnings('ignore')
+
+# SentencePiece（トークナイザー用）
+try:
+    import sentencepiece as spm
+    SENTENCEPIECE_AVAILABLE = True
+except ImportError:
+    SENTENCEPIECE_AVAILABLE = False
+    warnings.warn("sentencepieceライブラリがインストールされていません。pip install sentencepiece を実行してください。")
 
 # ========================================
 # qbnn_layered.py からコアコンポーネントをインポート
@@ -599,113 +609,283 @@ class NeuroQuantum(nn.Module):
 class NeuroQuantumTokenizer:
     """
     ニューロQ トークナイザー（図2-4のトークン化ステップに準拠）
-    
+
+    SentencePieceトークナイザーを使用:
+    - 語彙サイズを指定して学習可能（8000-32000推奨）
+    - BPEアルゴリズムを使用（日本語に適している）
+    - モデルの保存・読み込みが可能
+    - フォールバック: 簡易トークナイザー（SentencePiece未インストール時）
+
     処理フロー:
     1. 入力テキスト → トークン化（テキストを個々のトークンに分割）
     2. トークン → トークンID（各トークンを数値IDに変換）
-    
-    文字レベル + サブワード対応
     """
-    
-    def __init__(self, vocab_size: int = 8000):
+
+    def __init__(self, vocab_size: int = 8000, model_file: str = None):
+        """
+        Args:
+            vocab_size: 語彙サイズ（デフォルト: 8000）
+            model_file: 既存のSentencePieceモデルファイルパス（Noneの場合は新規学習）
+        """
         self.vocab_size = vocab_size
-        self.char_to_idx: Dict[str, int] = {}
-        self.idx_to_char: Dict[int, str] = {}
-        
+        self.actual_vocab_size = None
+        self.model_file = model_file
+        self.sp_model = None
+
         # 特殊トークン
-        self.pad_token = '<PAD>'
-        self.unk_token = '<UNK>'
-        self.bos_token = '<BOS>'
-        self.eos_token = '<EOS>'
-        
+        self.pad_token = '<pad>'
+        self.unk_token = '<unk>'
+        self.bos_token = '<s>'
+        self.eos_token = '</s>'
+
+        # SentencePieceを使用
+        if SENTENCEPIECE_AVAILABLE:
+            if model_file and os.path.exists(model_file):
+                # 既存モデルを読み込み
+                try:
+                    self.sp_model = spm.SentencePieceProcessor()
+                    self.sp_model.load(model_file)
+                    self.actual_vocab_size = self.sp_model.get_piece_size()
+                    self.vocab_size = self.actual_vocab_size
+                    # 特殊トークンIDを取得
+                    self.pad_id = self.sp_model.pad_id()
+                    self.unk_id = self.sp_model.unk_id()
+                    self.bos_id = self.sp_model.bos_id()
+                    self.eos_id = self.sp_model.eos_id()
+                    print(f"   ✅ SentencePieceモデル読み込み: {model_file} (語彙サイズ: {self.actual_vocab_size})")
+                except Exception as e:
+                    warnings.warn(f"SentencePieceモデルの読み込みに失敗: {e}。新規学習します。")
+                    self.sp_model = None
+        else:
+            # SentencePiece未インストール
+            self.sp_model = None
+
+        # SentencePieceが使えない場合はフォールバック
+        if self.sp_model is None:
+            self._init_fallback()
+
+    def _init_fallback(self):
+        """フォールバック用の簡易トークナイザー初期化"""
+        self.char_to_idx = {'<PAD>': 0, '<UNK>': 1, '<BOS>': 2, '<EOS>': 3}
+        self.idx_to_char = {0: '<PAD>', 1: '<UNK>', 2: '<BOS>', 3: '<EOS>'}
+        # vocab_sizeは設定されている値を保持（上書きしない）
+        if not hasattr(self, 'vocab_size') or self.vocab_size is None:
+            self.vocab_size = 4
+        self.actual_vocab_size = None  # build_vocab()で設定される
+
+        # 特殊トークンID
         self.pad_id = 0
         self.unk_id = 1
         self.bos_id = 2
         self.eos_id = 3
-    
-    def build_vocab(self, texts: List[str], min_freq: int = 1):
-        """語彙構築"""
-        # 文字頻度カウント
-        char_freq = Counter()
-        for text in texts:
-            char_freq.update(text)
-        
-        # 特殊トークン
-        special_tokens = [self.pad_token, self.unk_token, self.bos_token, self.eos_token]
-        
-        # 頻度順にソート
-        sorted_chars = [char for char, freq in char_freq.most_common() if freq >= min_freq]
-        
-        # 語彙サイズ制限
-        sorted_chars = sorted_chars[:self.vocab_size - len(special_tokens)]
-        
-        # 辞書作成
-        all_tokens = special_tokens + sorted_chars
-        self.char_to_idx = {c: i for i, c in enumerate(all_tokens)}
-        self.idx_to_char = {i: c for i, c in enumerate(all_tokens)}
-        
-        self.actual_vocab_size = len(all_tokens)
+
+    def build_vocab(self, texts: List[str], character_coverage: float = 0.9995, model_prefix: str = "spm_model_layered", min_freq: int = 1):
+        """
+        SentencePieceで語彙を学習
+
+        Args:
+            texts: 学習テキストのリスト
+            character_coverage: 文字カバレッジ（0.9995が推奨、日本語の場合は0.9995-0.99995）
+            model_prefix: モデルファイルのプレフィックス
+            min_freq: 最小頻度（フォールバック用）
+        """
+        if not SENTENCEPIECE_AVAILABLE:
+            warnings.warn("SentencePieceが利用できません。フォールバックトークナイザーを使用します。")
+            self._build_vocab_fallback(texts, min_freq)
+            return self
+
+        # vocab_sizeが4以下（特殊トークンのみ）の場合は、デフォルト値を使用
+        actual_vocab_size = max(self.vocab_size, 8000) if self.vocab_size <= 4 else self.vocab_size
+        print(f"   🔤 SentencePieceで語彙学習中... (目標語彙サイズ: {actual_vocab_size})")
+
+        # 一時ファイルにテキストを保存
+        import tempfile
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.txt', delete=False, encoding='utf-8') as f:
+            temp_file = f.name
+            for text in texts:
+                f.write(text + '\n')
+
+        try:
+            # SentencePiece学習
+            spm.SentencePieceTrainer.train(
+                input=temp_file,
+                model_prefix=model_prefix,
+                vocab_size=actual_vocab_size,
+                character_coverage=character_coverage,
+                model_type='bpe',  # BPEアルゴリズム
+                pad_id=0,
+                unk_id=1,
+                bos_id=2,
+                eos_id=3,
+                pad_piece=self.pad_token,
+                unk_piece=self.unk_token,
+                bos_piece=self.bos_token,
+                eos_piece=self.eos_token,
+            )
+
+            # モデルを読み込み
+            model_file_path = model_prefix + '.model'
+            self.sp_model = spm.SentencePieceProcessor()
+            self.sp_model.load(model_file_path)
+            self.actual_vocab_size = self.sp_model.get_piece_size()
+            self.vocab_size = self.actual_vocab_size
+            self.model_file = model_file_path
+            # vocab_sizeを更新
+            if hasattr(self, 'vocab_size') and self.vocab_size <= 4:
+                self.vocab_size = self.actual_vocab_size
+
+            # 特殊トークンIDを取得
+            self.pad_id = self.sp_model.pad_id()
+            self.unk_id = self.sp_model.unk_id()
+            self.bos_id = self.sp_model.bos_id()
+            self.eos_id = self.sp_model.eos_id()
+
+            print(f"   ✅ SentencePiece語彙学習完了 (語彙サイズ: {self.actual_vocab_size})")
+
+        except Exception as e:
+            warnings.warn(f"SentencePiece学習に失敗: {e}。フォールバックを使用します。")
+            self._build_vocab_fallback(texts, min_freq)
+        finally:
+            # 一時ファイルを削除
+            if os.path.exists(temp_file):
+                os.unlink(temp_file)
+            # モデルファイル以外の一時ファイルを削除
+            for ext in ['.vocab']:
+                temp_file_ext = model_prefix + ext
+                if os.path.exists(temp_file_ext):
+                    os.unlink(temp_file_ext)
+
         return self
-    
-    def encode(self, text: str, add_special: bool = True) -> List[int]:
+
+    def _build_vocab_fallback(self, texts: List[str], min_freq: int = 1):
+        """フォールバック：簡易語彙構築"""
+        print(f"   🔤 フォールバック語彙構築中...")
+        char_counts = Counter()
+        for text in texts:
+            char_counts.update(list(text))
+
+        # vocab_sizeが4以下（特殊トークンのみ）の場合は、デフォルト値を使用
+        target_vocab_size = max(self.vocab_size, 8000) if self.vocab_size <= 4 else self.vocab_size
+
+        for char, count in char_counts.most_common(target_vocab_size - 4):
+            if char not in self.char_to_idx and count >= min_freq:
+                idx = len(self.char_to_idx)
+                self.char_to_idx[char] = idx
+                self.idx_to_char[idx] = char
+
+        self.vocab_size = len(self.char_to_idx)
+        self.actual_vocab_size = self.vocab_size
+        print(f"   ✅ 語彙サイズ: {self.vocab_size}")
+
+    def encode(self, text: str, add_special: bool = False) -> List[int]:
         """
         エンコード（図2-4のトークン化ステップ）
-        
+
         処理:
-        1. 入力テキスト → トークン化（文字単位で分割）
-        2. トークン → トークンID（各文字を数値IDに変換）
-        
+        1. 入力テキスト → トークン化（テキストを個々のトークンに分割）
+        2. トークン → トークンID（各トークンを数値IDに変換）
+
         Args:
             text: 入力テキスト（例: "This is an example."）
             add_special: 特殊トークン（BOS/EOS）を追加するか
-        
+
         Returns:
             トークンIDのリスト（例: [40134, 2052, 133, 389, 12]）
         """
-        tokens = []
-        if add_special:
-            tokens.append(self.bos_id)
-        
-        # トークン化: テキストを個々の文字（トークン）に分割
-        for char in text:
-            # トークンID: 各トークンを数値IDに変換
-            tokens.append(self.char_to_idx.get(char, self.unk_id))
-        
-        if add_special:
-            tokens.append(self.eos_id)
-        
-        return tokens
-    
+        if self.sp_model is not None:
+            # SentencePiece使用
+            if add_special:
+                return self.sp_model.encode(text, out_type=int, add_bos=True, add_eos=True)
+            else:
+                return self.sp_model.encode(text, out_type=int, add_bos=False, add_eos=False)
+        else:
+            # フォールバック：最長マッチ方式
+            tokens = []
+            if add_special:
+                tokens.append(self.bos_id)
+
+            i = 0
+            text_len = len(text)
+            while i < text_len:
+                matched = False
+                for length in range(min(8, text_len - i), 0, -1):
+                    substr = text[i:i+length]
+                    if substr in self.char_to_idx:
+                        tokens.append(self.char_to_idx[substr])
+                        i += length
+                        matched = True
+                        break
+
+                if not matched:
+                    tokens.append(self.char_to_idx.get(text[i], self.unk_id))
+                    i += 1
+
+            if add_special:
+                tokens.append(self.eos_id)
+
+            return tokens
+
     def decode(self, token_ids: List[int], skip_special: bool = True) -> str:
         """デコード"""
-        chars = []
-        special_ids = {self.pad_id, self.unk_id, self.bos_id, self.eos_id}
-        
-        for t in token_ids:
-            if skip_special and t in special_ids:
-                continue
-            char = self.idx_to_char.get(t, self.unk_token)
-            if char not in [self.pad_token, self.unk_token, self.bos_token, self.eos_token]:
-                chars.append(char)
-        
-        return ''.join(chars)
-    
+        if self.sp_model is not None:
+            # SentencePiece使用
+            return self.sp_model.decode(token_ids)
+        else:
+            # フォールバック
+            chars = []
+            special_ids = {self.pad_id, self.unk_id, self.bos_id, self.eos_id}
+
+            for t in token_ids:
+                if skip_special and t in special_ids:
+                    continue
+                char = self.idx_to_char.get(t, self.unk_token)
+                if char not in ['<PAD>', '<UNK>', '<BOS>', '<EOS>']:
+                    chars.append(char)
+
+            return ''.join(chars)
+
     def save(self, path: str):
         """保存"""
-        data = {
-            'char_to_idx': self.char_to_idx,
-            'vocab_size': self.vocab_size,
-        }
-        with open(path, 'w', encoding='utf-8') as f:
-            json.dump(data, f, ensure_ascii=False, indent=2)
-    
+        if self.sp_model is not None:
+            # SentencePieceモデルは既に保存されている
+            print(f"   ✅ SentencePieceモデル保存済み: {self.model_file}")
+        else:
+            # フォールバック用の保存
+            data = {
+                'char_to_idx': self.char_to_idx,
+                'vocab_size': self.vocab_size,
+            }
+            with open(path, 'w', encoding='utf-8') as f:
+                json.dump(data, f, ensure_ascii=False, indent=2)
+
     def load(self, path: str):
         """読み込み"""
-        with open(path, 'r', encoding='utf-8') as f:
-            data = json.load(f)
-        self.char_to_idx = data['char_to_idx']
-        self.idx_to_char = {int(i): c for c, i in self.char_to_idx.items()}
-        self.vocab_size = data['vocab_size']
+        if path.endswith('.model'):
+            # SentencePieceモデルを読み込み
+            if SENTENCEPIECE_AVAILABLE:
+                try:
+                    self.sp_model = spm.SentencePieceProcessor()
+                    self.sp_model.load(path)
+                    self.actual_vocab_size = self.sp_model.get_piece_size()
+                    self.vocab_size = self.actual_vocab_size
+                    self.model_file = path
+                    # 特殊トークンIDを取得
+                    self.pad_id = self.sp_model.pad_id()
+                    self.unk_id = self.sp_model.unk_id()
+                    self.bos_id = self.sp_model.bos_id()
+                    self.eos_id = self.sp_model.eos_id()
+                    print(f"   ✅ SentencePieceモデル読み込み: {path} (語彙サイズ: {self.actual_vocab_size})")
+                except Exception as e:
+                    warnings.warn(f"SentencePieceモデルの読み込みに失敗: {e}")
+            else:
+                warnings.warn("SentencePieceが利用できません。")
+        else:
+            # フォールバック用のJSONファイルを読み込み
+            with open(path, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+            self.char_to_idx = data['char_to_idx']
+            self.idx_to_char = {int(i): c for c, i in self.char_to_idx.items()}
+            self.vocab_size = data['vocab_size']
         return self
 
 
@@ -761,17 +941,40 @@ class NeuroQuantumAI:
         self.model: Optional[NeuroQuantum] = None
         self.config: Optional[NeuroQuantumConfig] = None
     
-    def train(self, texts: List[str], epochs: int = 50, batch_size: int = 16, 
+    def train(self, texts: List[str], epochs: int = 50, batch_size: int = 16,
               lr: float = 0.001, seq_len: int = 64):
         """学習"""
         print("\n" + "=" * 70)
         print("📚 ニューロQ 学習開始")
         print("=" * 70)
-        
+
         # トークナイザー構築
         print("\n🔤 トークナイザー構築...")
-        self.tokenizer = NeuroQuantumTokenizer(vocab_size=8000)
-        self.tokenizer.build_vocab(texts)
+
+        # 既存のSentencePieceモデルを探す
+        tokenizer_model_paths = [
+            "neuroq_tokenizer_8k.model",  # カレントディレクトリ
+            "../neuroq_tokenizer_8k.model",  # 親ディレクトリ
+            os.path.join(os.path.dirname(__file__), "neuroq_tokenizer_8k.model"),  # スクリプトと同じディレクトリ
+            os.path.join(os.path.dirname(os.path.dirname(__file__)), "neuroq_tokenizer_8k.model"),  # 親の親ディレクトリ
+        ]
+
+        existing_model = None
+        for path in tokenizer_model_paths:
+            if os.path.exists(path):
+                existing_model = path
+                break
+
+        if existing_model:
+            # 既存のSentencePieceモデルを使用
+            print(f"   既存のSentencePieceモデルを使用: {existing_model}")
+            self.tokenizer = NeuroQuantumTokenizer(vocab_size=8000, model_file=existing_model)
+        else:
+            # 新規に語彙を構築
+            print("   新規に語彙を構築します...")
+            self.tokenizer = NeuroQuantumTokenizer(vocab_size=8000)
+            self.tokenizer.build_vocab(texts)
+
         print(f"   語彙サイズ: {self.tokenizer.actual_vocab_size}")
         
         # モデル構築
