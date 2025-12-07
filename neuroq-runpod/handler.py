@@ -665,19 +665,21 @@ def handler(event: Dict[str, Any]) -> Dict[str, Any]:
                 print(f"✅ 学習完了: {train_result.get('message', '')}")
             
             # 生成パラメータ（generate_textの明示的なパラメータと学習関連パラメータを除外）
-            exclude_keys = {
-                "action", "prompt", "mode", "max_length", "max_tokens",
-                "temperature", "top_k", "top_p", "repetition_penalty",
-                "train_before_generate", "data_sources", "common_crawl_config",
-                "epochs", "batch_size", "learning_rate", "seq_length"
-            }
+            # モデル初期化用のパラメータのみをkwargsに含める
+            model_init_keys = [
+                "embed_dim", "hidden_dim", "num_heads", "num_layers",
+                "num_neurons", "max_vocab", "max_seq_len", "dropout",
+                "lambda_entangle", "use_openai_embedding", "openai_api_key",
+                "openai_model"
+            ]
             
-            # generate_text()の明示的なパラメータを除外してkwargsを作成
+            # モデル初期化用のパラメータのみを抽出
             kwargs = {
                 k: v for k, v in input_data.items()
-                if k not in exclude_keys
+                if k in model_init_keys
             }
             
+            # generate_text()を呼び出す（明示的なパラメータのみを渡す）
             return generate_text(
                 prompt=prompt,
                 mode=mode,
@@ -686,7 +688,7 @@ def handler(event: Dict[str, Any]) -> Dict[str, Any]:
                 top_k=top_k,
                 top_p=top_p,
                 repetition_penalty=repetition_penalty,
-                **kwargs
+                **kwargs  # モデル初期化パラメータのみ
             )
         
         else:
