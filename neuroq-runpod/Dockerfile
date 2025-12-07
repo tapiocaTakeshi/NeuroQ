@@ -44,4 +44,4 @@ ENV NEUROQ_NUM_HEADS="4"
 ENV NEUROQ_LAMBDA_LAYERED="0.5"
 
 # エントリポイント
-CMD ["python3", "handler.py"]
+CMD ["python", "/app/handler.py"]
