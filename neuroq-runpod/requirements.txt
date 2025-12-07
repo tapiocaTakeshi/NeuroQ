@@ -4,28 +4,27 @@
 # RunPod SDK
 runpod>=1.6.0
 
-# PyTorch (CUDA対応版)
+# PyTorch (CUDA対応)
 torch>=2.0.0
 
 # 数値計算
 numpy>=1.24.0
-matplotlib>=3.7.0
 
-# その他ユーティリティ
-typing_extensions>=4.0.0
-python-dotenv>=1.0.0
+# HTTP リクエスト
+requests>=2.31.0
 
 # トークナイザー（SentencePiece）
 sentencepiece>=0.1.99
 
-# データセット取得用
-datasets>=2.0.0
-
-# OpenAI API（ChatGPTエンベディング用）
-openai>=1.0.0
-
-# Common Crawl データ取得用
+# Common Crawl データ取得
 warcio>=1.7.4
 beautifulsoup4>=4.12.0
-requests>=2.31.0
 
+# OpenAI API（オプション：ChatGPTエンベディング用）
+openai>=1.0.0
+
+# 可視化（オプション）
+matplotlib>=3.7.0
+
+# その他
+typing_extensions>=4.0.0
