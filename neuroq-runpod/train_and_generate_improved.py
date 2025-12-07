@@ -7,32 +7,27 @@ RunPod Serverless Handler - 改善版学習→生成スクリプト
 
 import requests
 import json
-import os
 import time
 from typing import Optional, Dict, Any
 
-# ========================================
-# 環境変数から設定を取得
-# ========================================
-RUNPOD_API_KEY = os.getenv("RUNPOD_API_KEY")
-ENDPOINT_ID = os.getenv("RUNPOD_ENDPOINT_ID")
+# config.pyから設定を読み込み
+from config import (
+    RUNPOD_API_KEY,
+    RUNPOD_ENDPOINT_ID as ENDPOINT_ID,
+    RUNPOD_URL,
+    RUNPOD_STATUS_URL as STATUS_URL,
+    get_headers,
+    check_config
+)
 
-if not RUNPOD_API_KEY or not ENDPOINT_ID:
-    print("=" * 60)
-    print("⚠️ 環境変数を設定してください")
-    print("=" * 60)
+# 設定確認
+if not check_config():
     exit(1)
-
-RUNPOD_URL = f"https://api.runpod.ai/v2/{ENDPOINT_ID}/run"
-STATUS_URL = f"https://api.runpod.ai/v2/{ENDPOINT_ID}/status"
 
 
 def send_and_wait(input_data: dict, timeout: int = 3600) -> dict:
     """リクエストを送信して完了を待つ"""
-    headers = {
-        "Content-Type": "application/json",
-        "Authorization": f"Bearer {RUNPOD_API_KEY}"
-    }
+    headers = get_headers()
     
     # リクエスト送信
     print("📤 RunPodにリクエストを送信中...")
@@ -53,7 +48,7 @@ def send_and_wait(input_data: dict, timeout: int = 3600) -> dict:
     print("⏳ 学習と生成の完了を待っています...")
     
     # ステータスポーリング
-    status_headers = {"Authorization": f"Bearer {RUNPOD_API_KEY}"}
+    status_headers = get_headers()
     status_url = f"{STATUS_URL}/{job_id}"
     start_time = time.time()
     last_status = None
