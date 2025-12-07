@@ -23,7 +23,7 @@ COPY neuroq_tokenizer.model /app/
 COPY neuroq_tokenizer.vocab /app/
 
 # 依存関係をインストール
-RUN pip install -r requirements.txt
+RUN pip install --no-cache-dir -r requirements.txt
 
 # ========================================
 # 環境変数（デフォルト設定）

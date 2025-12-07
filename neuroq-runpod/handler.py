@@ -1,773 +1,333 @@
 #!/usr/bin/env python3
 """
-NeuroQ RunPod Serverless Handler
-=================================
-RunPod Serverless API用のハンドラーファイル
-
-参照元:
-- neuroquantum_layered.py: 層状QBNN-Transformer
-- neuroquantum_brain.py: 脳型散在QBNN
-
-エンドポイント:
-- /generate: テキスト生成
-- /health: ヘルスチェック
+NeuroQ RunPod Serverless API Handler
+=====================================
+Common Crawlから事前学習するRunPod Serverless APIハンドラー
 """
 
-import os
-import sys
-import json
+import runpod
 import torch
-from typing import Dict, Any, Optional
+import requests
+import re
+from typing import Dict, Any, List
+from io import BytesIO
 
-# 親ディレクトリをパスに追加（neuroquantum_*.py を参照するため）
-# Dockerコンテナ内では同じディレクトリに配置されるので、親ディレクトリ参照は不要
-# ただし、ローカル開発環境での互換性のため残す
-PARENT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
-# まず現在のディレクトリを追加（Dockerコンテナ内ではこれで十分）
-# 現在のディレクトリを最初に追加することで、現在のディレクトリのファイルが優先される
-if CURRENT_DIR not in sys.path:
-    sys.path.insert(0, CURRENT_DIR)
-# 親ディレクトリも追加（ローカル開発用）
-# ただし、現在のディレクトリの後に追加することで、現在のディレクトリが優先される
-if PARENT_DIR not in sys.path:
-    sys.path.insert(1, PARENT_DIR)  # インデックス1に挿入して現在のディレクトリを優先
-
-# neuroquantum_layered.py からインポート
+# Common Crawl用ライブラリ
 try:
-    # 現在のディレクトリのファイルを明示的にインポート
-    import importlib.util
-    layered_path = os.path.join(CURRENT_DIR, "neuroquantum_layered.py")
-    if os.path.exists(layered_path):
-        spec = importlib.util.spec_from_file_location("neuroquantum_layered_local", layered_path)
-        layered_module = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(layered_module)
-        NeuroQuantumAI = layered_module.NeuroQuantumAI
-        NeuroQuantumTokenizer = layered_module.NeuroQuantumTokenizer
-        NeuroQuantumConfig = layered_module.NeuroQuantumConfig
-        NeuroQuantum = layered_module.NeuroQuantum
-        NEUROQUANTUM_LAYERED_AVAILABLE = True
-        print(f"✅ ローカルの neuroquantum_layered.py からコンポーネントをインポートしました ({layered_path})")
-    else:
-        # フォールバック: 通常のインポート
-        from neuroquantum_layered import (
-            NeuroQuantumAI,
-            NeuroQuantumTokenizer,
-            NeuroQuantumConfig,
-            NeuroQuantum,
-        )
-        NEUROQUANTUM_LAYERED_AVAILABLE = True
-        print("✅ neuroquantum_layered.py からコンポーネントをインポートしました")
-except ImportError as e:
-    NEUROQUANTUM_LAYERED_AVAILABLE = False
-    print(f"⚠️ neuroquantum_layered.py が見つかりません: {e}")
-except Exception as e:
-    NEUROQUANTUM_LAYERED_AVAILABLE = False
-    print(f"⚠️ neuroquantum_layered.py のインポートでエラーが発生しました: {e}")
-
-# neuroquantum_brain.py からインポート
-try:
-    from neuroquantum_brain import (
-        NeuroQuantumBrainAI,
-        BrainTokenizer,
-        NeuroQuantumBrain,
-    )
-    NEUROQUANTUM_BRAIN_AVAILABLE = True
-    print("✅ neuroquantum_brain.py からコンポーネントをインポートしました")
-except ImportError as e:
-    NEUROQUANTUM_BRAIN_AVAILABLE = False
-    print(f"⚠️ neuroquantum_brain.py が見つかりません: {e}")
-
-# RunPod SDK
-try:
-    import runpod
-    RUNPOD_AVAILABLE = True
+    from warcio.archiveiterator import ArchiveIterator
+    from bs4 import BeautifulSoup
+    COMMON_CRAWL_AVAILABLE = True
 except ImportError:
-    RUNPOD_AVAILABLE = False
-    print("⚠️ runpodライブラリがインストールされていません。pip install runpod を実行してください。")
+    COMMON_CRAWL_AVAILABLE = False
+    print("⚠️ warcio/beautifulsoup4 が見つかりません")
 
-# OpenAI API（ChatGPTエンベディング用）
+# NeuroQuantumモデルをインポート
 try:
-    from openai import OpenAI
-    OPENAI_AVAILABLE = True
+    from neuroquantum_layered import NeuroQuantumAI, NeuroQuantumConfig
+    LAYERED_AVAILABLE = True
 except ImportError:
-    OPENAI_AVAILABLE = False
-    print("⚠️ OpenAIライブラリがインストールされていません。pip install openai を実行してください。")
+    LAYERED_AVAILABLE = False
+    print("⚠️ neuroquantum_layered.py が見つかりません")
 
-# ========================================
-# グローバル変数
-# ========================================
+try:
+    from neuroquantum_brain import NeuroQuantumBrainAI
+    BRAIN_AVAILABLE = True
+except ImportError:
+    BRAIN_AVAILABLE = False
+    print("⚠️ neuroquantum_brain.py が見つかりません")
 
-# モデルインスタンス（グローバルに保持）
-model_layered: Optional[NeuroQuantumAI] = None
-model_brain: Optional[NeuroQuantumBrainAI] = None
-
-# デバイス選択
-if torch.backends.mps.is_available():
-    DEVICE = torch.device("mps")
-    print("🍎 Apple Silicon GPU (MPS) を使用")
-elif torch.cuda.is_available():
-    DEVICE = torch.device("cuda")
-    print("🎮 NVIDIA GPU (CUDA) を使用")
-else:
-    DEVICE = torch.device("cpu")
-    print("💻 CPU を使用")
+# グローバルモデルインスタンス
+layered_ai = None
+brain_ai = None
+is_pretrained = False
 
 
-# ========================================
-# モデル初期化
-# ========================================
-
-def init_model(mode: str = "layered", **kwargs) -> Dict[str, Any]:
+def fetch_common_crawl_data(max_records: int = 100, language: str = "ja") -> List[str]:
     """
-    モデルを初期化
+    Common Crawlからテキストデータを取得
     
     Args:
-        mode: 'layered' または 'brain'
-        **kwargs: モデル設定パラメータ
-    
-    Returns:
-        初期化結果
-    """
-    global model_layered, model_brain
-    
-    try:
-        if mode == "layered":
-            if not NEUROQUANTUM_LAYERED_AVAILABLE:
-                return {"error": "neuroquantum_layered.py が利用できません"}
-            
-            # デフォルト設定
-            embed_dim = kwargs.get("embed_dim", 64)
-            # num_neuronsが指定されている場合はhidden_dimとして使用
-            hidden_dim = kwargs.get("hidden_dim", kwargs.get("num_neurons", 128))
-            num_heads = kwargs.get("num_heads", 4)
-            num_layers = kwargs.get("num_layers", 2)
-            max_seq_len = kwargs.get("max_seq_len", 128)
-            dropout = kwargs.get("dropout", 0.1)
-            lambda_entangle = kwargs.get("lambda_entangle", 0.35)
-            use_openai_embedding = kwargs.get("use_openai_embedding", False)
-            openai_api_key = kwargs.get("openai_api_key")
-            openai_model = kwargs.get("openai_model", "text-embedding-3-large")
-            
-            model_layered = NeuroQuantumAI(
-                embed_dim=embed_dim,
-                hidden_dim=hidden_dim,
-                num_heads=num_heads,
-                num_layers=num_layers,
-                max_seq_len=max_seq_len,
-                dropout=dropout,
-                lambda_entangle=lambda_entangle,
-                use_openai_embedding=use_openai_embedding,
-                openai_api_key=openai_api_key,
-                openai_model=openai_model,
-            )
-            model_layered.device = DEVICE
-            
-            # vocab数を取得
-            vocab_size = None
-            if hasattr(model_layered, 'tokenizer'):
-                if hasattr(model_layered.tokenizer, 'actual_vocab_size'):
-                    vocab_size = model_layered.tokenizer.actual_vocab_size
-                elif hasattr(model_layered.tokenizer, 'vocab_size'):
-                    vocab_size = model_layered.tokenizer.vocab_size
-
-            return {
-                "status": "success",
-                "mode": "layered",
-                "message": "Layered mode モデルを初期化しました",
-                "vocab_size": vocab_size,
-            }
-        
-        elif mode == "brain":
-            if not NEUROQUANTUM_BRAIN_AVAILABLE:
-                return {"error": "neuroquantum_brain.py が利用できません"}
-            
-            # デフォルト設定
-            embed_dim = kwargs.get("embed_dim", 128)
-            num_heads = kwargs.get("num_heads", 4)
-            num_layers = kwargs.get("num_layers", 3)
-            num_neurons = kwargs.get("num_neurons", 75)
-            max_vocab = kwargs.get("max_vocab", 50000)
-            
-            model_brain = NeuroQuantumBrainAI(
-                embed_dim=embed_dim,
-                num_heads=num_heads,
-                num_layers=num_layers,
-                num_neurons=num_neurons,
-                max_vocab=max_vocab,
-            )
-            model_brain.device = DEVICE
-            
-            # vocab数を取得
-            vocab_size = None
-            if hasattr(model_brain, 'tokenizer') and hasattr(model_brain.tokenizer, 'vocab_size'):
-                vocab_size = model_brain.tokenizer.vocab_size
-
-            return {
-                "status": "success",
-                "mode": "brain",
-                "message": "Brain mode モデルを初期化しました",
-                "vocab_size": vocab_size,
-            }
-        
-        else:
-            return {"error": f"不明なモード: {mode}"}
-    
-    except Exception as e:
-        return {"error": f"モデル初期化エラー: {str(e)}"}
-
-
-# ========================================
-# データ取得
-# ========================================
-
-def fetch_training_data(
-    data_sources: Optional[list] = None,
-    common_crawl_config: Optional[Dict[str, Any]] = None,
-    max_records: int = 100
-) -> list:
-    """
-    学習データを取得
-    
-    Args:
-        data_sources: データソースのリスト (例: ["common_crawl", "huggingface"])
-        common_crawl_config: Common Crawl設定（将来の拡張用）
-        max_records: 最大レコード数
+        max_records: 取得する最大レコード数
+        language: 言語フィルタ ("ja" for Japanese)
     
     Returns:
         テキストのリスト
     """
+    if not COMMON_CRAWL_AVAILABLE:
+        print("⚠️ Common Crawlライブラリが利用できません")
+        return []
+    
     texts = []
     
-    if data_sources is None:
-        data_sources = ["huggingface"]  # デフォルト
-    
-    # Hugging Faceからデータ取得
-    if "huggingface" in data_sources or "hugging_face" in data_sources:
-        try:
-            from datasets import load_dataset
-            print("   📡 Hugging Faceからデータ取得中...")
-            
-            # 日本語Wikipedia
-            try:
-                ds = load_dataset("range3/wiki40b-ja", split="train", streaming=True)
-                count = 0
-                for item in ds:
-                    if 'text' in item and len(item['text']) > 50:
-                        texts.append(item['text'][:1000])  # 長さ制限
-                        count += 1
-                        if count >= max_records // 3:
-                            break
-            except Exception as e:
-                print(f"   ⚠️ 日本語Wikipedia取得失敗: {e}")
-            
-            # 英語データ
-            try:
-                ds = load_dataset("wikitext", "wikitext-2-raw-v1", split="train")
-                for item in ds[:max_records // 3]:
-                    if 'text' in item and len(item['text']) > 30:
-                        texts.append(item['text'])
-            except Exception as e:
-                print(f"   ⚠️ WikiText取得失敗: {e}")
-            
-            # 日本語対話
-            try:
-                ds = load_dataset("kunishou/databricks-dolly-15k-ja", split="train")
-                for item in ds[:max_records // 3]:
-                    if 'output' in item:
-                        texts.append(item['output'])
-            except Exception as e:
-                print(f"   ⚠️ 日本語対話データ取得失敗: {e}")
-            
-            print(f"   ✅ Hugging Face: {len(texts)} サンプル取得")
-            
-        except ImportError:
-            print("   ⚠️ datasets未インストール")
-        except Exception as e:
-            print(f"   ⚠️ Hugging Face取得失敗: {e}")
-    
-    # Common Crawl
-    if "common_crawl" in data_sources:
-        try:
-            from common_crawl_fetcher import fetch_common_crawl_data
-
-            # Common Crawl設定
-            cc_query = common_crawl_config.get("query", "*.jp") if common_crawl_config else "*.jp"
-            cc_index = common_crawl_config.get("index_name") if common_crawl_config else None
-            cc_max_records = common_crawl_config.get("max_records_cc", max_records // 2) if common_crawl_config else max_records // 2
-
-            print(f"   🌐 Common Crawlからデータ取得中... (クエリ: {cc_query}, 最大{cc_max_records}レコード)")
-
-            cc_texts = fetch_common_crawl_data(
-                max_records=cc_max_records,
-                query=cc_query,
-                index_name=cc_index,
-                min_text_length=100
-            )
-
-            texts.extend(cc_texts)
-            print(f"   ✅ Common Crawl: {len(cc_texts)} サンプル取得")
-
-        except ImportError as e:
-            print(f"   ⚠️ Common Crawl fetcher が利用できません: {e}")
-            print("   💡 pip install warcio beautifulsoup4 requests を実行してください")
-        except Exception as e:
-            print(f"   ⚠️ Common Crawl取得失敗: {e}")
-    
-    # 組み込みデータ（フォールバック）
-    if len(texts) == 0:
-        print("   📝 組み込みデータを使用...")
-        texts = [
-            "量子コンピュータは、量子力学の原理を利用して情報を処理する革新的な計算機です。",
-            "人工知能は、人間の知的活動をコンピュータで実現しようとする技術です。",
-            "機械学習は、データから学習して改善するシステムを実現します。",
-            "深層学習は、多層のニューラルネットワークを用いた機械学習手法です。",
-            "ニューラルネットワークは、人間の脳の神経回路を模倣した計算システムです。",
-        ] * (max_records // 5)
-    
-    return texts[:max_records]
-
-
-# ========================================
-# 学習処理
-# ========================================
-
-def train_model(
-    mode: str = "layered",
-    texts: Optional[list] = None,
-    epochs: int = 20,
-    batch_size: int = 16,
-    learning_rate: float = 0.001,
-    seq_length: int = 64,
-    **kwargs
-) -> Dict[str, Any]:
-    """
-    モデルを学習
-    
-    Args:
-        mode: 'layered' または 'brain'
-        texts: 学習データ（テキストのリスト）
-        epochs: エポック数
-        batch_size: バッチサイズ
-        learning_rate: 学習率
-        seq_length: シーケンス長
-        **kwargs: その他のパラメータ
-    
-    Returns:
-        学習結果
-    """
-    global model_layered, model_brain
+    # Common Crawl インデックスAPI
+    # 日本語サイトを検索
+    index_url = "https://index.commoncrawl.org/CC-MAIN-2024-10-index"
     
     try:
-        if texts is None or len(texts) == 0:
-            return {"error": "学習データが空です"}
+        # 日本語ドメインを検索
+        search_url = f"{index_url}?url=*.jp/*&output=json&limit={max_records}"
+        print(f"🔄 Common Crawlからデータを取得中... (最大{max_records}件)")
         
-        if mode == "layered":
-            if model_layered is None:
-                init_result = init_model(mode="layered", **kwargs)
-                if "error" in init_result:
-                    return init_result
-            
-            print(f"   🎓 Layered mode 学習開始: {len(texts)}サンプル, {epochs}エポック")
-            model_layered.train(
-                texts=texts,
-                epochs=epochs,
-                batch_size=batch_size,
-                lr=learning_rate,
-                seq_len=seq_length
-            )
-
-            # vocab数を取得
-            vocab_size = None
-            if hasattr(model_layered, 'tokenizer'):
-                if hasattr(model_layered.tokenizer, 'actual_vocab_size'):
-                    vocab_size = model_layered.tokenizer.actual_vocab_size
-                elif hasattr(model_layered.tokenizer, 'vocab_size'):
-                    vocab_size = model_layered.tokenizer.vocab_size
-
-            return {
-                "status": "success",
-                "mode": "layered",
-                "message": f"学習完了: {epochs}エポック",
-                "vocab_size": vocab_size,
-            }
+        response = requests.get(search_url, timeout=30)
+        if response.status_code != 200:
+            print(f"⚠️ Common Crawl API エラー: {response.status_code}")
+            # フォールバック: サンプルデータを使用
+            return get_sample_training_data()
         
-        elif mode == "brain":
-            if model_brain is None:
-                init_result = init_model(mode="brain", **kwargs)
-                if "error" in init_result:
-                    return init_result
-            
-            print(f"   🎓 Brain mode 学習開始: {len(texts)}サンプル, {epochs}エポック")
-            model_brain.train(
-                texts=texts,
-                epochs=epochs,
-                batch_size=batch_size,
-                lr=learning_rate,
-                seq_length=seq_length
-            )
-
-            # vocab数を取得
-            vocab_size = None
-            if hasattr(model_brain, 'tokenizer') and hasattr(model_brain.tokenizer, 'vocab_size'):
-                vocab_size = model_brain.tokenizer.vocab_size
-
-            return {
-                "status": "success",
-                "mode": "brain",
-                "message": f"学習完了: {epochs}エポック",
-                "vocab_size": vocab_size,
-            }
+        lines = response.text.strip().split('\n')
         
-        else:
-            return {"error": f"不明なモード: {mode}"}
-    
+        for i, line in enumerate(lines[:max_records]):
+            try:
+                import json
+                record = json.loads(line)
+                
+                # WARCファイルからコンテンツを取得
+                warc_url = f"https://data.commoncrawl.org/{record['filename']}"
+                offset = int(record['offset'])
+                length = int(record['length'])
+                
+                headers = {'Range': f'bytes={offset}-{offset+length-1}'}
+                warc_response = requests.get(warc_url, headers=headers, timeout=30)
+                
+                if warc_response.status_code in [200, 206]:
+                    # WARCレコードをパース
+                    stream = BytesIO(warc_response.content)
+                    for warc_record in ArchiveIterator(stream):
+                        if warc_record.rec_type == 'response':
+                            content = warc_record.content_stream().read()
+                            # HTMLからテキストを抽出
+                            soup = BeautifulSoup(content, 'html.parser')
+                            
+                            # スクリプトとスタイルを削除
+                            for script in soup(["script", "style"]):
+                                script.decompose()
+                            
+                            text = soup.get_text(separator=' ', strip=True)
+                            
+                            # テキストをクリーンアップ
+                            text = re.sub(r'\s+', ' ', text)
+                            
+                            # 日本語テキストのみフィルタ
+                            if language == "ja" and re.search(r'[\u3040-\u309F\u30A0-\u30FF\u4E00-\u9FFF]', text):
+                                if len(text) > 100:  # 短すぎるテキストは除外
+                                    texts.append(text[:2000])  # 最大2000文字
+                                    print(f"  ✅ {i+1}/{max_records}: {len(text)}文字取得")
+                            elif language != "ja" and len(text) > 100:
+                                texts.append(text[:2000])
+                                print(f"  ✅ {i+1}/{max_records}: {len(text)}文字取得")
+                
+            except Exception as e:
+                print(f"  ⚠️ レコード {i+1} エラー: {e}")
+                continue
+        
+        print(f"✅ Common Crawlから{len(texts)}件のテキストを取得")
+        
     except Exception as e:
-        return {"error": f"学習エラー: {str(e)}"}
+        print(f"⚠️ Common Crawl取得エラー: {e}")
+        # フォールバック: サンプルデータを使用
+        return get_sample_training_data()
+    
+    if not texts:
+        return get_sample_training_data()
+    
+    return texts
 
 
-# ========================================
-# テキスト生成
-# ========================================
+def get_sample_training_data() -> List[str]:
+    """サンプル学習データ（フォールバック用）"""
+    return [
+        "人工知能は、人間の知能を模倣するコンピュータシステムです。機械学習やディープラーニングなどの技術を使用して、データからパターンを学習し、予測や判断を行います。",
+        "量子コンピュータは、量子力学の原理を利用した次世代のコンピュータです。従来のコンピュータでは解けない複雑な問題を高速に解くことができます。",
+        "自然言語処理は、コンピュータが人間の言語を理解し、生成するための技術です。翻訳、要約、質問応答などのタスクに使用されます。",
+        "ニューラルネットワークは、人間の脳の神経細胞の働きを模倣した計算モデルです。層状に接続されたノードで構成され、データから特徴を学習します。",
+        "プログラミングは、コンピュータに指示を与えるための言語を使ってソフトウェアを作成する技術です。Python、JavaScript、Javaなど多くの言語があります。",
+        "データサイエンスは、大量のデータから有用な情報を抽出し、ビジネスや研究に活用する学問分野です。統計学、機械学習、可視化などの手法を組み合わせます。",
+        "クラウドコンピューティングは、インターネット経由でコンピュータリソースを提供するサービスです。AWS、Azure、GCPなどのプラットフォームが代表的です。",
+        "ブロックチェーンは、分散型台帳技術の一種で、データの改ざんを防ぐ仕組みを持っています。暗号通貨や契約管理などに応用されています。",
+    ]
 
-def generate_text(
-    prompt: str,
-    mode: str = "layered",
-    max_length: int = 100,
-    temperature: float = 0.7,
-    top_k: int = 40,
-    top_p: float = 0.9,
-    repetition_penalty: float = 2.0,  # デフォルト値を2.0に変更して繰り返しを抑制
-    **kwargs
-) -> Dict[str, Any]:
+
+def pretrain_model(model, max_records: int = 50, epochs: int = 5):
     """
-    テキスト生成
-    
-    Args:
-        prompt: 入力プロンプト
-        mode: 'layered' または 'brain'
-        max_length: 最大生成長
-        temperature: 温度パラメータ
-        top_k: Top-K サンプリング
-        top_p: Top-P サンプリング
-        **kwargs: その他のパラメータ
-    
-    Returns:
-        生成結果
+    Common Crawlから事前学習を実行
     """
-    global model_layered, model_brain
+    global is_pretrained
     
-    try:
-        if mode == "layered":
-            if model_layered is None:
-                # モデルが初期化されていない場合は初期化
-                init_result = init_model(mode="layered", **kwargs)
-                if "error" in init_result:
-                    return init_result
-            
-            if model_layered.model is None:
-                return {"error": "モデルが学習されていません"}
-            
-            # テキスト生成
-            generated = model_layered.generate(
-                prompt=prompt,
-                max_length=min(max_length, 150),  # 最大長を150に制限して繰り返しを防ぐ
-                temp_min=temperature * 0.8,
-                temp_max=temperature * 1.2,
-                top_k=min(top_k, 50),  # top_kを50に制限
-                top_p=top_p,
-                repetition_penalty=repetition_penalty,
-            )
-
-            # vocab数を取得
-            vocab_size = None
-            if hasattr(model_layered, 'tokenizer'):
-                if hasattr(model_layered.tokenizer, 'actual_vocab_size'):
-                    vocab_size = model_layered.tokenizer.actual_vocab_size
-                elif hasattr(model_layered.tokenizer, 'vocab_size'):
-                    vocab_size = model_layered.tokenizer.vocab_size
-            
-            return {
-                "status": "success",
-                "mode": "layered",
-                "prompt": prompt,
-                "generated": generated,
-                "vocab_size": vocab_size,
-            }
-        
-        elif mode == "brain":
-            if model_brain is None:
-                # モデルが初期化されていない場合は初期化
-                init_result = init_model(mode="brain", **kwargs)
-                if "error" in init_result:
-                    return init_result
-            
-            if model_brain.model is None:
-                return {"error": "モデルが学習されていません"}
-            
-            # テキスト生成
-            generated = model_brain.generate(
-                prompt=prompt,
-                max_length=max_length,
-                temperature_min=temperature * 0.8,
-                temperature_max=temperature * 1.2,
-                top_k=top_k,
-                top_p=top_p,
-            )
-            
-            # vocab数を取得
-            vocab_size = None
-            if hasattr(model_brain, 'tokenizer') and hasattr(model_brain.tokenizer, 'vocab_size'):
-                vocab_size = model_brain.tokenizer.vocab_size
-
-            return {
-                "status": "success",
-                "mode": "brain",
-                "prompt": prompt,
-                "generated": generated,
-                "vocab_size": vocab_size,
-            }
-        
-        else:
-            return {"error": f"不明なモード: {mode}"}
+    if is_pretrained:
+        print("ℹ️ 既に事前学習済みです")
+        return
     
-    except Exception as e:
-        return {"error": f"生成エラー: {str(e)}"}
+    print("🔄 事前学習を開始...")
+    
+    # Common Crawlからデータ取得
+    training_data = fetch_common_crawl_data(max_records=max_records)
+    
+    if training_data:
+        print(f"📚 {len(training_data)}件のデータで学習開始 (エポック: {epochs})")
+        try:
+            model.train_on_texts(training_data, epochs=epochs)
+            is_pretrained = True
+            print("✅ 事前学習完了")
+        except Exception as e:
+            print(f"⚠️ 学習エラー: {e}")
+    else:
+        print("⚠️ 学習データが取得できませんでした")
 
 
-# ========================================
-# RunPod Handler
-# ========================================
+def get_layered_model(pretrain: bool = True):
+    """Layeredモデルを取得（事前学習付き）"""
+    global layered_ai
+    if layered_ai is None and LAYERED_AVAILABLE:
+        print("🔄 Layeredモデルを初期化中...")
+        layered_ai = NeuroQuantumAI()
+        print("✅ Layeredモデル初期化完了")
+        
+        if pretrain:
+            pretrain_model(layered_ai)
+    
+    return layered_ai
+
+
+def get_brain_model(pretrain: bool = True):
+    """Brainモデルを取得（事前学習付き）"""
+    global brain_ai
+    if brain_ai is None and BRAIN_AVAILABLE:
+        print("🔄 Brainモデルを初期化中...")
+        brain_ai = NeuroQuantumBrainAI()
+        print("✅ Brainモデル初期化完了")
+        
+        if pretrain:
+            pretrain_model(brain_ai)
+    
+    return brain_ai
+
 
 def handler(event: Dict[str, Any]) -> Dict[str, Any]:
     """
-    RunPod Serverless Handler
+    RunPod Serverless ハンドラー
     
-    リクエスト形式:
+    リクエスト例:
     {
         "input": {
-            "action": "generate" | "init" | "health",
-            "mode": "layered" | "brain",
-            "prompt": "テキストプロンプト",
+            "action": "generate",
+            "prompt": "こんにちは",
+            "mode": "layered",
             "max_length": 100,
-            "temperature": 0.7,
-            ...
+            "temperature": 0.8,
+            "pretrain": true
         }
     }
     """
     try:
         input_data = event.get("input", {})
         action = input_data.get("action", "generate")
+        pretrain = input_data.get("pretrain", True)
         
+        # ヘルスチェック
         if action == "health":
-            # モデルのvocab情報を取得
-            layered_vocab_size = None
-            brain_vocab_size = None
-
-            if model_layered is not None and hasattr(model_layered, 'tokenizer'):
-                if hasattr(model_layered.tokenizer, 'actual_vocab_size'):
-                    layered_vocab_size = model_layered.tokenizer.actual_vocab_size
-                elif hasattr(model_layered.tokenizer, 'vocab_size'):
-                    layered_vocab_size = model_layered.tokenizer.vocab_size
-
-            if model_brain is not None and hasattr(model_brain, 'tokenizer'):
-                if hasattr(model_brain.tokenizer, 'vocab_size'):
-                    brain_vocab_size = model_brain.tokenizer.vocab_size
-
             return {
                 "status": "healthy",
-                "layered_available": NEUROQUANTUM_LAYERED_AVAILABLE,
-                "brain_available": NEUROQUANTUM_BRAIN_AVAILABLE,
-                "openai_available": OPENAI_AVAILABLE,
-                "device": str(DEVICE),
-                "layered_vocab_size": layered_vocab_size,
-                "brain_vocab_size": brain_vocab_size,
+                "layered_available": LAYERED_AVAILABLE,
+                "brain_available": BRAIN_AVAILABLE,
+                "common_crawl_available": COMMON_CRAWL_AVAILABLE,
+                "cuda_available": torch.cuda.is_available(),
+                "is_pretrained": is_pretrained
             }
         
-        elif action == "init":
+        # テキスト生成
+        if action == "generate":
             mode = input_data.get("mode", "layered")
-            kwargs = {k: v for k, v in input_data.items() if k != "action" and k != "mode"}
-            return init_model(mode=mode, **kwargs)
-        
-        elif action == "train":
-            mode = input_data.get("mode", "layered")
-            
-            # データ取得
-            data_sources = input_data.get("data_sources", ["huggingface"])
-            common_crawl_config = input_data.get("common_crawl_config", {})
-            max_records = common_crawl_config.get("max_records", 100)
-            
-            print(f"📥 学習データを取得中... (ソース: {data_sources}, 最大{max_records}レコード)")
-            texts = fetch_training_data(
-                data_sources=data_sources,
-                common_crawl_config=common_crawl_config,
-                max_records=max_records
-            )
-            
-            if len(texts) == 0:
-                return {"error": "学習データの取得に失敗しました"}
-            
-            # 学習パラメータ
-            epochs = input_data.get("epochs", 20)
-            batch_size = input_data.get("batch_size", 16)
-            learning_rate = input_data.get("learning_rate", 0.001)
-            seq_length = input_data.get("seq_length", 64)
-            
-            # モデル設定パラメータを抽出
-            model_kwargs = {
-                k: v for k, v in input_data.items()
-                if k in [
-                    "embed_dim", "hidden_dim", "num_heads", "num_layers",
-                    "num_neurons", "max_vocab", "max_seq_len", "dropout",
-                    "lambda_entangle", "use_openai_embedding", "openai_api_key",
-                    "openai_model"
-                ]
-            }
-            
-            # num_neuronsが指定されている場合、モードに応じて変換
-            if "num_neurons" in input_data and "num_neurons" not in model_kwargs:
-                num_neurons = input_data["num_neurons"]
-                if mode == "layered":
-                    model_kwargs["hidden_dim"] = num_neurons
-                elif mode == "brain":
-                    model_kwargs["num_neurons"] = num_neurons
-            
-            # 学習実行
-            train_result = train_model(
-                mode=mode,
-                texts=texts,
-                epochs=epochs,
-                batch_size=batch_size,
-                learning_rate=learning_rate,
-                seq_length=seq_length,
-                **model_kwargs
-            )
-            
-            return train_result
-        
-        elif action == "generate":
             prompt = input_data.get("prompt", "")
-            if not prompt:
-                return {"error": "promptが必要です"}
-            
-            mode = input_data.get("mode", "layered")
-            max_length = input_data.get("max_length", input_data.get("max_tokens", 100))
-            temperature = input_data.get("temperature", 0.7)
-            top_k = input_data.get("top_k", 40)
+            max_length = input_data.get("max_length", 100)
+            temperature = input_data.get("temperature", 0.8)
+            top_k = input_data.get("top_k", 50)
             top_p = input_data.get("top_p", 0.9)
-            repetition_penalty = input_data.get("repetition_penalty", 2.0)  # 繰り返しペナルティを強化（デフォルト2.0）
             
-            # train_before_generate フラグの処理
-            train_before_generate = input_data.get("train_before_generate", False)
-            
-            if train_before_generate:
-                # データ取得
-                data_sources = input_data.get("data_sources", ["huggingface"])
-                common_crawl_config = input_data.get("common_crawl_config", {})
-                max_records = common_crawl_config.get("max_records", 100)
-                
-                print(f"📥 学習データを取得中... (ソース: {data_sources}, 最大{max_records}レコード)")
-                texts = fetch_training_data(
-                    data_sources=data_sources,
-                    common_crawl_config=common_crawl_config,
-                    max_records=max_records
+            if mode == "layered" and LAYERED_AVAILABLE:
+                model = get_layered_model(pretrain=pretrain)
+                result = model.generate(
+                    prompt=prompt,
+                    max_length=max_length,
+                    temperature=temperature,
+                    top_k=top_k,
+                    top_p=top_p
                 )
-                
-                if len(texts) == 0:
-                    return {"error": "学習データの取得に失敗しました"}
-                
-                # 学習パラメータ
-                epochs = input_data.get("epochs", 20)
-                batch_size = input_data.get("batch_size", 16)
-                learning_rate = input_data.get("learning_rate", 0.001)
-                seq_length = input_data.get("seq_length", 64)
-                
-                # モデル設定パラメータを抽出
-                # num_neuronsはbrainモードではnum_neurons、layeredモードではhidden_dimとして使用
-                model_kwargs = {
-                    k: v for k, v in input_data.items()
-                    if k in [
-                        "embed_dim", "hidden_dim", "num_heads", "num_layers",
-                        "num_neurons", "max_vocab", "max_seq_len", "dropout",
-                        "lambda_entangle", "use_openai_embedding", "openai_api_key",
-                        "openai_model"
-                    ]
+                return {
+                    "status": "success",
+                    "mode": "layered",
+                    "prompt": prompt,
+                    "generated_text": result,
+                    "is_pretrained": is_pretrained
                 }
-                
-                # num_neuronsが指定されている場合、モードに応じて変換
-                if "num_neurons" in input_data and "num_neurons" not in model_kwargs:
-                    num_neurons = input_data["num_neurons"]
-                    if mode == "layered":
-                        # layeredモードではhidden_dimとして使用
-                        model_kwargs["hidden_dim"] = num_neurons
-                    elif mode == "brain":
-                        # brainモードではnum_neuronsとして使用
-                        model_kwargs["num_neurons"] = num_neurons
-                
-                # 学習実行
-                train_result = train_model(
-                    mode=mode,
-                    texts=texts,
-                    epochs=epochs,
-                    batch_size=batch_size,
-                    learning_rate=learning_rate,
-                    seq_length=seq_length,
-                    **model_kwargs
+            
+            elif mode == "brain" and BRAIN_AVAILABLE:
+                model = get_brain_model(pretrain=pretrain)
+                result = model.generate(
+                    prompt=prompt,
+                    max_length=max_length,
+                    temperature=temperature
                 )
-                
-                if "error" in train_result:
-                    return train_result
-                
-                print(f"✅ 学習完了: {train_result.get('message', '')}")
+                return {
+                    "status": "success",
+                    "mode": "brain",
+                    "prompt": prompt,
+                    "generated_text": result,
+                    "is_pretrained": is_pretrained
+                }
             
-            # 生成パラメータ（generate_textの明示的なパラメータと学習関連パラメータを除外）
-            # モデル初期化用のパラメータのみをkwargsに含める
-            model_init_keys = [
-                "embed_dim", "hidden_dim", "num_heads", "num_layers",
-                "num_neurons", "max_vocab", "max_seq_len", "dropout",
-                "lambda_entangle", "use_openai_embedding", "openai_api_key",
-                "openai_model"
-            ]
-            
-            # モデル初期化用のパラメータのみを抽出
-            kwargs = {
-                k: v for k, v in input_data.items()
-                if k in model_init_keys
-            }
-            
-            # generate_text()を呼び出す（明示的なパラメータのみを渡す）
-            return generate_text(
-                prompt=prompt,
-                mode=mode,
-                max_length=max_length,
-                temperature=temperature,
-                top_k=top_k,
-                top_p=top_p,
-                repetition_penalty=repetition_penalty,
-                **kwargs  # モデル初期化パラメータのみ
-            )
+            else:
+                return {
+                    "status": "error",
+                    "error": f"モード '{mode}' は利用できません"
+                }
         
-        else:
-            return {"error": f"不明なアクション: {action}"}
+        # 追加学習
+        if action == "train":
+            mode = input_data.get("mode", "layered")
+            training_data = input_data.get("training_data", [])
+            epochs = input_data.get("epochs", 10)
+            use_common_crawl = input_data.get("use_common_crawl", False)
+            max_records = input_data.get("max_records", 50)
+            
+            # Common Crawlからデータを追加
+            if use_common_crawl:
+                cc_data = fetch_common_crawl_data(max_records=max_records)
+                training_data.extend(cc_data)
+            
+            if not training_data:
+                return {"status": "error", "error": "training_data が必要です"}
+            
+            if mode == "layered" and LAYERED_AVAILABLE:
+                model = get_layered_model(pretrain=False)
+                model.train_on_texts(training_data, epochs=epochs)
+                return {
+                    "status": "success",
+                    "mode": "layered",
+                    "message": f"{len(training_data)}件のデータで{epochs}エポック学習完了"
+                }
+            
+            elif mode == "brain" and BRAIN_AVAILABLE:
+                model = get_brain_model(pretrain=False)
+                model.train_on_texts(training_data, epochs=epochs)
+                return {
+                    "status": "success",
+                    "mode": "brain",
+                    "message": f"{len(training_data)}件のデータで{epochs}エポック学習完了"
+                }
+            
+            else:
+                return {"status": "error", "error": f"モード '{mode}' は利用できません"}
+        
+        return {"status": "error", "error": f"不明なアクション: {action}"}
     
     except Exception as e:
-        return {"error": f"ハンドラーエラー: {str(e)}"}
+        return {"status": "error", "error": str(e)}
 
 
-# ========================================
 # RunPod Serverless 起動
-# ========================================
-
 if __name__ == "__main__":
-    if RUNPOD_AVAILABLE:
-        print("🚀 RunPod Serverless Handler を起動します...")
-        runpod.serverless.start({"handler": handler})
-    else:
-        print("⚠️ RunPod SDKが利用できません。ローカルテストモードで実行します。")
-        print("\nテストリクエスト例:")
-        print(json.dumps({
-            "input": {
-                "action": "health"
-            }
-        }, indent=2))
-
+    print("🚀 NeuroQ RunPod Serverless Handler を起動します...")
+    print(f"   Common Crawl: {'✅' if COMMON_CRAWL_AVAILABLE else '❌'}")
+    print(f"   Layered: {'✅' if LAYERED_AVAILABLE else '❌'}")
+    print(f"   Brain: {'✅' if BRAIN_AVAILABLE else '❌'}")
+    runpod.serverless.start({"handler": handler})
