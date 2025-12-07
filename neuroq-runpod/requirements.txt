@@ -22,3 +22,8 @@ datasets>=2.0.0
 # OpenAI API（ChatGPTエンベディング用）
 openai>=1.0.0
 
+# Common Crawl データ取得用
+warcio>=1.7.4
+beautifulsoup4>=4.12.0
+requests>=2.31.0
+
