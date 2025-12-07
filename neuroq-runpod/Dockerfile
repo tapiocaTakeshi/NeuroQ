@@ -20,9 +20,9 @@ COPY neuroq-runpod/neuroquantum_layered.py /app/
 COPY neuroq-runpod/qbnn_layered.py /app/
 COPY neuroq-runpod/qbnn_brain.py /app/
 
-# SentencePiece トークナイザーモデルをコピー
-COPY neuroq-runpod/neuroq_tokenizer.model /app/
-COPY neuroq-runpod/neuroq_tokenizer.vocab /app/
+# # SentencePiece トークナイザーモデルをコピー
+# COPY neuroq-runpod/neuroq_tokenizer.model /app/
+# COPY neuroq-runpod/neuroq_tokenizer.vocab /app/
 
 # 依存関係をインストール
 RUN pip install --no-cache-dir -r requirements.txt
