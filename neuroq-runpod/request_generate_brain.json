@@ -1,0 +1,10 @@
+{
+  "input": {
+    "action": "generate",
+    "mode": "brain",
+    "prompt": "ニューラルネットワークとは",
+    "max_length": 120,
+    "temperature": 0.8,
+    "pretrain": true
+  }
+}
