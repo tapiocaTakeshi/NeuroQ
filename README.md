@@ -1,92 +1,196 @@
-# 擬似量子ビット (Pseudo-Qubit)
+# 調整可能擬似量子ビット (APQB: Adjustable Pseudo Quantum Bit)
 
-相関係数 r ∈ [-1, 1] を量子ビットの状態にマッピングする数学的・プログラム的実装です。
+**ニューラルネットワークと量子多体系の統一理論としてのAPQBフレームワーク**
 
-## マッピング原理
+統計、AI、量子論を統一的に記述する理論モデルです。
 
-| 相関係数 r | 角度 θ | 量子状態 | 説明 |
-|-----------|--------|----------|------|
-| r = 1 | θ = 0 | \|0⟩ | 完全な正の相関 → 純粋状態 |
-| r = 0 | θ = π/2 | (|0⟩ + |1⟩)/√2 | 無相関 → 完全な重ね合わせ |
-| r = -1 | θ = π | \|1⟩ | 完全な負の相関 → 純粋状態 |
+## 📚 理論の詳細
 
-## 数学的定式化
+詳細な理論と論文は以下のNote記事をご覧ください：
+
+- [調整可能擬似量子ビット（APQB）に基づく量子インスパイアニューラルネットワーク](https://note.com/bright_laelia447/n/n0751aaac9730)
+- [APQB（Adjustable Pseudo Quantum Bit）理論](https://note.com/bright_laelia447/n/nc9e892c35fca)
+- [私の理論と概念](https://note.com/bright_laelia447/n/n3b7e5124d73d)
+
+## 🎯 基本概念
+
+**調整可能擬似量子ビット（APQB）**は、単一パラメータ θ で以下を統一的に記述します：
+
+- **量子状態**: |ψ⟩ = cos(θ)|0⟩ + sin(θ)|1⟩
+- **相関係数**: r = cos(2θ)
+- **温度（乱雑さ）**: T = |sin(2θ)|
+- **制約条件**: r² + T² = 1
+
+## 📐 数学的定式化
+
+### 基本関係式
+
+| パラメータ | 角度 θ | 相関係数 r | 温度 T | 量子状態 |
+|-----------|--------|-----------|--------|----------|
+| θ = 0 | 0 | r = 1 | T = 0 | \|0⟩ (完全な正の相関) |
+| θ = π/4 | π/4 | r = 0 | T = 1 | (\|0⟩ + \|1⟩)/√2 (無相関・最大ゆらぎ) |
+| θ = π/2 | π/2 | r = -1 | T = 0 | \|1⟩ (完全な負の相関) |
 
 ### 相関係数から角度への変換
+
+```
+θ = arccos(r) / 2
+```
+
+または、相関係数 r ∈ [-1, 1] から直接：
+
 ```
 θ = π × (1 - r) / 2
 ```
 
-### 量子状態
-```
-|ψ⟩ = cos(θ/2)|0⟩ + sin(θ/2)|1⟩
-```
-
 ### 測定確率
+
 ```
-P(|0⟩) = cos²(θ/2)
-P(|1⟩) = sin²(θ/2)
+P(|0⟩) = cos²(θ)
+P(|1⟩) = sin²(θ)
 ```
 
-## インストール
+## 🔬 理論的背景
+
+APQBフレームワークは以下を実現します：
+
+1. **単一APQBの数学的定義**
+   - 量子状態、相関係数、温度を統一的に記述
+
+2. **N体系への一般化と多体相関**
+   - k体相関関数: Q_k(θ) = cos(2kθ) (k偶数) / sin(2kθ) (k奇数)
+   - 一般化トレードオフ関係の確立
+
+3. **APQBニューラルネットワーク**
+   - 量子もつれを模倣した処理
+   - 量子確率的な活性化による創造的な生成
+
+4. **複素角度空間での学習**
+   - 複素表現: z = e^{i2θ}
+   - 最適化アルゴリズムの適用
+
+## 💻 インストール
 
 ```bash
 pip install -r requirements.txt
 ```
 
-## 使用方法
+## 🚀 使用方法
 
 ### 基本的な使い方
 
 ```python
-from pseudo_qubit import PseudoQubit
+from apqb_framework import APQB
 
-# 相関係数から擬似量子ビットを作成
-qubit = PseudoQubit(correlation=0.5)
+# 角度からAPQBを作成
+qubit = APQB(theta=np.pi/4)
 
-# 状態を確認
-print(qubit)
+# 相関係数と温度を取得
+print(f"相関係数 r = {qubit.r:.4f}")
+print(f"温度 T = {qubit.T:.4f}")
+print(f"制約条件 r² + T² = {qubit.verify_constraint():.4f}")
 
 # 確率を取得
-p0, p1 = qubit.probabilities
-print(f"P(|0⟩) = {p0}, P(|1⟩) = {p1}")
+p0, p1 = qubit.p0, qubit.p1
+print(f"P(|0⟩) = {p0:.4f}, P(|1⟩) = {p1:.4f}")
 
 # 測定（シミュレーション）
 result = qubit.measure()  # 0 または 1
-
-# 統計測定
-stats = qubit.measure_n(1000)
 ```
 
-### データから量子ビットを生成
+### 相関係数からAPQBを生成
 
 ```python
-import numpy as np
-from pseudo_qubit import create_qubit_from_data
-
-x = np.array([1, 2, 3, 4, 5])
-y = np.array([2, 4, 5, 4, 5])
-
-qubit = create_qubit_from_data(x, y)
+# 相関係数 r からAPQBを生成
+qubit = APQB.from_r(r=0.5)
+print(qubit)  # APQB(θ=..., r=0.5000, T=...)
 ```
 
-## ファイル構成
+### 温度からAPQBを生成
 
-- `pseudo_qubit.py` - 擬似量子ビットのコア実装
-- `visualize_qubit.py` - ブロッホ球と確率分布の視覚化
-- `requirements.txt` - 依存パッケージ
+```python
+# 温度 T からAPQBを生成
+qubit = APQB.from_T(T=0.8)
+print(qubit)
+```
 
-## 実行
+### N体系への拡張
+
+```python
+from apqb_framework import APQBMultiBody
+
+# N量子ビットAPQB系
+multi_body = APQBMultiBody(n=3, theta=np.pi/4)
+
+# k体相関関数を取得
+correlation_2 = multi_body.Q_k(k=2)  # 2体相関
+correlation_3 = multi_body.Q_k(k=3)  # 3体相関
+
+# 全ての多体相関を取得
+all_correlations = multi_body.get_all_correlations()
+```
+
+## 📁 ファイル構成
+
+### コア実装
+
+- `apqb_framework.py` - APQBフレームワークのコア実装
+  - 単一APQBの定義
+  - N体系への一般化
+  - APQBニューラルネットワーク
+
+### 応用例
+
+- `apqb_generative_ai.py` - APQBベースの生成AI
+- `apqb_dropout.py` - APQBベースのドロップアウト層
+- `qbnn_layered.py` - レイヤード型量子ビットニューラルネットワーク
+- `qbnn_brain.py` - 脳型散在量子ビットネットワーク
+- `neuroquantum_layered.py` - NeuroQuantum Layered実装
+- `neuroquantum_brain.py` - NeuroQuantum Brain実装
+
+### RunPod Serverless
+
+- `neuroq-runpod/` - RunPod Serverless用の実装
+  - `handler.py` - RunPod Serverless Handler
+  - `train_and_generate.py` - 学習→生成スクリプト
+  - `train_request_examples_improved.json` - 改善されたリクエスト例
+
+## 🎓 実行例
 
 ```bash
-# デモンストレーション
-python pseudo_qubit.py
+# APQBフレームワークのデモンストレーション
+python apqb_framework.py
 
-# 視覚化
-python visualize_qubit.py
+# 生成AIの実行
+python apqb_generative_ai.py
+
+# NeuroQuantum Layered
+python neuroquantum_layered.py
+
+# NeuroQuantum Brain
+python neuroquantum_brain.py
 ```
 
-## 注意事項
+## 📖 参考資料
 
-この実装は **数学的・プログラム的な擬似量子ビット** であり、実際の量子コンピュータ上で動作する量子ビットではありません。真の量子ビットの実現には専門的な量子ハードウェアが必要です。
+- **理論論文**: [調整可能擬似量子ビット（APQB）に基づく量子インスパイアニューラルネットワーク](https://note.com/bright_laelia447/n/n0751aaac9730)
+- **基本理論**: [APQB（Adjustable Pseudo Quantum Bit）理論](https://note.com/bright_laelia447/n/nc9e892c35fca)
+- **作者のNote**: [https://note.com/bright_laelia447](https://note.com/bright_laelia447)
+- **RSS Feed**: [https://note.com/bright_laelia447/rss](https://note.com/bright_laelia447/rss)
 
+## ⚠️ 注意事項
+
+この実装は **数学的・プログラム的な調整可能擬似量子ビット（APQB）** であり、実際の量子コンピュータ上で動作する量子ビットではありません。真の量子ビットの実現には専門的な量子ハードウェアが必要です。
+
+APQBは、量子力学の概念を古典コンピュータ上で擬似的に実現し、ニューラルネットワークと量子多体系を統一的に記述するための理論フレームワークです。
+
+## 📝 ライセンス
+
+このプロジェクトは理論研究・教育目的で開発されています。
+
+## 👤 作者
+
+Yuya Higuchi (Riddle Official)
+
+- Note: [https://note.com/bright_laelia447](https://note.com/bright_laelia447)
+- RSS: [https://note.com/bright_laelia447/rss](https://note.com/bright_laelia447/rss)
