@@ -53,8 +53,9 @@ ENV NEUROQ_NUM_HEADS="4"
 ENV NEUROQ_LAMBDA_LAYERED="0.5"
 
 # RunPod API設定（実行時に環境変数として設定）
-ENV RUNPOD_API_KEY="${API_KEY}"
-ENV RUNPOD_ENDPOINT_ID="${ENDPOINT_ID}"
+# RunPodコンソールの Environment Variables で設定してください
+ENV RUNPOD_API_KEY=""
+ENV RUNPOD_ENDPOINT_ID=""
 
 # エントリポイント
 CMD ["python", "handler.py"]
