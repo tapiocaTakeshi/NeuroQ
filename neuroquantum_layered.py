@@ -1187,11 +1187,35 @@ class NeuroQuantumAI:
         
         # トークナイザー構築（SentencePiece使用）
         print("\n🔤 トークナイザー構築...")
-        
-        # SentencePieceで語彙を学習
-        self.tokenizer = NeuroQuantumTokenizer(vocab_size=vocab_size)
-        self.tokenizer.build_vocab(texts, min_freq=2)
-        
+
+        # 既存のSentencePieceモデルを探す
+        tokenizer_model_paths = [
+            "neuroq_tokenizer.model",  # カレントディレクトリ（推奨）
+            "neuroq_tokenizer_8k.model",  # カレントディレクトリ（旧名称）
+            "../neuroq_tokenizer.model",  # 親ディレクトリ
+            "../neuroq_tokenizer_8k.model",  # 親ディレクトリ（旧名称）
+            os.path.join(os.path.dirname(__file__), "neuroq_tokenizer.model"),  # スクリプトと同じディレクトリ
+            os.path.join(os.path.dirname(__file__), "neuroq_tokenizer_8k.model"),  # スクリプトと同じディレクトリ（旧名称）
+            os.path.join(os.path.dirname(os.path.dirname(__file__)), "neuroq_tokenizer.model"),  # 親の親ディレクトリ
+            os.path.join(os.path.dirname(os.path.dirname(__file__)), "neuroq_tokenizer_8k.model"),  # 親の親ディレクトリ（旧名称）
+        ]
+
+        existing_model = None
+        for path in tokenizer_model_paths:
+            if os.path.exists(path):
+                existing_model = path
+                break
+
+        if existing_model:
+            # 既存のSentencePieceモデルを使用
+            print(f"   既存のSentencePieceモデルを使用: {existing_model}")
+            self.tokenizer = NeuroQuantumTokenizer(vocab_size=vocab_size, model_file=existing_model)
+        else:
+            # 新規に語彙を構築
+            print("   新規に語彙を構築します...")
+            self.tokenizer = NeuroQuantumTokenizer(vocab_size=vocab_size)
+            self.tokenizer.build_vocab(texts, min_freq=2)
+
         print(f"   語彙サイズ: {self.tokenizer.actual_vocab_size}")
         
         # モデル構築

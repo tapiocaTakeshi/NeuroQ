@@ -979,10 +979,14 @@ class NeuroQuantumAI:
 
         # 既存のSentencePieceモデルを探す
         tokenizer_model_paths = [
-            "neuroq_tokenizer_8k.model",  # カレントディレクトリ
-            "../neuroq_tokenizer_8k.model",  # 親ディレクトリ
-            os.path.join(os.path.dirname(__file__), "neuroq_tokenizer_8k.model"),  # スクリプトと同じディレクトリ
-            os.path.join(os.path.dirname(os.path.dirname(__file__)), "neuroq_tokenizer_8k.model"),  # 親の親ディレクトリ
+            "neuroq_tokenizer.model",  # カレントディレクトリ（推奨）
+            "neuroq_tokenizer_8k.model",  # カレントディレクトリ（旧名称）
+            "../neuroq_tokenizer.model",  # 親ディレクトリ
+            "../neuroq_tokenizer_8k.model",  # 親ディレクトリ（旧名称）
+            os.path.join(os.path.dirname(__file__), "neuroq_tokenizer.model"),  # スクリプトと同じディレクトリ
+            os.path.join(os.path.dirname(__file__), "neuroq_tokenizer_8k.model"),  # スクリプトと同じディレクトリ（旧名称）
+            os.path.join(os.path.dirname(os.path.dirname(__file__)), "neuroq_tokenizer.model"),  # 親の親ディレクトリ
+            os.path.join(os.path.dirname(os.path.dirname(__file__)), "neuroq_tokenizer_8k.model"),  # 親の親ディレクトリ（旧名称）
         ]
 
         existing_model = None

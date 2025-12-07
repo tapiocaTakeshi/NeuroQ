@@ -13,6 +13,12 @@ numpy>=1.24.0
 # その他ユーティリティ
 typing_extensions>=4.0.0
 
+# トークナイザー（SentencePiece）
+sentencepiece>=0.1.99
+
+# データセット取得用
+datasets>=2.0.0
+
 # OpenAI API（ChatGPTエンベディング用）
 openai>=1.0.0
 
