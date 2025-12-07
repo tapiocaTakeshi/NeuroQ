@@ -248,7 +248,8 @@ def handler(event: Dict[str, Any]) -> Dict[str, Any]:
                 result = model.generate(
                     prompt=prompt,
                     max_length=max_length,
-                    temperature=temperature,
+                    temp_min=temperature * 0.8,  # Convert temperature to temp_min/max range
+                    temp_max=temperature * 1.2,
                     top_k=top_k,
                     top_p=top_p
                 )
@@ -265,7 +266,8 @@ def handler(event: Dict[str, Any]) -> Dict[str, Any]:
                 result = model.generate(
                     prompt=prompt,
                     max_length=max_length,
-                    temperature=temperature
+                    temperature_min=temperature * 0.8,  # Convert temperature to temperature_min/max range
+                    temperature_max=temperature * 1.2
                 )
                 return {
                     "status": "success",
