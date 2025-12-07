@@ -4,7 +4,7 @@
 #
 # Build Context: neuroq-runpod (RunPodで設定)
 
-FROM runpod/pytorch:2.3.1-py3.13-cuda12.4.0-devel
+FROM runpod/pytorch:2.1.0-py3.10-cuda11.8.0-devel
 
 WORKDIR /app
 
