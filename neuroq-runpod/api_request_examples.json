@@ -1,0 +1,287 @@
+{
+  "説明": "NeuroQ RunPod Serverless API リクエスト例集",
+  "ドキュメント": "各アクションごとのリクエスト形式とパラメータの説明",
+
+  "1. ヘルスチェック": {
+    "説明": "APIの状態とモジュールの利用可否を確認",
+    "リクエスト": {
+      "input": {
+        "action": "health"
+      }
+    },
+    "レスポンス例": {
+      "status": "healthy",
+      "layered_available": true,
+      "brain_available": true,
+      "common_crawl_available": true,
+      "cuda_available": true,
+      "is_pretrained": false
+    }
+  },
+
+  "2. テキスト生成 (Layeredモード)": {
+    "説明": "事前学習済みLayeredモデルでテキスト生成",
+    "リクエスト": {
+      "input": {
+        "action": "generate",
+        "mode": "layered",
+        "prompt": "人工知能とは",
+        "max_length": 100,
+        "temperature": 0.8,
+        "top_k": 50,
+        "top_p": 0.9,
+        "pretrain": true
+      }
+    },
+    "パラメータ説明": {
+      "action": "固定値 'generate'",
+      "mode": "layered または brain",
+      "prompt": "生成の開始プロンプト",
+      "max_length": "生成する最大トークン数 (デフォルト: 100)",
+      "temperature": "ランダム性の制御 0.0-2.0 (デフォルト: 0.8)",
+      "top_k": "上位K個のトークンから選択 (デフォルト: 50)",
+      "top_p": "累積確率がpになるまでのトークンから選択 (デフォルト: 0.9)",
+      "pretrain": "Common Crawlで事前学習するか (デフォルト: true)"
+    },
+    "レスポンス例": {
+      "status": "success",
+      "mode": "layered",
+      "prompt": "人工知能とは",
+      "generated_text": "人工知能とは、人間の知能を模倣するコンピュータシステムです...",
+      "is_pretrained": true
+    }
+  },
+
+  "3. テキスト生成 (Brainモード)": {
+    "説明": "脳型散在量子ビットネットワークでテキスト生成",
+    "リクエスト": {
+      "input": {
+        "action": "generate",
+        "mode": "brain",
+        "prompt": "量子コンピュータについて",
+        "max_length": 150,
+        "temperature": 0.7,
+        "pretrain": true
+      }
+    },
+    "注意": "Brainモードではtop_k, top_pパラメータは使用されません",
+    "レスポンス例": {
+      "status": "success",
+      "mode": "brain",
+      "prompt": "量子コンピュータについて",
+      "generated_text": "量子コンピュータについて、量子力学の原理を利用した...",
+      "is_pretrained": true
+    }
+  },
+
+  "4. 追加学習 (カスタムデータ)": {
+    "説明": "カスタムデータでモデルを追加学習",
+    "リクエスト": {
+      "input": {
+        "action": "train",
+        "mode": "layered",
+        "training_data": [
+          "人工知能は、人間の知能を模倣するコンピュータシステムです。",
+          "機械学習は、データからパターンを学習する技術です。",
+          "ディープラーニングは、多層ニューラルネットワークを使用します。"
+        ],
+        "epochs": 10,
+        "use_common_crawl": false
+      }
+    },
+    "パラメータ説明": {
+      "action": "固定値 'train'",
+      "mode": "layered または brain",
+      "training_data": "学習データのテキスト配列",
+      "epochs": "学習エポック数 (デフォルト: 10)",
+      "use_common_crawl": "Common Crawlデータを追加するか (デフォルト: false)",
+      "max_records": "Common Crawlから取得する最大レコード数 (デフォルト: 50)"
+    },
+    "レスポンス例": {
+      "status": "success",
+      "mode": "layered",
+      "message": "3件のデータで10エポック学習完了"
+    }
+  },
+
+  "5. 追加学習 (Common Crawl併用)": {
+    "説明": "カスタムデータとCommon Crawlデータを組み合わせて学習",
+    "リクエスト": {
+      "input": {
+        "action": "train",
+        "mode": "brain",
+        "training_data": [
+          "ニューラルネットワークは脳の神経細胞を模倣します。",
+          "量子もつれは量子コンピュータの重要な概念です。"
+        ],
+        "epochs": 15,
+        "use_common_crawl": true,
+        "max_records": 100
+      }
+    },
+    "説明詳細": "training_dataに加えて、Common Crawlから最大100件の日本語テキストを取得して学習",
+    "レスポンス例": {
+      "status": "success",
+      "mode": "brain",
+      "message": "102件のデータで15エポック学習完了"
+    }
+  },
+
+  "6. 学習後に生成": {
+    "説明": "学習とテキスト生成を順次実行する例",
+    "手順": "まずtrainアクションで学習し、次にgenerateアクションで生成",
+    "ステップ1 - 学習": {
+      "input": {
+        "action": "train",
+        "mode": "layered",
+        "training_data": [
+          "APQBは調整可能擬似量子ビットの略称です。",
+          "APQBは量子状態と統計的相関を統一的に記述します。"
+        ],
+        "epochs": 20,
+        "use_common_crawl": false
+      }
+    },
+    "ステップ2 - 生成": {
+      "input": {
+        "action": "generate",
+        "mode": "layered",
+        "prompt": "APQBとは",
+        "max_length": 120,
+        "temperature": 0.75,
+        "top_k": 40,
+        "top_p": 0.85,
+        "pretrain": false
+      }
+    }
+  },
+
+  "エラー例": {
+    "不明なアクション": {
+      "リクエスト": {
+        "input": {
+          "action": "unknown_action"
+        }
+      },
+      "レスポンス": {
+        "status": "error",
+        "error": "不明なアクション: unknown_action"
+      }
+    },
+    "モード利用不可": {
+      "リクエスト": {
+        "input": {
+          "action": "generate",
+          "mode": "invalid_mode",
+          "prompt": "test"
+        }
+      },
+      "レスポンス": {
+        "status": "error",
+        "error": "モード 'invalid_mode' は利用できません"
+      }
+    },
+    "学習データ不足": {
+      "リクエスト": {
+        "input": {
+          "action": "train",
+          "mode": "layered",
+          "training_data": []
+        }
+      },
+      "レスポンス": {
+        "status": "error",
+        "error": "training_data が必要です"
+      }
+    }
+  },
+
+  "パラメータ一覧": {
+    "action": {
+      "型": "string",
+      "必須": true,
+      "選択肢": ["health", "generate", "train"],
+      "説明": "実行するアクション"
+    },
+    "mode": {
+      "型": "string",
+      "必須": false,
+      "デフォルト": "layered",
+      "選択肢": ["layered", "brain"],
+      "説明": "使用するモデルの種類"
+    },
+    "prompt": {
+      "型": "string",
+      "必須": "generateアクション時のみ",
+      "説明": "テキスト生成の開始プロンプト"
+    },
+    "max_length": {
+      "型": "integer",
+      "必須": false,
+      "デフォルト": 100,
+      "説明": "生成する最大トークン数"
+    },
+    "temperature": {
+      "型": "float",
+      "必須": false,
+      "デフォルト": 0.8,
+      "範囲": "0.0 - 2.0",
+      "説明": "生成のランダム性（高いほどクリエイティブ）"
+    },
+    "top_k": {
+      "型": "integer",
+      "必須": false,
+      "デフォルト": 50,
+      "説明": "上位K個のトークンから選択（layeredモードのみ）"
+    },
+    "top_p": {
+      "型": "float",
+      "必須": false,
+      "デフォルト": 0.9,
+      "範囲": "0.0 - 1.0",
+      "説明": "累積確率がpになるまでのトークンから選択（layeredモードのみ）"
+    },
+    "pretrain": {
+      "型": "boolean",
+      "必須": false,
+      "デフォルト": true,
+      "説明": "Common Crawlで事前学習するか"
+    },
+    "training_data": {
+      "型": "array of strings",
+      "必須": "trainアクション時のみ",
+      "説明": "学習用テキストの配列"
+    },
+    "epochs": {
+      "型": "integer",
+      "必須": false,
+      "デフォルト": 10,
+      "説明": "学習のエポック数"
+    },
+    "use_common_crawl": {
+      "型": "boolean",
+      "必須": false,
+      "デフォルト": false,
+      "説明": "Common Crawlデータを追加するか"
+    },
+    "max_records": {
+      "型": "integer",
+      "必須": false,
+      "デフォルト": 50,
+      "説明": "Common Crawlから取得する最大レコード数"
+    }
+  },
+
+  "使用例 - cURL": {
+    "1. ヘルスチェック": "curl -X POST https://api.runpod.ai/v2/YOUR_ENDPOINT_ID/runsync -H 'Content-Type: application/json' -H 'Authorization: Bearer YOUR_API_KEY' -d '{\"input\": {\"action\": \"health\"}}'",
+
+    "2. テキスト生成": "curl -X POST https://api.runpod.ai/v2/YOUR_ENDPOINT_ID/runsync -H 'Content-Type: application/json' -H 'Authorization: Bearer YOUR_API_KEY' -d '{\"input\": {\"action\": \"generate\", \"mode\": \"layered\", \"prompt\": \"人工知能とは\", \"max_length\": 100, \"temperature\": 0.8}}'",
+
+    "3. 追加学習": "curl -X POST https://api.runpod.ai/v2/YOUR_ENDPOINT_ID/runsync -H 'Content-Type: application/json' -H 'Authorization: Bearer YOUR_API_KEY' -d '{\"input\": {\"action\": \"train\", \"mode\": \"layered\", \"training_data\": [\"テキスト1\", \"テキスト2\"], \"epochs\": 10}}'"
+  },
+
+  "使用例 - Python": {
+    "説明": "Pythonでの使用例",
+    "コード": "import requests\n\nurl = 'https://api.runpod.ai/v2/YOUR_ENDPOINT_ID/runsync'\nheaders = {\n    'Content-Type': 'application/json',\n    'Authorization': 'Bearer YOUR_API_KEY'\n}\n\n# テキスト生成\npayload = {\n    'input': {\n        'action': 'generate',\n        'mode': 'layered',\n        'prompt': '人工知能とは',\n        'max_length': 100,\n        'temperature': 0.8,\n        'top_k': 50,\n        'top_p': 0.9,\n        'pretrain': True\n    }\n}\n\nresponse = requests.post(url, json=payload, headers=headers)\nprint(response.json())"
+  }
+}

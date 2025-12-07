@@ -1,0 +1,13 @@
+{
+  "input": {
+    "action": "train",
+    "mode": "layered",
+    "training_data": [
+      "APQBは調整可能擬似量子ビットの略称です。",
+      "APQBは量子状態と統計的相関を統一的に記述します。"
+    ],
+    "epochs": 20,
+    "use_common_crawl": true,
+    "max_records": 100
+  }
+}
