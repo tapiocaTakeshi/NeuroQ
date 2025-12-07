@@ -162,11 +162,20 @@ def init_model(mode: str = "layered", **kwargs) -> Dict[str, Any]:
                 openai_model=openai_model,
             )
             model_layered.device = DEVICE
-            
+
+            # vocab数を取得
+            vocab_size = None
+            if hasattr(model_layered, 'tokenizer'):
+                if hasattr(model_layered.tokenizer, 'actual_vocab_size'):
+                    vocab_size = model_layered.tokenizer.actual_vocab_size
+                elif hasattr(model_layered.tokenizer, 'vocab_size'):
+                    vocab_size = model_layered.tokenizer.vocab_size
+
             return {
                 "status": "success",
                 "mode": "layered",
-                "message": "Layered mode モデルを初期化しました"
+                "message": "Layered mode モデルを初期化しました",
+                "vocab_size": vocab_size,
             }
         
         elif mode == "brain":
@@ -188,11 +197,17 @@ def init_model(mode: str = "layered", **kwargs) -> Dict[str, Any]:
                 max_vocab=max_vocab,
             )
             model_brain.device = DEVICE
-            
+
+            # vocab数を取得
+            vocab_size = None
+            if hasattr(model_brain, 'tokenizer') and hasattr(model_brain.tokenizer, 'vocab_size'):
+                vocab_size = model_brain.tokenizer.vocab_size
+
             return {
                 "status": "success",
                 "mode": "brain",
-                "message": "Brain mode モデルを初期化しました"
+                "message": "Brain mode モデルを初期化しました",
+                "vocab_size": vocab_size,
             }
         
         else:
@@ -338,11 +353,20 @@ def train_model(
                 lr=learning_rate,
                 seq_len=seq_length
             )
-            
+
+            # vocab数を取得
+            vocab_size = None
+            if hasattr(model_layered, 'tokenizer'):
+                if hasattr(model_layered.tokenizer, 'actual_vocab_size'):
+                    vocab_size = model_layered.tokenizer.actual_vocab_size
+                elif hasattr(model_layered.tokenizer, 'vocab_size'):
+                    vocab_size = model_layered.tokenizer.vocab_size
+
             return {
                 "status": "success",
                 "mode": "layered",
-                "message": f"学習完了: {epochs}エポック"
+                "message": f"学習完了: {epochs}エポック",
+                "vocab_size": vocab_size,
             }
         
         elif mode == "brain":
@@ -359,11 +383,17 @@ def train_model(
                 lr=learning_rate,
                 seq_length=seq_length
             )
-            
+
+            # vocab数を取得
+            vocab_size = None
+            if hasattr(model_brain, 'tokenizer') and hasattr(model_brain.tokenizer, 'vocab_size'):
+                vocab_size = model_brain.tokenizer.vocab_size
+
             return {
                 "status": "success",
                 "mode": "brain",
-                "message": f"学習完了: {epochs}エポック"
+                "message": f"学習完了: {epochs}エポック",
+                "vocab_size": vocab_size,
             }
         
         else:
@@ -423,12 +453,21 @@ def generate_text(
                 top_k=top_k,
                 top_p=top_p,
             )
-            
+
+            # vocab数を取得
+            vocab_size = None
+            if hasattr(model_layered, 'tokenizer'):
+                if hasattr(model_layered.tokenizer, 'actual_vocab_size'):
+                    vocab_size = model_layered.tokenizer.actual_vocab_size
+                elif hasattr(model_layered.tokenizer, 'vocab_size'):
+                    vocab_size = model_layered.tokenizer.vocab_size
+
             return {
                 "status": "success",
                 "mode": "layered",
                 "prompt": prompt,
                 "generated": generated,
+                "vocab_size": vocab_size,
             }
         
         elif mode == "brain":
@@ -450,12 +489,18 @@ def generate_text(
                 top_k=top_k,
                 top_p=top_p,
             )
-            
+
+            # vocab数を取得
+            vocab_size = None
+            if hasattr(model_brain, 'tokenizer') and hasattr(model_brain.tokenizer, 'vocab_size'):
+                vocab_size = model_brain.tokenizer.vocab_size
+
             return {
                 "status": "success",
                 "mode": "brain",
                 "prompt": prompt,
                 "generated": generated,
+                "vocab_size": vocab_size,
             }
         
         else:
@@ -490,12 +535,28 @@ def handler(event: Dict[str, Any]) -> Dict[str, Any]:
         action = input_data.get("action", "generate")
         
         if action == "health":
+            # モデルのvocab情報を取得
+            layered_vocab_size = None
+            brain_vocab_size = None
+
+            if model_layered is not None and hasattr(model_layered, 'tokenizer'):
+                if hasattr(model_layered.tokenizer, 'actual_vocab_size'):
+                    layered_vocab_size = model_layered.tokenizer.actual_vocab_size
+                elif hasattr(model_layered.tokenizer, 'vocab_size'):
+                    layered_vocab_size = model_layered.tokenizer.vocab_size
+
+            if model_brain is not None and hasattr(model_brain, 'tokenizer'):
+                if hasattr(model_brain.tokenizer, 'vocab_size'):
+                    brain_vocab_size = model_brain.tokenizer.vocab_size
+
             return {
                 "status": "healthy",
                 "layered_available": NEUROQUANTUM_LAYERED_AVAILABLE,
                 "brain_available": NEUROQUANTUM_BRAIN_AVAILABLE,
                 "openai_available": OPENAI_AVAILABLE,
                 "device": str(DEVICE),
+                "layered_vocab_size": layered_vocab_size,
+                "brain_vocab_size": brain_vocab_size,
             }
         
         elif action == "init":
