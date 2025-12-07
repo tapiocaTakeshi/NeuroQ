@@ -157,9 +157,42 @@ payload = {
         "repetition_penalty": 2.5,
         "train_before_generate": True,
         "data_sources": ["huggingface"],
-        "max_records": 100,
-        "epochs": 20
+        "common_crawl_config": {
+            "max_records": 100
+        },
+        "epochs": 20,
+        "batch_size": 16,
+        "learning_rate": 0.001,
+        "seq_length": 64
     }
+}
+```
+
+**JSONファイルでの詳細な例**: `train_request_examples.json` を参照してください。
+
+**シンプルなJSON例**:
+
+```json
+{
+  "input": {
+    "action": "generate",
+    "mode": "layered",
+    "prompt": "ChatGPTについて教えて",
+    "max_length": 80,
+    "temperature": 0.7,
+    "top_k": 40,
+    "top_p": 0.9,
+    "repetition_penalty": 2.5,
+    "train_before_generate": true,
+    "data_sources": ["huggingface"],
+    "common_crawl_config": {
+      "max_records": 100
+    },
+    "epochs": 20,
+    "batch_size": 16,
+    "learning_rate": 0.001,
+    "seq_length": 64
+  }
 }
 ```
 
@@ -168,6 +201,11 @@ payload = {
 - `quick_start.py` - シンプルな使用例
 - `example_request.py` - 詳細なヘルパー関数
 - `request_example.py` - 改善されたパラメータの例
+- `train_and_generate.py` - 学習→生成を一度に実行
+- `train_request_examples.json` - 学習を含む詳細なJSONリクエスト例
+- `train_request_example_simple.json` - 学習を含むシンプルなJSON例
+- `train_request_examples_improved.json` - **改善された学習リクエスト例（推奨）**
+- `IMPROVEMENT_ANALYSIS.md` - 生成テキスト品質の改善分析
 
 ## 実行方法
 
