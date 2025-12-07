@@ -12,6 +12,7 @@ numpy>=1.24.0
 
 # その他ユーティリティ
 typing_extensions>=4.0.0
+python-dotenv>=1.0.0
 
 # トークナイザー（SentencePiece）
 sentencepiece>=0.1.99
