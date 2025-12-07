@@ -58,6 +58,25 @@ except ImportError:
     # オプションなので警告を表示しない（内蔵コンポーネントで動作します）
 
 # ========================================
+# quantum_computer.py から量子回路シミュレーターをインポート
+# ========================================
+try:
+    # 親ディレクトリから quantum_computer.py をインポート
+    import sys
+    sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
+    from quantum_computer import (
+        QuantumComputer,
+        QuantumCircuit,
+        Gates,
+        QubitState,
+    )
+    QUANTUM_COMPUTER_AVAILABLE = True
+    print("✅ quantum_computer.py から量子回路シミュレーターをインポートしました")
+except ImportError:
+    QUANTUM_COMPUTER_AVAILABLE = False
+    warnings.warn("quantum_computer.py が見つかりません。量子回路シミュレーション機能は無効です。")
+
+# ========================================
 # 設定
 # ========================================
 
@@ -940,7 +959,14 @@ class NeuroQuantumAI:
         self.tokenizer: Optional[NeuroQuantumTokenizer] = None
         self.model: Optional[NeuroQuantum] = None
         self.config: Optional[NeuroQuantumConfig] = None
-    
+
+        # 量子回路シミュレーター
+        self.quantum_computer: Optional[QuantumComputer] = None
+        self.use_quantum_simulation = QUANTUM_COMPUTER_AVAILABLE
+        if self.use_quantum_simulation:
+            self.quantum_computer = QuantumComputer("NeuroQuantum-QC")
+            print("⚛️  量子回路シミュレーターを初期化しました")
+
     def train(self, texts: List[str], epochs: int = 50, batch_size: int = 16,
               lr: float = 0.001, seq_len: int = 64):
         """学習"""
@@ -1066,7 +1092,67 @@ class NeuroQuantumAI:
         print("\n⚛️ 量子もつれ情報:")
         for info in self.model.get_quantum_info():
             print(f"   Block {info['block']}: λ_attn = {info['attn_lambda']:.4f}")
-    
+
+    def _quantum_circuit_influence(self, logits: torch.Tensor, step: int) -> torch.Tensor:
+        """
+        量子回路シミュレーションを使用してlogitsに影響を与える
+
+        Args:
+            logits: 次トークンのlogits
+            step: 現在の生成ステップ
+
+        Returns:
+            量子的に調整されたlogits
+        """
+        if not self.use_quantum_simulation or self.quantum_computer is None:
+            return logits
+
+        # 3量子ビット回路を作成（ステップごとにユニークな回路を構築）
+        n_qubits = 3
+        circuit_name = f"generation_step_{step}"
+        qc = self.quantum_computer.create_circuit(circuit_name, n_qubits)
+
+        # プロンプト内容に基づいて量子ゲートを適用
+        # ステップ数に応じて異なる量子回路パターンを生成
+        if step % 4 == 0:
+            # ベル状態を作成
+            qc.h(0).cnot(0, 1).cnot(1, 2)
+        elif step % 4 == 1:
+            # GHZ状態を作成
+            qc.h(0).cnot(0, 1).cnot(0, 2)
+        elif step % 4 == 2:
+            # W状態風の重ね合わせ
+            qc.h(0).h(1).cnot(0, 2)
+        else:
+            # 回転ゲートを使用
+            theta = step * 0.1
+            qc.ry(0, theta).ry(1, theta * 1.5).cnot(0, 1)
+
+        # 量子回路を測定（複数回実行して統計を取得）
+        results = qc.run(shots=100)
+
+        # 測定結果の確率分布を計算
+        total_shots = sum(results.values())
+        probs = {state: count / total_shots for state, count in results.items()}
+
+        # 量子測定結果をlogitsの調整に使用
+        # ビット列を数値に変換し、logitsに量子的な影響を与える
+        quantum_influence = torch.zeros_like(logits)
+        for state, prob in probs.items():
+            # ビット列を整数に変換（例: "101" -> 5）
+            state_value = int(state, 2)
+            # 状態値を使ってlogitsの一部を調整
+            # vocab_sizeに対してモジュロを取り、循環的に影響を与える
+            vocab_size = logits.size(0)
+            for i in range(0, vocab_size, 8):  # 8トークンごとに影響
+                idx = (i + state_value) % vocab_size
+                quantum_influence[idx] += prob * 0.3  # 量子的な影響の強度
+
+        # 元のlogitsに量子的な影響を加算
+        adjusted_logits = logits + quantum_influence
+
+        return adjusted_logits
+
     def generate(
         self,
         prompt: str = "",
@@ -1105,7 +1191,10 @@ class NeuroQuantumAI:
                 
                 logits = self.model(input_tokens)
                 next_logits = logits[0, -1, :]
-                
+
+                # ⚛️ 量子回路シミュレーションの影響を適用
+                next_logits = self._quantum_circuit_influence(next_logits, step)
+
                 # 動的温度: θが動けるように範囲内で変化させる
                 # sin波で滑らかに変動（量子的な振動をシミュレート）
                 theta_phase = step * 0.3  # 位相
