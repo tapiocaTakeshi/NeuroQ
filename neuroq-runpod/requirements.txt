@@ -9,6 +9,7 @@ torch>=2.0.0
 
 # 数値計算
 numpy>=1.24.0
+matplotlib>=3.7.0
 
 # その他ユーティリティ
 typing_extensions>=4.0.0

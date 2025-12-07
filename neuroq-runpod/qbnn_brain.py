@@ -19,7 +19,14 @@ import numpy as np
 import random
 import math
 from typing import List, Dict, Tuple, Optional
-import matplotlib.pyplot as plt
+
+# matplotlib はオプショナル（RunPod Serverlessでは不要）
+try:
+    import matplotlib.pyplot as plt
+    MATPLOTLIB_AVAILABLE = True
+except ImportError:
+    MATPLOTLIB_AVAILABLE = False
+    plt = None
 
 
 # ========================================
