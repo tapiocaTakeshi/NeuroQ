@@ -1,46 +1,15 @@
-# Python
+# 余計なキャッシュなどだけ無視する
 __pycache__/
-
+*.pyc
 *.pyo
-*.pyd
-.Python
-*.so
+*.tmp
+*.log
 
-# Virtual environments
+# 仮想環境は無視
 venv/
-.venv/
-env/
+.env/
+.ipynb_checkpoints/
 
-# IDE
-.vscode/
-.idea/
-*.swp
-*.swo
-
-# Git
+# Git 系
 .git/
 .gitignore
-
-# Documentation
-*.md
-!README.md
-
-# Test files
-test_*.py
-*_test.py
-
-# Config files (not needed in container)
-config.py
-.env
-.env.example
-
-# Logs
-*.log
-logs/
-
-# OS
-.DS_Store
-Thumbs.db
-
-# History
-.history/
