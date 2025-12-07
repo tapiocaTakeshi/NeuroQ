@@ -67,6 +67,14 @@ ENV NEUROQ_LAMBDA_LAYERED="0.5"
 # OpenAI API設定（オプション）
 ENV OPENAI_API_KEY="***REMOVED***IezsldGqhyran77epMkwTM9-BtA7eY_oX72xoDt1yBN09a8twp1cQfSHwo80aJyYa7XDP28WvRT3BlbkFJcBODfXl_fE-RjAH7oIWqPhOdyWAuqiatBhPtT2-7YfMPS9dxC-LG6Q6fRFBLWhugMvLcAAF2cA"
 
+# RunPod API設定（ビルド時に設定可能）
+# 注意: セキュリティのため、本番環境ではARG/ENVではなく、
+# 実行時に環境変数として設定することを推奨します
+ARG RUNPOD_API_KEY=""
+ARG RUNPOD_ENDPOINT_ID=""
+ENV RUNPOD_API_KEY="${RUNPOD_API_KEY}"
+ENV RUNPOD_ENDPOINT_ID="${RUNPOD_ENDPOINT_ID}"
+
 # エントリポイント
 CMD ["python", "handler.py"]
 
