@@ -286,10 +286,33 @@ def fetch_training_data(
         except Exception as e:
             print(f"   ⚠️ Hugging Face取得失敗: {e}")
     
-    # Common Crawl（将来の拡張用）
+    # Common Crawl
     if "common_crawl" in data_sources:
-        print("   ⚠️ Common Crawlは現在実装中です。Hugging Faceデータを使用します。")
-        # TODO: Common Crawl API実装
+        try:
+            from common_crawl_fetcher import fetch_common_crawl_data
+
+            # Common Crawl設定
+            cc_query = common_crawl_config.get("query", "*.jp") if common_crawl_config else "*.jp"
+            cc_index = common_crawl_config.get("index_name") if common_crawl_config else None
+            cc_max_records = common_crawl_config.get("max_records_cc", max_records // 2) if common_crawl_config else max_records // 2
+
+            print(f"   🌐 Common Crawlからデータ取得中... (クエリ: {cc_query}, 最大{cc_max_records}レコード)")
+
+            cc_texts = fetch_common_crawl_data(
+                max_records=cc_max_records,
+                query=cc_query,
+                index_name=cc_index,
+                min_text_length=100
+            )
+
+            texts.extend(cc_texts)
+            print(f"   ✅ Common Crawl: {len(cc_texts)} サンプル取得")
+
+        except ImportError as e:
+            print(f"   ⚠️ Common Crawl fetcher が利用できません: {e}")
+            print("   💡 pip install warcio beautifulsoup4 requests を実行してください")
+        except Exception as e:
+            print(f"   ⚠️ Common Crawl取得失敗: {e}")
     
     # 組み込みデータ（フォールバック）
     if len(texts) == 0:
