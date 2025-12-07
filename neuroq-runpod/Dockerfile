@@ -3,38 +3,26 @@
 # Brain & Layered モード対応
 # ニューロン数・隠れ層次元など環境変数で設定可能
 #
-# ビルド方法:
-# プロジェクトルートから実行:
-#   docker build --platform linux/amd64 -f neuroq-runpod/Dockerfile -t neuroq-runpod .
-#
-# または neuroq-runpod/ ディレクトリから実行:
-#   docker build --platform linux/amd64 -t neuroq-runpod ..
-#
-# 注意: Apple Silicon (M1/M2/M3) Macでは --platform linux/amd64 を指定してください
+# RunPod Serverless では Build Context が "/" になるため、
+# neuroq-runpod/ ディレクトリからのパスを指定する必要があります。
 
 FROM runpod/pytorch:2.1.0-py3.10-cuda11.8.0-devel
 
 WORKDIR /app
 
 # 必要なファイルをコピー（neuroq-runpodディレクトリから）
-COPY handler.py /app/
-COPY requirements.txt /app/
+COPY neuroq-runpod/handler.py /app/
+COPY neuroq-runpod/requirements.txt /app/
 
 # 参照元ファイルをコピー（neuroq-runpodディレクトリ内に配置）
-COPY neuroquantum_brain.py /app/
-COPY neuroquantum_layered.py /app/
-COPY qbnn_layered.py /app/
-COPY qbnn_brain.py /app/
+COPY neuroq-runpod/neuroquantum_brain.py /app/
+COPY neuroq-runpod/neuroquantum_layered.py /app/
+COPY neuroq-runpod/qbnn_layered.py /app/
+COPY neuroq-runpod/qbnn_brain.py /app/
 
 # SentencePiece トークナイザーモデルをコピー
-COPY neuroq_tokenizer.model /app/
-COPY neuroq_tokenizer.vocab /app/
-
-# モデルファイルをコピー（オプション、学習済みモデルがあれば）
-# （ビルド前に学習済みモデルを配置してください）
-# 注意: ファイルが存在しない場合はビルドエラーになります
-# 必要に応じて、ビルド時にファイルを配置するか、RUNコマンドで条件付きコピーを使用してください
-# COPY neuroq_*.pt /app/
+COPY neuroq-runpod/neuroq_tokenizer.model /app/
+COPY neuroq-runpod/neuroq_tokenizer.vocab /app/
 
 # 依存関係をインストール
 RUN pip install --no-cache-dir -r requirements.txt
@@ -64,12 +52,7 @@ ENV NEUROQ_HIDDEN_DIM="256"
 ENV NEUROQ_NUM_HEADS="4"
 ENV NEUROQ_LAMBDA_LAYERED="0.5"
 
-# OpenAI API設定（オプション）
-ENV OPENAI_API_KEY="***REMOVED***IezsldGqhyran77epMkwTM9-BtA7eY_oX72xoDt1yBN09a8twp1cQfSHwo80aJyYa7XDP28WvRT3BlbkFJcBODfXl_fE-RjAH7oIWqPhOdyWAuqiatBhPtT2-7YfMPS9dxC-LG6Q6fRFBLWhugMvLcAAF2cA"
-
-# RunPod API設定（ビルド時に設定可能）
-# 注意: セキュリティのため、本番環境ではARG/ENVではなく、
-# 実行時に環境変数として設定することを推奨します
+# RunPod API設定（実行時に環境変数として設定）
 ARG RUNPOD_API_KEY=""
 ARG RUNPOD_ENDPOINT_ID=""
 ENV RUNPOD_API_KEY="${RUNPOD_API_KEY}"
@@ -77,4 +60,3 @@ ENV RUNPOD_ENDPOINT_ID="${RUNPOD_ENDPOINT_ID}"
 
 # エントリポイント
 CMD ["python", "handler.py"]
-
