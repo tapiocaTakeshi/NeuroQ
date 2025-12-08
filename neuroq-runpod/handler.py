@@ -9,6 +9,7 @@ import runpod
 import torch
 import requests
 import re
+import os
 from typing import Dict, Any, List
 from io import BytesIO
 
@@ -156,12 +157,16 @@ def pretrain_model(model, max_records: int = 50, epochs: int = 5):
     """
     global is_pretrained
     
+    print(f"🔍 pretrain_model開始: is_pretrained={is_pretrained}, model.model is None={model.model is None if model else 'N/A'}")
+    
     # 既にモデルが学習済みかどうかを確認
     if is_pretrained and model.model is not None:
         print("ℹ️ 既に事前学習済みです")
         return True
     
     print("🔄 事前学習を開始...")
+    print(f"   カレントディレクトリ: {os.getcwd()}")
+    print(f"   トークナイザー存在: {os.path.exists('neuroq_tokenizer.model')}")
     
     # まずサンプルデータで確実に学習（フォールバックとして）
     # これにより、Common Crawl取得に失敗しても動作を保証
@@ -281,12 +286,19 @@ def handler(event: Dict[str, Any]) -> Dict[str, Any]:
         }
     }
     """
-    global is_pretrained
+    global is_pretrained, layered_ai, brain_ai
     
     try:
         input_data = event.get("input", {})
         action = input_data.get("action", "generate")
         pretrain = input_data.get("pretrain", True)
+        
+        # ========================================
+        # 毎回モデルの状態を確認し、必要に応じて初期化
+        # ========================================
+        if not is_pretrained:
+            print("⚠️ モデルが未初期化です。初期化を実行します...")
+            initialize_models()
         
         # ヘルスチェック
         if action == "health":
@@ -332,12 +344,19 @@ def handler(event: Dict[str, Any]) -> Dict[str, Any]:
                 # 事前学習が失敗した場合、ここで再度学習を試みる
                 if model.model is None:
                     print("⚠️ モデルが未学習です。サンプルデータで学習を試みます...")
+                    print(f"   カレントディレクトリ: {os.getcwd()}")
+                    print(f"   トークナイザーファイル存在: {os.path.exists('neuroq_tokenizer.model')}")
+                    print(f"   /app内のファイル: {os.listdir('/app') if os.path.exists('/app') else 'N/A'}")
                     try:
                         sample_data = get_sample_training_data()
+                        print(f"   サンプルデータ数: {len(sample_data)}")
                         model.train(sample_data, epochs=3)
                         print("✅ サンプルデータでの学習完了")
+                        print(f"   model.model is None: {model.model is None}")
                     except Exception as train_error:
                         print(f"⚠️ サンプルデータでの学習失敗: {train_error}")
+                        import traceback
+                        traceback.print_exc()
                         return {
                             "status": "error",
                             "error": f"モデルの学習に失敗しました: {str(train_error)}"
@@ -545,17 +564,24 @@ def initialize_models():
     global is_pretrained
     
     print("🔄 モデルの初期化と事前学習を開始...")
+    print(f"   カレントディレクトリ: {os.getcwd()}")
+    print(f"   /app内のファイル: {os.listdir('/app') if os.path.exists('/app') else 'N/A'}")
+    print(f"   トークナイザー存在: {os.path.exists('neuroq_tokenizer.model')}")
+    print(f"   /app/トークナイザー存在: {os.path.exists('/app/neuroq_tokenizer.model')}")
     
     # Layeredモデルを初期化・学習
     if LAYERED_AVAILABLE:
         try:
             model, trained = get_layered_model(pretrain=True)
-            if trained:
+            if trained and model.model is not None:
                 print("✅ Layeredモデルの事前学習が完了しました")
+                is_pretrained = True
             else:
-                print("⚠️ Layeredモデルの事前学習が完了しましたが、確認してください")
+                print(f"⚠️ Layeredモデル: trained={trained}, model.model is None={model.model is None if model else 'N/A'}")
         except Exception as e:
             print(f"⚠️ Layeredモデルの初期化エラー: {e}")
+            import traceback
+            traceback.print_exc()
     
     # Brainモデルを初期化・学習
     if BRAIN_AVAILABLE:
