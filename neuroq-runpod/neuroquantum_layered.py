@@ -1198,8 +1198,16 @@ class NeuroQuantumAI:
                 "クラウドコンピューティングは、インターネット経由でコンピュータリソースを提供するサービスです。AWS、Azure、GCPなどのプラットフォームが代表的です。",
                 "ブロックチェーンは、分散型台帳技術の一種で、データの改ざんを防ぐ仕組みを持っています。暗号通貨や契約管理などに応用されています。",
             ]
-            self.train(sample_data, epochs=3)  # 軽量な学習
-            print("✅ 自動学習完了")
+            try:
+                self.train(sample_data, epochs=3)  # 軽量な学習
+                print("✅ 自動学習完了")
+            except Exception as e:
+                print(f"⚠️ 自動学習に失敗しました: {e}")
+                raise ValueError(f"モデルの自動学習に失敗しました: {e}")
+        
+        # 学習後もモデルがNoneの場合はエラー
+        if self.model is None:
+            raise ValueError("モデルが学習されていません")
         
         self.model.eval()
         
