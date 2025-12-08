@@ -51,9 +51,9 @@ fi
 
 echo ""
 echo "📦 Building Docker image..."
-echo "   Build context: ${REPO_ROOT}"
+echo "   Build context: ${SCRIPT_DIR}"
 echo "   Dockerfile: ${SCRIPT_DIR}/Dockerfile"
-docker build -t "${FULL_IMAGE}" -f "${SCRIPT_DIR}/Dockerfile" "${REPO_ROOT}"
+docker build -t "${FULL_IMAGE}" "${SCRIPT_DIR}"
 
 echo ""
 echo "✅ Build complete!"
