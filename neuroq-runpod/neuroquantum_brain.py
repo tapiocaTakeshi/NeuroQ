@@ -936,6 +936,20 @@ class NeuroQuantumBrainAI:
         
         print("   学習完了！")
     
+    def train_on_texts(self, texts: List[str], epochs: int = 20, batch_size: int = 16,
+                       lr: float = 0.001, seq_length: int = 64):
+        """
+        train()へのエイリアス（後方互換性のため）
+        
+        Args:
+            texts: 学習用テキストのリスト
+            epochs: エポック数
+            batch_size: バッチサイズ
+            lr: 学習率
+            seq_length: シーケンス長
+        """
+        return self.train(texts, epochs=epochs, batch_size=batch_size, lr=lr, seq_length=seq_length)
+    
     def generate(self, prompt: str, max_length: int = 50,
                  temperature_min: float = 0.4, temperature_max: float = 0.9,
                  top_k: int = 40, top_p: float = 0.9) -> str:
