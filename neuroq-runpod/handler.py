@@ -571,14 +571,18 @@ def initialize_models():
     print(f"🏁 モデル初期化完了 (is_pretrained: {is_pretrained})")
 
 
+# ========================================
+# モジュール読み込み時に初期化を実行
+# ========================================
+# RunPod Serverlessでは__main__が実行されない場合があるため、
+# モジュールレベルで初期化を行う
+print("🚀 NeuroQ RunPod Serverless Handler を起動します...")
+print(f"   Common Crawl: {'✅' if COMMON_CRAWL_AVAILABLE else '❌'}")
+print(f"   Layered: {'✅' if LAYERED_AVAILABLE else '❌'}")
+print(f"   Brain: {'✅' if BRAIN_AVAILABLE else '❌'}")
+
+# 起動時に事前学習を実行（重要！）
+initialize_models()
+
 # RunPod Serverless 起動
-if __name__ == "__main__":
-    print("🚀 NeuroQ RunPod Serverless Handler を起動します...")
-    print(f"   Common Crawl: {'✅' if COMMON_CRAWL_AVAILABLE else '❌'}")
-    print(f"   Layered: {'✅' if LAYERED_AVAILABLE else '❌'}")
-    print(f"   Brain: {'✅' if BRAIN_AVAILABLE else '❌'}")
-    
-    # 起動時に事前学習を実行（重要！）
-    initialize_models()
-    
-    runpod.serverless.start({"handler": handler})
+runpod.serverless.start({"handler": handler})
