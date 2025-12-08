@@ -602,6 +602,12 @@ def initialize_models():
 # ========================================
 # RunPod Serverlessでは__main__が実行されない場合があるため、
 # モジュールレベルで初期化を行う
+
+# カレントディレクトリを/appに変更（トークナイザーファイルが見つかるように）
+if os.path.exists('/app'):
+    os.chdir('/app')
+    print(f"📁 カレントディレクトリを /app に変更しました")
+
 print("🚀 NeuroQ RunPod Serverless Handler を起動します...")
 print(f"   Common Crawl: {'✅' if COMMON_CRAWL_AVAILABLE else '❌'}")
 print(f"   Layered: {'✅' if LAYERED_AVAILABLE else '❌'}")
