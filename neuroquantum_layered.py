@@ -1407,6 +1407,7 @@ class NeuroQuantumAI:
         top_p: float = 0.9,
         repetition_penalty: float = 2.0,  # 強化（1.15 → 2.0、より強力に）
         no_repeat_ngram_size: int = 3,  # N-gram重複防止
+        temperature: float = None,   # 後方互換性のため（指定された場合temp_min/temp_maxを自動計算）
     ) -> str:
         """
         テキスト生成（改善版）
@@ -1415,7 +1416,17 @@ class NeuroQuantumAI:
         - 強化された繰り返しペナルティ
         - N-gram重複防止
         - より安定したサンプリング
+        
+        Args:
+            temperature: 後方互換性のための単一温度パラメータ。
+                        指定された場合、temp_min = temperature * 0.8, 
+                        temp_max = temperature * 1.2 に自動変換されます。
         """
+        # 後方互換性: temperature が指定された場合、temp_min/temp_max に変換
+        if temperature is not None:
+            temp_min = temperature * 0.8
+            temp_max = temperature * 1.2
+        
         if self.model is None:
             raise ValueError("モデルが学習されていません")
         

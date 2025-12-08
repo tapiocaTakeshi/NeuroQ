@@ -1166,6 +1166,7 @@ class NeuroQuantumAI:
         top_k: int = 40,
         top_p: float = 0.9,
         repetition_penalty: float = 2.0,
+        temperature: float = None,   # 後方互換性のため（指定された場合temp_min/temp_maxを自動計算）
     ) -> str:
         """
         テキスト生成（対話形式）
@@ -1173,7 +1174,17 @@ class NeuroQuantumAI:
         温度を範囲で指定することで、θ（シータ）が動的に変化できるようにする。
         APQB理論: r = cos(2θ), T = |sin(2θ)|, r² + T² = 1
         温度Tが固定だとθが固定され、量子的ゆらぎがなくなる。
+        
+        Args:
+            temperature: 後方互換性のための単一温度パラメータ。
+                        指定された場合、temp_min = temperature * 0.8, 
+                        temp_max = temperature * 1.2 に自動変換されます。
         """
+        # 後方互換性: temperature が指定された場合、temp_min/temp_max に変換
+        if temperature is not None:
+            temp_min = temperature * 0.8
+            temp_max = temperature * 1.2
+        
         if self.model is None:
             raise ValueError("モデルが学習されていません")
         
