@@ -182,13 +182,16 @@ def pretrain_model(model, max_records: int = 50, epochs: int = 5):
         print(f"⚠️ Common Crawl取得スキップ: {e}")
     
     if training_data:
-        print(f"📚 {len(training_data)}件のデータで学習開始 (エポック: {epochs})")
+        # データを結合して長いテキストを作成（シーケンス作成のため）
+        long_text = " ".join(training_data) * 3
+        combined_data = [long_text]
+        print(f"📚 結合後テキスト長: {len(long_text)} で学習開始 (エポック: {epochs})")
         try:
-            # train メソッドを使用
-            model.train(training_data, epochs=epochs)
+            # train メソッドを使用（seq_lenを短く設定）
+            model.train(combined_data, epochs=epochs, seq_len=16)
             is_pretrained = True
-            print("✅ 事前学習完了")
-            return True
+            print(f"✅ 事前学習完了 (model.model is None: {model.model is None})")
+            return model.model is not None
         except Exception as e:
             print(f"⚠️ 学習エラー: {e}")
             import traceback
@@ -197,16 +200,17 @@ def pretrain_model(model, max_records: int = 50, epochs: int = 5):
             # 最小限のサンプルデータで再試行
             print("🔄 最小サンプルデータで再学習を試みます...")
             try:
-                minimal_data = [
-                    "人工知能は、人間の知能を模倣するコンピュータシステムです。",
-                    "量子コンピュータは、量子力学の原理を利用した次世代のコンピュータです。",
-                    "自然言語処理は、コンピュータが人間の言語を理解し生成するための技術です。",
-                    "こんにちは。私はニューロQです。何かお手伝いできることはありますか？",
-                ]
-                model.train(minimal_data, epochs=3)
+                minimal_text = """
+                人工知能は、人間の知能を模倣するコンピュータシステムです。
+                量子コンピュータは、量子力学の原理を利用した次世代のコンピュータです。
+                自然言語処理は、コンピュータが人間の言語を理解し生成するための技術です。
+                こんにちは。私はニューロQです。何かお手伝いできることはありますか？
+                ディープラーニングは、多層のニューラルネットワークを使用する機械学習の手法です。
+                """ * 10
+                model.train([minimal_text], epochs=3, seq_len=16)
                 is_pretrained = True
-                print("✅ 最小サンプルデータでの学習完了")
-                return True
+                print(f"✅ 最小サンプルデータでの学習完了 (model.model is None: {model.model is None})")
+                return model.model is not None
             except Exception as e2:
                 print(f"⚠️ 最小サンプルデータでの学習も失敗: {e2}")
                 import traceback
@@ -348,9 +352,14 @@ def handler(event: Dict[str, Any]) -> Dict[str, Any]:
                     print(f"   トークナイザーファイル存在: {os.path.exists('neuroq_tokenizer.model')}")
                     print(f"   /app内のファイル: {os.listdir('/app') if os.path.exists('/app') else 'N/A'}")
                     try:
+                        # より長いサンプルデータを使用（シーケンス作成のため）
                         sample_data = get_sample_training_data()
-                        print(f"   サンプルデータ数: {len(sample_data)}")
-                        model.train(sample_data, epochs=3)
+                        # 短いテキストを結合して長くする
+                        long_text = " ".join(sample_data) * 5
+                        combined_data = [long_text]
+                        print(f"   結合後のテキスト長: {len(long_text)}")
+                        # seq_lenを短く設定（16）
+                        model.train(combined_data, epochs=3, seq_len=16)
                         print("✅ サンプルデータでの学習完了")
                         print(f"   model.model is None: {model.model is None}")
                     except Exception as train_error:
