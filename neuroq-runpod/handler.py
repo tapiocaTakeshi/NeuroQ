@@ -150,12 +150,16 @@ def get_sample_training_data() -> List[str]:
 def pretrain_model(model, max_records: int = 50, epochs: int = 5):
     """
     Common Crawlから事前学習を実行
+    
+    Returns:
+        bool: 学習が成功したかどうか
     """
     global is_pretrained
     
-    if is_pretrained:
+    # 既にモデルが学習済みかどうかを確認
+    if is_pretrained and model.model is not None:
         print("ℹ️ 既に事前学習済みです")
-        return
+        return True
     
     print("🔄 事前学習を開始...")
     
@@ -174,6 +178,7 @@ def pretrain_model(model, max_records: int = 50, epochs: int = 5):
             model.train(training_data, epochs=epochs)
             is_pretrained = True
             print("✅ 事前学習完了")
+            return True
         except Exception as e:
             print(f"⚠️ 学習エラー: {e}")
             # 学習失敗時もサンプルデータで再試行
@@ -183,38 +188,65 @@ def pretrain_model(model, max_records: int = 50, epochs: int = 5):
                 model.train(sample_data, epochs=3)
                 is_pretrained = True
                 print("✅ サンプルデータでの学習完了")
+                return True
             except Exception as e2:
                 print(f"⚠️ サンプルデータでの学習も失敗: {e2}")
+                return False
     else:
         print("⚠️ 学習データが取得できませんでした")
+        return False
 
 
 def get_layered_model(pretrain: bool = True):
-    """Layeredモデルを取得（事前学習付き）"""
+    """
+    Layeredモデルを取得（事前学習付き）
+    
+    Returns:
+        tuple: (model, is_trained) - モデルと学習済みかどうか
+    """
     global layered_ai
+    trained = False
+    
     if layered_ai is None and LAYERED_AVAILABLE:
         print("🔄 Layeredモデルを初期化中...")
         layered_ai = NeuroQuantumAI()
         print("✅ Layeredモデル初期化完了")
         
         if pretrain:
-            pretrain_model(layered_ai)
+            trained = pretrain_model(layered_ai)
+    elif layered_ai is not None:
+        # 既存のモデルがある場合、学習済みかどうかを確認
+        trained = layered_ai.model is not None
+        if not trained and pretrain:
+            trained = pretrain_model(layered_ai)
     
-    return layered_ai
+    return layered_ai, trained
 
 
 def get_brain_model(pretrain: bool = True):
-    """Brainモデルを取得（事前学習付き）"""
+    """
+    Brainモデルを取得（事前学習付き）
+    
+    Returns:
+        tuple: (model, is_trained) - モデルと学習済みかどうか
+    """
     global brain_ai
+    trained = False
+    
     if brain_ai is None and BRAIN_AVAILABLE:
         print("🔄 Brainモデルを初期化中...")
         brain_ai = NeuroQuantumBrainAI()
         print("✅ Brainモデル初期化完了")
         
         if pretrain:
-            pretrain_model(brain_ai)
+            trained = pretrain_model(brain_ai)
+    elif brain_ai is not None:
+        # 既存のモデルがある場合、学習済みかどうかを確認
+        trained = brain_ai.model is not None
+        if not trained and pretrain:
+            trained = pretrain_model(brain_ai)
     
-    return brain_ai
+    return brain_ai, trained
 
 
 def handler(event: Dict[str, Any]) -> Dict[str, Any]:
@@ -271,7 +303,21 @@ def handler(event: Dict[str, Any]) -> Dict[str, Any]:
             top_p = input_data.get("top_p", 0.9)
             
             if mode == "layered" and LAYERED_AVAILABLE:
-                model = get_layered_model(pretrain=pretrain)
+                model, trained = get_layered_model(pretrain=pretrain)
+                
+                # モデルが学習済みかどうかを確認
+                if model is None:
+                    return {
+                        "status": "error",
+                        "error": "モデルの初期化に失敗しました"
+                    }
+                
+                if not trained and model.model is None:
+                    return {
+                        "status": "error",
+                        "error": "モデルが学習されていません。学習を実行してください。"
+                    }
+                
                 try:
                     # 新しいパラメータ形式 (temp_min/temp_max)
                     result = model.generate(
@@ -295,6 +341,14 @@ def handler(event: Dict[str, Any]) -> Dict[str, Any]:
                         )
                     else:
                         raise e
+                
+                # 生成結果がエラーメッセージかどうかを確認
+                if result == "モデルが学習されていません":
+                    return {
+                        "status": "error",
+                        "error": "モデルが学習されていません。学習を実行してください。"
+                    }
+                
                 return {
                     "status": "success",
                     "mode": "layered",
@@ -304,13 +358,35 @@ def handler(event: Dict[str, Any]) -> Dict[str, Any]:
                 }
             
             elif mode == "brain" and BRAIN_AVAILABLE:
-                model = get_brain_model(pretrain=pretrain)
+                model, trained = get_brain_model(pretrain=pretrain)
+                
+                # モデルが学習済みかどうかを確認
+                if model is None:
+                    return {
+                        "status": "error",
+                        "error": "モデルの初期化に失敗しました"
+                    }
+                
+                if not trained and model.model is None:
+                    return {
+                        "status": "error",
+                        "error": "モデルが学習されていません。学習を実行してください。"
+                    }
+                
                 result = model.generate(
                     prompt=prompt,
                     max_length=max_length,
                     temperature_min=temp_min,
                     temperature_max=temp_max
                 )
+                
+                # 生成結果がエラーメッセージかどうかを確認
+                if result == "モデルが学習されていません":
+                    return {
+                        "status": "error",
+                        "error": "モデルが学習されていません。学習を実行してください。"
+                    }
+                
                 return {
                     "status": "success",
                     "mode": "brain",
@@ -338,28 +414,45 @@ def handler(event: Dict[str, Any]) -> Dict[str, Any]:
                 cc_data = fetch_common_crawl_data(max_records=max_records)
                 training_data.extend(cc_data)
             
+            # training_dataが空の場合はサンプルデータを使用
             if not training_data:
-                return {"status": "error", "error": "training_data が必要です"}
+                print("⚠️ training_data が空です。サンプルデータを使用します。")
+                training_data = get_sample_training_data()
             
             if mode == "layered" and LAYERED_AVAILABLE:
-                model = get_layered_model(pretrain=False)
+                model, _ = get_layered_model(pretrain=False)
+                if model is None:
+                    return {"status": "error", "error": "モデルの初期化に失敗しました"}
+                
                 # train メソッドを使用（train_on_texts は存在しない）
-                model.train(training_data, epochs=epochs)
-                return {
-                    "status": "success",
-                    "mode": "layered",
-                    "message": f"{len(training_data)}件のデータで{epochs}エポック学習完了"
-                }
+                try:
+                    model.train(training_data, epochs=epochs)
+                    global is_pretrained
+                    is_pretrained = True
+                    return {
+                        "status": "success",
+                        "mode": "layered",
+                        "message": f"{len(training_data)}件のデータで{epochs}エポック学習完了"
+                    }
+                except Exception as e:
+                    return {"status": "error", "error": f"学習エラー: {str(e)}"}
             
             elif mode == "brain" and BRAIN_AVAILABLE:
-                model = get_brain_model(pretrain=False)
+                model, _ = get_brain_model(pretrain=False)
+                if model is None:
+                    return {"status": "error", "error": "モデルの初期化に失敗しました"}
+                
                 # train メソッドを使用（train_on_texts は存在しない）
-                model.train(training_data, epochs=epochs)
-                return {
-                    "status": "success",
-                    "mode": "brain",
-                    "message": f"{len(training_data)}件のデータで{epochs}エポック学習完了"
-                }
+                try:
+                    model.train(training_data, epochs=epochs)
+                    is_pretrained = True
+                    return {
+                        "status": "success",
+                        "mode": "brain",
+                        "message": f"{len(training_data)}件のデータで{epochs}エポック学習完了"
+                    }
+                except Exception as e:
+                    return {"status": "error", "error": f"学習エラー: {str(e)}"}
             
             else:
                 return {"status": "error", "error": f"モード '{mode}' は利用できません"}
