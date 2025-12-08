@@ -163,34 +163,49 @@ def pretrain_model(model, max_records: int = 50, epochs: int = 5):
     
     print("🔄 事前学習を開始...")
     
-    # Common Crawlからデータ取得
-    training_data = fetch_common_crawl_data(max_records=max_records)
+    # まずサンプルデータで確実に学習（フォールバックとして）
+    # これにより、Common Crawl取得に失敗しても動作を保証
+    training_data = get_sample_training_data()
     
-    # データが取得できなかった場合はサンプルデータを使用
-    if not training_data:
-        print("⚠️ Common Crawlからデータを取得できませんでした。サンプルデータを使用します。")
-        training_data = get_sample_training_data()
+    # Common Crawlからデータ取得を試みる（追加データとして）
+    try:
+        cc_data = fetch_common_crawl_data(max_records=max_records)
+        if cc_data:
+            training_data.extend(cc_data)
+            print(f"📡 Common Crawlから{len(cc_data)}件追加")
+    except Exception as e:
+        print(f"⚠️ Common Crawl取得スキップ: {e}")
     
     if training_data:
         print(f"📚 {len(training_data)}件のデータで学習開始 (エポック: {epochs})")
         try:
-            # train メソッドを使用（train_on_texts は存在しない）
+            # train メソッドを使用
             model.train(training_data, epochs=epochs)
             is_pretrained = True
             print("✅ 事前学習完了")
             return True
         except Exception as e:
             print(f"⚠️ 学習エラー: {e}")
-            # 学習失敗時もサンプルデータで再試行
-            print("🔄 サンプルデータで再学習を試みます...")
+            import traceback
+            traceback.print_exc()
+            
+            # 最小限のサンプルデータで再試行
+            print("🔄 最小サンプルデータで再学習を試みます...")
             try:
-                sample_data = get_sample_training_data()
-                model.train(sample_data, epochs=3)
+                minimal_data = [
+                    "人工知能は、人間の知能を模倣するコンピュータシステムです。",
+                    "量子コンピュータは、量子力学の原理を利用した次世代のコンピュータです。",
+                    "自然言語処理は、コンピュータが人間の言語を理解し生成するための技術です。",
+                    "こんにちは。私はニューロQです。何かお手伝いできることはありますか？",
+                ]
+                model.train(minimal_data, epochs=3)
                 is_pretrained = True
-                print("✅ サンプルデータでの学習完了")
+                print("✅ 最小サンプルデータでの学習完了")
                 return True
             except Exception as e2:
-                print(f"⚠️ サンプルデータでの学習も失敗: {e2}")
+                print(f"⚠️ 最小サンプルデータでの学習も失敗: {e2}")
+                import traceback
+                traceback.print_exc()
                 return False
     else:
         print("⚠️ 学習データが取得できませんでした")
@@ -314,8 +329,19 @@ def handler(event: Dict[str, Any]) -> Dict[str, Any]:
                         "error": "モデルの初期化に失敗しました"
                     }
                 
-                # 事前学習が失敗しても、generateメソッド内の自動学習を利用
-                # model.model is Noneでも、generate()が自動的にサンプルデータで学習を行う
+                # 事前学習が失敗した場合、ここで再度学習を試みる
+                if model.model is None:
+                    print("⚠️ モデルが未学習です。サンプルデータで学習を試みます...")
+                    try:
+                        sample_data = get_sample_training_data()
+                        model.train(sample_data, epochs=3)
+                        print("✅ サンプルデータでの学習完了")
+                    except Exception as train_error:
+                        print(f"⚠️ サンプルデータでの学習失敗: {train_error}")
+                        return {
+                            "status": "error",
+                            "error": f"モデルの学習に失敗しました: {str(train_error)}"
+                        }
                 
                 try:
                     # 新しいパラメータ形式 (temp_min/temp_max)
@@ -342,13 +368,25 @@ def handler(event: Dict[str, Any]) -> Dict[str, Any]:
                         raise e
                 except ValueError as e:
                     # 自動学習も失敗した場合
+                    error_msg = str(e)
+                    print(f"⚠️ generate ValueError: {error_msg}")
                     return {
                         "status": "error",
-                        "error": f"モデルの自動学習に失敗しました: {str(e)}"
+                        "error": f"テキスト生成エラー: {error_msg}"
+                    }
+                except Exception as e:
+                    # その他のエラー
+                    error_msg = str(e)
+                    print(f"⚠️ generate Exception: {error_msg}")
+                    import traceback
+                    traceback.print_exc()
+                    return {
+                        "status": "error",
+                        "error": f"生成時にエラーが発生しました: {error_msg}"
                     }
                 
                 # 生成結果がエラーメッセージかどうかを確認
-                if result == "モデルが学習されていません":
+                if result == "モデルが学習されていません" or not result:
                     return {
                         "status": "error",
                         "error": "モデルが学習されていません。学習を実行してください。"
@@ -372,7 +410,19 @@ def handler(event: Dict[str, Any]) -> Dict[str, Any]:
                         "error": "モデルの初期化に失敗しました"
                     }
                 
-                # 事前学習が失敗しても、generateメソッド内の自動学習を利用
+                # 事前学習が失敗した場合、ここで再度学習を試みる
+                if model.model is None:
+                    print("⚠️ Brainモデルが未学習です。サンプルデータで学習を試みます...")
+                    try:
+                        sample_data = get_sample_training_data()
+                        model.train(sample_data, epochs=3)
+                        print("✅ Brainモデルのサンプルデータでの学習完了")
+                    except Exception as train_error:
+                        print(f"⚠️ Brainモデルのサンプルデータでの学習失敗: {train_error}")
+                        return {
+                            "status": "error",
+                            "error": f"Brainモデルの学習に失敗しました: {str(train_error)}"
+                        }
                 
                 try:
                     result = model.generate(
@@ -383,13 +433,25 @@ def handler(event: Dict[str, Any]) -> Dict[str, Any]:
                     )
                 except ValueError as e:
                     # 自動学習も失敗した場合
+                    error_msg = str(e)
+                    print(f"⚠️ Brain generate ValueError: {error_msg}")
                     return {
                         "status": "error",
-                        "error": f"モデルの自動学習に失敗しました: {str(e)}"
+                        "error": f"Brainモデルのテキスト生成エラー: {error_msg}"
+                    }
+                except Exception as e:
+                    # その他のエラー
+                    error_msg = str(e)
+                    print(f"⚠️ Brain generate Exception: {error_msg}")
+                    import traceback
+                    traceback.print_exc()
+                    return {
+                        "status": "error",
+                        "error": f"Brain生成時にエラーが発生しました: {error_msg}"
                     }
                 
                 # 生成結果がエラーメッセージかどうかを確認
-                if result == "モデルが学習されていません":
+                if result == "モデルが学習されていません" or not result:
                     return {
                         "status": "error",
                         "error": "モデルが学習されていません。学習を実行してください。"
@@ -467,7 +529,46 @@ def handler(event: Dict[str, Any]) -> Dict[str, Any]:
         return {"status": "error", "error": f"不明なアクション: {action}"}
     
     except Exception as e:
-        return {"status": "error", "error": str(e)}
+        import traceback
+        error_msg = str(e)
+        print(f"⚠️ Handler Exception: {error_msg}")
+        traceback.print_exc()
+        return {"status": "error", "error": f"ハンドラーエラー: {error_msg}"}
+
+
+# 起動時に事前学習を実行
+def initialize_models():
+    """
+    起動時にモデルを初期化し、事前学習を実行
+    これにより、最初のリクエストでの遅延を回避
+    """
+    global is_pretrained
+    
+    print("🔄 モデルの初期化と事前学習を開始...")
+    
+    # Layeredモデルを初期化・学習
+    if LAYERED_AVAILABLE:
+        try:
+            model, trained = get_layered_model(pretrain=True)
+            if trained:
+                print("✅ Layeredモデルの事前学習が完了しました")
+            else:
+                print("⚠️ Layeredモデルの事前学習が完了しましたが、確認してください")
+        except Exception as e:
+            print(f"⚠️ Layeredモデルの初期化エラー: {e}")
+    
+    # Brainモデルを初期化・学習
+    if BRAIN_AVAILABLE:
+        try:
+            model, trained = get_brain_model(pretrain=True)
+            if trained:
+                print("✅ Brainモデルの事前学習が完了しました")
+            else:
+                print("⚠️ Brainモデルの事前学習が完了しましたが、確認してください")
+        except Exception as e:
+            print(f"⚠️ Brainモデルの初期化エラー: {e}")
+    
+    print(f"🏁 モデル初期化完了 (is_pretrained: {is_pretrained})")
 
 
 # RunPod Serverless 起動
@@ -476,4 +577,8 @@ if __name__ == "__main__":
     print(f"   Common Crawl: {'✅' if COMMON_CRAWL_AVAILABLE else '❌'}")
     print(f"   Layered: {'✅' if LAYERED_AVAILABLE else '❌'}")
     print(f"   Brain: {'✅' if BRAIN_AVAILABLE else '❌'}")
+    
+    # 起動時に事前学習を実行（重要！）
+    initialize_models()
+    
     runpod.serverless.start({"handler": handler})
