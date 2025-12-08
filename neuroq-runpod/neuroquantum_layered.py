@@ -690,7 +690,8 @@ class NeuroQuantumTokenizer:
         # vocab_sizeは設定されている値を保持（上書きしない）
         if not hasattr(self, 'vocab_size') or self.vocab_size is None:
             self.vocab_size = 4
-        self.actual_vocab_size = None  # build_vocab()で設定される
+        # actual_vocab_sizeを特殊トークン数で初期化（build_vocab()で更新される）
+        self.actual_vocab_size = len(self.char_to_idx)
 
         # 特殊トークンID
         self.pad_id = 0
@@ -1005,12 +1006,18 @@ class NeuroQuantumAI:
             self.tokenizer = NeuroQuantumTokenizer(vocab_size=8000)
             self.tokenizer.build_vocab(texts)
 
-        print(f"   語彙サイズ: {self.tokenizer.actual_vocab_size}")
+        # 語彙サイズを取得（actual_vocab_sizeがNoneの場合はvocab_sizeを使用）
+        effective_vocab_size = self.tokenizer.actual_vocab_size
+        if effective_vocab_size is None or effective_vocab_size <= 4:
+            effective_vocab_size = self.tokenizer.vocab_size
+        if effective_vocab_size is None or effective_vocab_size <= 4:
+            effective_vocab_size = 8000  # デフォルト値
+        print(f"   語彙サイズ: {effective_vocab_size}")
         
         # モデル構築
         print("\n🧠 ニューロQモデル構築...")
         self.config = NeuroQuantumConfig(
-            vocab_size=self.tokenizer.actual_vocab_size,
+            vocab_size=effective_vocab_size,
             embed_dim=self.embed_dim,
             hidden_dim=self.hidden_dim,
             num_heads=self.num_heads,
@@ -1074,7 +1081,7 @@ class NeuroQuantumAI:
                 logits = self.model(x_batch)
                 
                 loss = criterion(
-                    logits.view(-1, self.tokenizer.actual_vocab_size),
+                    logits.view(-1, self.config.vocab_size),
                     y_batch.view(-1)
                 )
                 
@@ -1348,7 +1355,8 @@ class NeuroQuantumAI:
                 
                 if user_input == '/info':
                     print(f"\n📊 ニューロQ モデル情報:")
-                    print(f"   語彙サイズ: {self.tokenizer.actual_vocab_size}")
+                    vocab_size = self.config.vocab_size if self.config else (self.tokenizer.actual_vocab_size or self.tokenizer.vocab_size)
+                    print(f"   語彙サイズ: {vocab_size}")
                     print(f"   埋め込み次元: {self.embed_dim}")
                     print(f"   隠れ層次元: {self.hidden_dim}")
                     print(f"   アテンションヘッド: {self.num_heads}")
