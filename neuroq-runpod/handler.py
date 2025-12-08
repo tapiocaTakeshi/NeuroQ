@@ -517,14 +517,18 @@ def handler(event: Dict[str, Any]) -> Dict[str, Any]:
                 print("⚠️ training_data が空です。サンプルデータを使用します。")
                 training_data = get_sample_training_data()
             
+            # データを結合して長いテキストを作成
+            long_text = " ".join(training_data) * 3
+            combined_data = [long_text]
+            print(f"📚 結合後テキスト長: {len(long_text)}")
+            
             if mode == "layered" and LAYERED_AVAILABLE:
                 model, _ = get_layered_model(pretrain=False)
                 if model is None:
                     return {"status": "error", "error": "モデルの初期化に失敗しました"}
                 
-                # train メソッドを使用（train_on_texts は存在しない）
                 try:
-                    model.train(training_data, epochs=epochs)
+                    model.train(combined_data, epochs=epochs, seq_len=16)
                     is_pretrained = True
                     return {
                         "status": "success",
@@ -532,6 +536,8 @@ def handler(event: Dict[str, Any]) -> Dict[str, Any]:
                         "message": f"{len(training_data)}件のデータで{epochs}エポック学習完了"
                     }
                 except Exception as e:
+                    import traceback
+                    traceback.print_exc()
                     return {"status": "error", "error": f"学習エラー: {str(e)}"}
             
             elif mode == "brain" and BRAIN_AVAILABLE:
@@ -539,9 +545,8 @@ def handler(event: Dict[str, Any]) -> Dict[str, Any]:
                 if model is None:
                     return {"status": "error", "error": "モデルの初期化に失敗しました"}
                 
-                # train メソッドを使用（train_on_texts は存在しない）
                 try:
-                    model.train(training_data, epochs=epochs)
+                    model.train(combined_data, epochs=epochs, seq_len=16)
                     is_pretrained = True
                     return {
                         "status": "success",
@@ -549,6 +554,8 @@ def handler(event: Dict[str, Any]) -> Dict[str, Any]:
                         "message": f"{len(training_data)}件のデータで{epochs}エポック学習完了"
                     }
                 except Exception as e:
+                    import traceback
+                    traceback.print_exc()
                     return {"status": "error", "error": f"学習エラー: {str(e)}"}
             
             else:
