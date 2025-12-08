@@ -18,22 +18,31 @@ echo "================================"
 echo "Image: ${FULL_IMAGE}"
 echo ""
 
-# Verify we're in the right directory
-if [ ! -f "handler.py" ]; then
-    echo "❌ Error: handler.py not found. Please run this script from neuroq-runpod/ directory"
+# Determine script directory and repository root
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
+
+# Verify files exist
+if [ ! -f "${SCRIPT_DIR}/handler.py" ]; then
+    echo "❌ Error: handler.py not found in ${SCRIPT_DIR}"
+    exit 1
+fi
+
+if [ ! -f "${SCRIPT_DIR}/neuroq_tokenizer.vocab" ]; then
+    echo "❌ Error: neuroq_tokenizer.vocab not found in ${SCRIPT_DIR}"
     exit 1
 fi
 
 # Verify the fix is in place
 echo "🔍 Verifying temperature parameter fix..."
-if grep -q "temp_min=temperature \* 0.8" handler.py; then
+if grep -q "temp_min=temperature \* 0.8" "${SCRIPT_DIR}/handler.py"; then
     echo "✅ Fix confirmed: Layered mode uses temp_min/temp_max"
 else
     echo "❌ Warning: Fix not found in handler.py"
     exit 1
 fi
 
-if grep -q "temperature_min=temperature \* 0.8" handler.py; then
+if grep -q "temperature_min=temperature \* 0.8" "${SCRIPT_DIR}/handler.py"; then
     echo "✅ Fix confirmed: Brain mode uses temperature_min/temperature_max"
 else
     echo "❌ Warning: Fix not found in handler.py"
@@ -42,7 +51,9 @@ fi
 
 echo ""
 echo "📦 Building Docker image..."
-docker build -t "${FULL_IMAGE}" .
+echo "   Build context: ${REPO_ROOT}"
+echo "   Dockerfile: ${SCRIPT_DIR}/Dockerfile"
+docker build -t "${FULL_IMAGE}" -f "${SCRIPT_DIR}/Dockerfile" "${REPO_ROOT}"
 
 echo ""
 echo "✅ Build complete!"
