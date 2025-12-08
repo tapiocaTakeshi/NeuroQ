@@ -165,7 +165,8 @@ def pretrain_model(model, max_records: int = 50, epochs: int = 5):
     if training_data:
         print(f"📚 {len(training_data)}件のデータで学習開始 (エポック: {epochs})")
         try:
-            model.train_on_texts(training_data, epochs=epochs)
+            # train メソッドを使用（train_on_texts は存在しない）
+            model.train(training_data, epochs=epochs)
             is_pretrained = True
             print("✅ 事前学習完了")
         except Exception as e:
@@ -257,14 +258,29 @@ def handler(event: Dict[str, Any]) -> Dict[str, Any]:
             
             if mode == "layered" and LAYERED_AVAILABLE:
                 model = get_layered_model(pretrain=pretrain)
-                result = model.generate(
-                    prompt=prompt,
-                    max_length=max_length,
-                    temp_min=temp_min,
-                    temp_max=temp_max,
-                    top_k=top_k,
-                    top_p=top_p
-                )
+                try:
+                    # 新しいパラメータ形式 (temp_min/temp_max)
+                    result = model.generate(
+                        prompt=prompt,
+                        max_length=max_length,
+                        temp_min=temp_min,
+                        temp_max=temp_max,
+                        top_k=top_k,
+                        top_p=top_p
+                    )
+                except TypeError as e:
+                    # 後方互換性: 古いバージョンでは temperature を使用
+                    if "temp_min" in str(e) or "temp_max" in str(e):
+                        avg_temp = (temp_min + temp_max) / 2
+                        result = model.generate(
+                            prompt=prompt,
+                            max_length=max_length,
+                            temperature=avg_temp,
+                            top_k=top_k,
+                            top_p=top_p
+                        )
+                    else:
+                        raise e
                 return {
                     "status": "success",
                     "mode": "layered",
@@ -313,7 +329,8 @@ def handler(event: Dict[str, Any]) -> Dict[str, Any]:
             
             if mode == "layered" and LAYERED_AVAILABLE:
                 model = get_layered_model(pretrain=False)
-                model.train_on_texts(training_data, epochs=epochs)
+                # train メソッドを使用（train_on_texts は存在しない）
+                model.train(training_data, epochs=epochs)
                 return {
                     "status": "success",
                     "mode": "layered",
@@ -322,7 +339,8 @@ def handler(event: Dict[str, Any]) -> Dict[str, Any]:
             
             elif mode == "brain" and BRAIN_AVAILABLE:
                 model = get_brain_model(pretrain=False)
-                model.train_on_texts(training_data, epochs=epochs)
+                # train メソッドを使用（train_on_texts は存在しない）
+                model.train(training_data, epochs=epochs)
                 return {
                     "status": "success",
                     "mode": "brain",
