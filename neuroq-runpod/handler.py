@@ -266,6 +266,8 @@ def handler(event: Dict[str, Any]) -> Dict[str, Any]:
         }
     }
     """
+    global is_pretrained
+    
     try:
         input_data = event.get("input", {})
         action = input_data.get("action", "generate")
@@ -312,11 +314,8 @@ def handler(event: Dict[str, Any]) -> Dict[str, Any]:
                         "error": "モデルの初期化に失敗しました"
                     }
                 
-                if not trained and model.model is None:
-                    return {
-                        "status": "error",
-                        "error": "モデルが学習されていません。学習を実行してください。"
-                    }
+                # 事前学習が失敗しても、generateメソッド内の自動学習を利用
+                # model.model is Noneでも、generate()が自動的にサンプルデータで学習を行う
                 
                 try:
                     # 新しいパラメータ形式 (temp_min/temp_max)
@@ -341,6 +340,12 @@ def handler(event: Dict[str, Any]) -> Dict[str, Any]:
                         )
                     else:
                         raise e
+                except ValueError as e:
+                    # 自動学習も失敗した場合
+                    return {
+                        "status": "error",
+                        "error": f"モデルの自動学習に失敗しました: {str(e)}"
+                    }
                 
                 # 生成結果がエラーメッセージかどうかを確認
                 if result == "モデルが学習されていません":
@@ -367,18 +372,21 @@ def handler(event: Dict[str, Any]) -> Dict[str, Any]:
                         "error": "モデルの初期化に失敗しました"
                     }
                 
-                if not trained and model.model is None:
+                # 事前学習が失敗しても、generateメソッド内の自動学習を利用
+                
+                try:
+                    result = model.generate(
+                        prompt=prompt,
+                        max_length=max_length,
+                        temperature_min=temp_min,
+                        temperature_max=temp_max
+                    )
+                except ValueError as e:
+                    # 自動学習も失敗した場合
                     return {
                         "status": "error",
-                        "error": "モデルが学習されていません。学習を実行してください。"
+                        "error": f"モデルの自動学習に失敗しました: {str(e)}"
                     }
-                
-                result = model.generate(
-                    prompt=prompt,
-                    max_length=max_length,
-                    temperature_min=temp_min,
-                    temperature_max=temp_max
-                )
                 
                 # 生成結果がエラーメッセージかどうかを確認
                 if result == "モデルが学習されていません":
@@ -427,7 +435,6 @@ def handler(event: Dict[str, Any]) -> Dict[str, Any]:
                 # train メソッドを使用（train_on_texts は存在しない）
                 try:
                     model.train(training_data, epochs=epochs)
-                    global is_pretrained
                     is_pretrained = True
                     return {
                         "status": "success",
