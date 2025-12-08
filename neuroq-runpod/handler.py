@@ -162,6 +162,11 @@ def pretrain_model(model, max_records: int = 50, epochs: int = 5):
     # Common Crawlからデータ取得
     training_data = fetch_common_crawl_data(max_records=max_records)
     
+    # データが取得できなかった場合はサンプルデータを使用
+    if not training_data:
+        print("⚠️ Common Crawlからデータを取得できませんでした。サンプルデータを使用します。")
+        training_data = get_sample_training_data()
+    
     if training_data:
         print(f"📚 {len(training_data)}件のデータで学習開始 (エポック: {epochs})")
         try:
@@ -171,6 +176,15 @@ def pretrain_model(model, max_records: int = 50, epochs: int = 5):
             print("✅ 事前学習完了")
         except Exception as e:
             print(f"⚠️ 学習エラー: {e}")
+            # 学習失敗時もサンプルデータで再試行
+            print("🔄 サンプルデータで再学習を試みます...")
+            try:
+                sample_data = get_sample_training_data()
+                model.train(sample_data, epochs=3)
+                is_pretrained = True
+                print("✅ サンプルデータでの学習完了")
+            except Exception as e2:
+                print(f"⚠️ サンプルデータでの学習も失敗: {e2}")
     else:
         print("⚠️ 学習データが取得できませんでした")
 
