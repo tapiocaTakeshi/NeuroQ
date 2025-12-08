@@ -240,8 +240,18 @@ def handler(event: Dict[str, Any]) -> Dict[str, Any]:
             mode = input_data.get("mode", "layered")
             prompt = input_data.get("prompt", "")
             max_length = input_data.get("max_length", 100)
-            temp_min = input_data.get("temp_min", 0.4)
-            temp_max = input_data.get("temp_max", 0.8)
+            
+            # 温度パラメータの処理（後方互換性対応）
+            # temperature が指定された場合、temp_min/temp_max に変換
+            temperature = input_data.get("temperature", None)
+            if temperature is not None:
+                # temperature を temp_min/temp_max の範囲に変換
+                temp_min = temperature * 0.8
+                temp_max = temperature * 1.2
+            else:
+                temp_min = input_data.get("temp_min", 0.4)
+                temp_max = input_data.get("temp_max", 0.8)
+            
             top_k = input_data.get("top_k", 50)
             top_p = input_data.get("top_p", 0.9)
             
