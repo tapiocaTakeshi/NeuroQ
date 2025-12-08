@@ -4,7 +4,8 @@
     "mode": "layered",
     "prompt": "人工知能とは",
     "max_length": 100,
-    "temperature": 0.8,
+    "temp_min": 0.4,
+    "temp_max": 0.8,
     "pretrain": true
   }
 }

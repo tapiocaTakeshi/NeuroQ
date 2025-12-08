@@ -213,7 +213,8 @@ def handler(event: Dict[str, Any]) -> Dict[str, Any]:
             "prompt": "こんにちは",
             "mode": "layered",
             "max_length": 100,
-            "temperature": 0.8,
+            "temp_min": 0.4,
+            "temp_max": 0.8,
             "pretrain": true
         }
     }
@@ -239,7 +240,8 @@ def handler(event: Dict[str, Any]) -> Dict[str, Any]:
             mode = input_data.get("mode", "layered")
             prompt = input_data.get("prompt", "")
             max_length = input_data.get("max_length", 100)
-            temperature = input_data.get("temperature", 0.8)
+            temp_min = input_data.get("temp_min", 0.4)
+            temp_max = input_data.get("temp_max", 0.8)
             top_k = input_data.get("top_k", 50)
             top_p = input_data.get("top_p", 0.9)
             
@@ -248,8 +250,8 @@ def handler(event: Dict[str, Any]) -> Dict[str, Any]:
                 result = model.generate(
                     prompt=prompt,
                     max_length=max_length,
-                    temp_min=temperature * 0.8,  # Convert temperature to temp_min/max range
-                    temp_max=temperature * 1.2,
+                    temp_min=temp_min,
+                    temp_max=temp_max,
                     top_k=top_k,
                     top_p=top_p
                 )
@@ -266,8 +268,8 @@ def handler(event: Dict[str, Any]) -> Dict[str, Any]:
                 result = model.generate(
                     prompt=prompt,
                     max_length=max_length,
-                    temperature_min=temperature * 0.8,  # Convert temperature to temperature_min/max range
-                    temperature_max=temperature * 1.2
+                    temperature_min=temp_min,
+                    temperature_max=temp_max
                 )
                 return {
                     "status": "success",

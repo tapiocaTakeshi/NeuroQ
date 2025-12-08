@@ -4,7 +4,8 @@
     "mode": "brain",
     "prompt": "ニューラルネットワークとは",
     "max_length": 120,
-    "temperature": 0.8,
+    "temp_min": 0.4,
+    "temp_max": 0.8,
     "pretrain": true
   }
 }
