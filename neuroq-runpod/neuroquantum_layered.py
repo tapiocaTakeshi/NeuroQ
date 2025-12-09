@@ -1294,19 +1294,40 @@ class NeuroQuantumAI:
             combined_data = [long_text]
             print(f"   結合後のテキスト長: {len(long_text)}")
             
-            try:
-                self.train(combined_data, epochs=5, seq_len=16)  # 軽量な学習
-                print("✅ 自動学習完了")
-                
-                # 学習後の確認
-                if self.model is None:
-                    raise Exception("学習後もモデルがNoneです")
+            # 複数回の試行で学習を実行
+            max_retries = 3
+            training_success = False
+            
+            for attempt in range(max_retries):
+                try:
+                    print(f"🔄 自動学習試行 {attempt + 1}/{max_retries}...")
+                    self.train(combined_data, epochs=5, seq_len=16)  # 軽量な学習
+                    print("✅ 自動学習完了")
                     
-            except Exception as e:
-                print(f"⚠️ 自動学習に失敗しました: {e}")
-                import traceback
-                traceback.print_exc()
-                raise ValueError(f"モデルの自動学習に失敗しました: {e}")
+                    # 学習後の確認
+                    if self.model is None:
+                        if attempt < max_retries - 1:
+                            print(f"   学習試行 {attempt + 1} 後もmodel.modelがNoneです。再試行します...")
+                            continue
+                        else:
+                            raise Exception("すべての学習試行後もmodel.modelがNoneです")
+                    
+                    training_success = True
+                    break
+                    
+                except Exception as e:
+                    print(f"⚠️ 自動学習試行 {attempt + 1} に失敗しました: {e}")
+                    import traceback
+                    traceback.print_exc()
+                    
+                    if attempt < max_retries - 1:
+                        print("   再試行します...")
+                        continue
+                    else:
+                        print("   すべての学習試行が失敗しました")
+            
+            if not training_success or self.model is None:
+                raise ValueError("モデルが学習されていません。すべての自動学習試行が失敗しました。")
         
         # 学習後もモデルがNoneの場合はエラー
         if self.model is None:
