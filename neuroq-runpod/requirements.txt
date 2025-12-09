@@ -16,6 +16,9 @@ requests>=2.31.0
 # トークナイザー（SentencePiece）
 sentencepiece>=0.1.99
 
+# Transformers（GPT-2等のモデル）
+transformers>=4.30.0
+
 # Common Crawl データ取得
 warcio>=1.7.4
 beautifulsoup4>=4.12.0
