@@ -1,8 +1,19 @@
 # NeuroQ RunPod Deployment Guide
 
-## 🚨 Current Issue
+## 🚨 CRITICAL: Docker Image Must Be Rebuilt
+
+**If you're seeing the `train_on_texts` error, you MUST rebuild and redeploy the Docker image!**
 
 The code has been updated, but **the deployed RunPod instance is still running an old version**.
+
+### Quick Fix (3 Commands)
+
+```bash
+cd neuroq-runpod
+docker build -t YOUR_DOCKER_USERNAME/neuroq-runpod:latest .
+docker push YOUR_DOCKER_USERNAME/neuroq-runpod:latest
+# Then update your RunPod endpoint to use the new image
+```
 
 ### Errors You Might See:
 
@@ -23,6 +34,23 @@ The code has been updated, but **the deployed RunPod instance is still running a
 These errors occur because the old code (before the fixes) is still deployed on RunPod. **You need to rebuild and redeploy the Docker image.**
 
 ## ✅ What Was Fixed
+
+### Fix 1: Added train_on_texts Method
+
+The `train_on_texts` method has been added to both `NeuroQuantumAI` and `NeuroQuantumBrainAI` classes as a backward compatibility alias for the `train()` method.
+
+**Location:** `neuroquantum_layered.py:1163` and `neuroquantum_brain.py:939`
+
+```python
+def train_on_texts(self, texts: List[str], epochs: int = 50, batch_size: int = 16,
+                   lr: float = 0.001, seq_len: int = 64):
+    """
+    train()へのエイリアス（後方互換性のため）
+    """
+    return self.train(texts, epochs=epochs, batch_size=batch_size, lr=lr, seq_len=seq_len)
+```
+
+### Fix 2: Temperature Parameter Handling
 
 The handler.py has been updated to correctly convert the `temperature` parameter:
 
