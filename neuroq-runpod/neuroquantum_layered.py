@@ -685,12 +685,42 @@ class NeuroQuantumTokenizer:
 
     def _init_fallback(self):
         """フォールバック用の簡易トークナイザー初期化"""
+        # 基本的な特殊トークン
         self.char_to_idx = {'<PAD>': 0, '<UNK>': 1, '<BOS>': 2, '<EOS>': 3}
         self.idx_to_char = {0: '<PAD>', 1: '<UNK>', 2: '<BOS>', 3: '<EOS>'}
+        
+        # よく使う文字を事前に追加（日本語対応強化）
+        common_chars = (
+            # ひらがな
+            'あいうえおかきくけこさしすせそたちつてとなにぬねのはひふへほまみむめもやゆよらりるれろわをん'
+            # カタカナ
+            'アイウエオカキクケコサシスセソタチツテトナニヌネノハヒフヘホマミムメモヤユヨラリルレロワヲン'
+            # 英数字
+            'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789'
+            # 記号
+            ' 　。、！？「」『』（）・ー〜…'
+            # 特殊タグ文字
+            '<>/'
+        )
+        
+        for char in common_chars:
+            if char not in self.char_to_idx:
+                idx = len(self.char_to_idx)
+                self.char_to_idx[char] = idx
+                self.idx_to_char[idx] = char
+        
+        # 特殊タグも追加
+        special_tags = ['<USER>', '<ASSISTANT>']
+        for tag in special_tags:
+            if tag not in self.char_to_idx:
+                idx = len(self.char_to_idx)
+                self.char_to_idx[tag] = idx
+                self.idx_to_char[idx] = tag
+        
         # vocab_sizeは設定されている値を保持（上書きしない）
         if not hasattr(self, 'vocab_size') or self.vocab_size is None:
-            self.vocab_size = 4
-        # actual_vocab_sizeを特殊トークン数で初期化（build_vocab()で更新される）
+            self.vocab_size = len(self.char_to_idx)
+        # actual_vocab_sizeを現在の語彙サイズで初期化（build_vocab()で更新される）
         self.actual_vocab_size = len(self.char_to_idx)
 
         # 特殊トークンID
@@ -698,6 +728,8 @@ class NeuroQuantumTokenizer:
         self.unk_id = 1
         self.bos_id = 2
         self.eos_id = 3
+        
+        print(f"   🔤 フォールバックトークナイザー初期化: 語彙サイズ={self.actual_vocab_size}")
 
     def build_vocab(self, texts: List[str], character_coverage: float = 0.9995, model_prefix: str = "spm_model_layered", min_freq: int = 1):
         """
@@ -1044,18 +1076,42 @@ class NeuroQuantumAI:
             tokens = self.tokenizer.encode(text)
             all_tokens.extend(tokens)
         
-        all_tokens = torch.tensor(all_tokens, dtype=torch.long)
         print(f"   総トークン数: {len(all_tokens):,}")
+        print(f"   seq_len: {seq_len}")
+        
+        # トークン数が不足している場合は繰り返す
+        min_tokens_needed = seq_len * 4  # 最低でも数シーケンス作れる量
+        if len(all_tokens) < min_tokens_needed:
+            print(f"   ⚠️ トークン数が不足 ({len(all_tokens)} < {min_tokens_needed})。繰り返します...")
+            repeat_count = (min_tokens_needed // len(all_tokens)) + 1
+            all_tokens = all_tokens * repeat_count
+            print(f"   繰り返し後のトークン数: {len(all_tokens):,}")
+        
+        all_tokens = torch.tensor(all_tokens, dtype=torch.long)
         
         # シーケンス作成
         sequences = []
-        for i in range(0, len(all_tokens) - seq_len - 1, seq_len // 2):
+        step_size = max(1, seq_len // 2)  # ステップサイズが0にならないように
+        for i in range(0, len(all_tokens) - seq_len - 1, step_size):
             x = all_tokens[i:i+seq_len]
             y = all_tokens[i+1:i+seq_len+1]
             if len(x) == seq_len and len(y) == seq_len:
                 sequences.append((x, y))
         
         print(f"   シーケンス数: {len(sequences):,}")
+        
+        # シーケンスが作成できない場合のエラー処理
+        if len(sequences) == 0:
+            print("   ⚠️ シーケンスが作成できませんでした。より短いseq_lenで再試行します...")
+            seq_len = min(8, len(all_tokens) - 2)
+            if seq_len < 2:
+                raise ValueError(f"トークン数が少なすぎます: {len(all_tokens)}")
+            for i in range(0, len(all_tokens) - seq_len - 1, max(1, seq_len // 2)):
+                x = all_tokens[i:i+seq_len]
+                y = all_tokens[i+1:i+seq_len+1]
+                if len(x) == seq_len and len(y) == seq_len:
+                    sequences.append((x, y))
+            print(f"   再試行後のシーケンス数: {len(sequences):,}")
         
         # 学習
         optimizer = torch.optim.AdamW(self.model.parameters(), lr=lr, weight_decay=0.01)
@@ -1209,7 +1265,11 @@ class NeuroQuantumAI:
         if self.model is None:
             # 自動的にサンプルデータで学習を実行
             print("⚠️ モデルが未学習です。サンプルデータで自動学習を開始...")
+            print(f"   カレントディレクトリ: {os.getcwd()}")
+            
+            # 対話形式を含む拡張サンプルデータ
             sample_data = [
+                # 基本的な説明文
                 "人工知能は、人間の知能を模倣するコンピュータシステムです。機械学習やディープラーニングなどの技術を使用して、データからパターンを学習し、予測や判断を行います。",
                 "量子コンピュータは、量子力学の原理を利用した次世代のコンピュータです。従来のコンピュータでは解けない複雑な問題を高速に解くことができます。",
                 "自然言語処理は、コンピュータが人間の言語を理解し、生成するための技術です。翻訳、要約、質問応答などのタスクに使用されます。",
@@ -1218,12 +1278,34 @@ class NeuroQuantumAI:
                 "データサイエンスは、大量のデータから有用な情報を抽出し、ビジネスや研究に活用する学問分野です。統計学、機械学習、可視化などの手法を組み合わせます。",
                 "クラウドコンピューティングは、インターネット経由でコンピュータリソースを提供するサービスです。AWS、Azure、GCPなどのプラットフォームが代表的です。",
                 "ブロックチェーンは、分散型台帳技術の一種で、データの改ざんを防ぐ仕組みを持っています。暗号通貨や契約管理などに応用されています。",
+                # 対話形式のデータ
+                "<USER>こんにちは<ASSISTANT>こんにちは！私はニューロQです。何かお手伝いできることはありますか？",
+                "<USER>あなたは誰ですか<ASSISTANT>私はニューロQという名前の生成AIです。よろしくお願いします。",
+                "<USER>量子とは何ですか<ASSISTANT>量子とは、物質やエネルギーの最小単位のことです。量子力学では、粒子は波の性質も持ちます。",
+                "<USER>AIとは何ですか<ASSISTANT>AIは人工知能（Artificial Intelligence）の略で、機械に知的な振る舞いをさせる技術です。",
+                "<USER>Hello<ASSISTANT>Hello! I'm NeuroQ. How can I help you today?",
+                "<USER>What is quantum computing<ASSISTANT>Quantum computing uses quantum mechanics principles to perform calculations much faster than classical computers.",
+                "<USER>ありがとう<ASSISTANT>どういたしまして！お役に立てて嬉しいです。",
+                "<USER>教えてください<ASSISTANT>はい、何について知りたいですか？具体的に教えてください。",
             ]
+            
+            # データを結合して十分な長さを確保
+            long_text = " ".join(sample_data) * 10
+            combined_data = [long_text]
+            print(f"   結合後のテキスト長: {len(long_text)}")
+            
             try:
-                self.train(sample_data, epochs=3)  # 軽量な学習
+                self.train(combined_data, epochs=5, seq_len=16)  # 軽量な学習
                 print("✅ 自動学習完了")
+                
+                # 学習後の確認
+                if self.model is None:
+                    raise Exception("学習後もモデルがNoneです")
+                    
             except Exception as e:
                 print(f"⚠️ 自動学習に失敗しました: {e}")
+                import traceback
+                traceback.print_exc()
                 raise ValueError(f"モデルの自動学習に失敗しました: {e}")
         
         # 学習後もモデルがNoneの場合はエラー
