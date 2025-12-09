@@ -2,16 +2,25 @@
 
 ## 🚨 Current Issue
 
-The temperature parameter fix has been implemented in the code, but **the deployed RunPod instance is still running the old version**.
+The code has been updated, but **the deployed RunPod instance is still running an old version**.
 
-### Error You're Seeing:
+### Errors You Might See:
+
+**Error 1: train_on_texts attribute error**
+```json
+{
+  "error": "'NeuroQuantumAI' object has no attribute 'train_on_texts'"
+}
+```
+
+**Error 2: temperature parameter error**
 ```json
 {
   "error": "NeuroQuantumAI.generate() got an unexpected keyword argument 'temperature'"
 }
 ```
 
-This error occurs because the old code (before the fix) is still deployed on RunPod.
+These errors occur because the old code (before the fixes) is still deployed on RunPod. **You need to rebuild and redeploy the Docker image.**
 
 ## ✅ What Was Fixed
 
