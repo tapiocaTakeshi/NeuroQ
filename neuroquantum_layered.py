@@ -1337,6 +1337,20 @@ class NeuroQuantumAI:
         for info in self.model.get_quantum_info():
             print(f"   Block {info['block']}: λ_attn = {info['attn_lambda']:.4f}")
 
+    def train_on_texts(self, texts: List[str], epochs: int = 50, batch_size: int = 16,
+                       lr: float = 0.001, seq_len: int = 64):
+        """
+        train()へのエイリアス（後方互換性のため）
+        
+        Args:
+            texts: 学習用テキストのリスト
+            epochs: エポック数
+            batch_size: バッチサイズ
+            lr: 学習率
+            seq_len: シーケンス長
+        """
+        return self.train(texts, epochs=epochs, batch_size=batch_size, lr=lr, seq_len=seq_len)
+
     def _quantum_circuit_influence(self, logits: torch.Tensor, step: int) -> torch.Tensor:
         """
         量子回路シミュレーションを使用してlogitsに影響を与える
