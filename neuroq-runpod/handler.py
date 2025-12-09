@@ -152,7 +152,7 @@ def get_extended_training_data() -> List[str]:
     """拡張サンプル学習データ（対話形式を含む）"""
     # 基本的なサンプルデータ
     base_data = get_sample_training_data()
-    
+
     # 対話形式のデータを追加
     dialogues = [
         "<USER>こんにちは<ASSISTANT>こんにちは！私はニューロQです。何かお手伝いできることはありますか？",
@@ -163,37 +163,73 @@ def get_extended_training_data() -> List[str]:
         "<USER>What is quantum computing<ASSISTANT>Quantum computing uses quantum mechanics principles to perform calculations much faster than classical computers.",
         "<USER>ありがとう<ASSISTANT>どういたしまして！お役に立てて嬉しいです。",
         "<USER>教えてください<ASSISTANT>はい、何について知りたいですか？具体的に教えてください。",
+        "<USER>機械学習とは<ASSISTANT>機械学習は、データから学習して改善するシステムを実現する技術です。",
+        "<USER>深層学習について<ASSISTANT>深層学習は、多層のニューラルネットワークを用いた機械学習手法で、画像認識や自然言語処理で優れた性能を発揮します。",
+        "<USER>トランスフォーマーとは<ASSISTANT>トランスフォーマーは、アテンション機構を基盤とした自然言語処理のニューラルネットワークアーキテクチャです。",
+        "<USER>量子もつれとは<ASSISTANT>量子もつれは、複数の量子ビット間で生じる相関で、一方を観測すると他方の状態が決まる現象です。",
+        "<USER>エンタングルメント<ASSISTANT>エンタングルメントは量子もつれの英語表現で、量子コンピューティングの重要な概念です。",
     ]
-    
+
+    # より多様な技術用語データを追加
+    tech_data = [
+        "アルゴリズムは、問題を解決するための手順を定義したものです。効率的なアルゴリズムは計算時間を大幅に削減します。",
+        "データ構造は、データを効率的に格納・操作するための方法です。配列、リスト、木構造、グラフなど様々な種類があります。",
+        "セキュリティは、情報システムを保護するための重要な要素です。暗号化、認証、アクセス制御などの技術が用いられます。",
+        "クラウドコンピューティングは、インターネット経由でコンピュータリソースを提供するサービスです。スケーラビリティと柔軟性が特徴です。",
+        "ビッグデータは、従来の手法では処理困難な大量のデータを指します。分析により新たな知見を得ることができます。",
+        "ネットワークプロトコルは、コンピュータ間の通信規約です。TCP/IP、HTTP、HTTPSなどが広く使われています。",
+        "オペレーティングシステムは、ハードウェアとソフトウェアを管理する基本ソフトです。Windows、Linux、macOSなどがあります。",
+        "データベースは、データを構造化して保存・管理するシステムです。SQL、NoSQLなど様々な種類があります。",
+    ]
+
+    # 日常会話データを追加
+    daily_conversations = [
+        "<USER>おはようございます<ASSISTANT>おはようございます！今日も良い一日をお過ごしください。",
+        "<USER>今日の天気は<ASSISTANT>申し訳ありませんが、私はリアルタイムの天気情報にアクセスできません。",
+        "<USER>お疲れ様です<ASSISTANT>お疲れ様です。今日も一日お疲れ様でした。",
+        "<USER>よろしくお願いします<ASSISTANT>こちらこそ、よろしくお願いします。",
+        "<USER>すみません<ASSISTANT>いいえ、大丈夫ですよ。何かお手伝いできることはありますか？",
+        "<USER>ごめんなさい<ASSISTANT>気にしないでください。何か困っていることがあれば教えてください。",
+    ]
+
+    # 技術的な質問と回答
+    technical_qa = [
+        "<USER>Pythonとは<ASSISTANT>Pythonは、読みやすく書きやすいプログラミング言語です。データサイエンスやAI開発で広く使われています。",
+        "<USER>JavaScriptについて<ASSISTANT>JavaScriptは、主にWebブラウザで動作するプログラミング言語です。動的なWebページを作成できます。",
+        "<USER>データベースとは<ASSISTANT>データベースは、大量のデータを効率的に保存・管理・検索するためのシステムです。",
+        "<USER>APIとは何ですか<ASSISTANT>APIは、Application Programming Interfaceの略で、ソフトウェア間でデータをやり取りするための規約です。",
+        "<USER>クラウドとは<ASSISTANT>クラウドは、インターネット経由でコンピュータリソースやサービスを提供する仕組みです。",
+    ]
+
     # すべてのデータを結合
-    all_data = base_data + dialogues
-    
+    all_data = base_data + dialogues + tech_data + daily_conversations + technical_qa
+
     return all_data
 
 
-def pretrain_model(model, max_records: int = 50, epochs: int = 5):
+def pretrain_model(model, max_records: int = 50, epochs: int = 10):
     """
     Common Crawlから事前学習を実行
-    
+
     Returns:
         bool: 学習が成功したかどうか
     """
     global is_pretrained
-    
+
     print(f"🔍 pretrain_model開始: is_pretrained={is_pretrained}, model.model is None={model.model is None if model else 'N/A'}")
-    
+
     # 既にモデルが学習済みかどうかを確認
     if is_pretrained and model.model is not None:
         print("ℹ️ 既に事前学習済みです")
         return True
-    
+
     print("🔄 事前学習を開始...")
     print(f"   カレントディレクトリ: {os.getcwd()}")
     print(f"   トークナイザー存在: {os.path.exists('neuroq_tokenizer.model')}")
-    
+
     # 拡張サンプルデータを取得（対話形式を含む）
     training_data = get_extended_training_data()
-    
+
     # Common Crawlからデータ取得を試みる（追加データとして）
     try:
         cc_data = fetch_common_crawl_data(max_records=max_records)
@@ -202,21 +238,23 @@ def pretrain_model(model, max_records: int = 50, epochs: int = 5):
             print(f"📡 Common Crawlから{len(cc_data)}件追加")
     except Exception as e:
         print(f"⚠️ Common Crawl取得スキップ: {e}")
-    
+
     if training_data:
         # データを結合して長いテキストを作成（シーケンス作成のため）
-        # 十分な長さを確保するために繰り返し回数を増やす
-        long_text = " ".join(training_data) * 5
+        # 十分な長さを確保するために繰り返し回数を大幅に増やす
+        long_text = " ".join(training_data) * 8
         combined_data = [long_text]
         print(f"📚 結合後テキスト長: {len(long_text)} で学習開始 (エポック: {epochs})")
-        
+        print(f"   学習データ数: {len(training_data)} 件")
+        print(f"   繰り返し倍率: 8倍")
+
         # 複数回の試行で学習を実行
         max_retries = 3
         for attempt in range(max_retries):
             try:
                 print(f"🔄 学習試行 {attempt + 1}/{max_retries}...")
-                # train メソッドを使用（seq_lenを短く設定）
-                model.train(combined_data, epochs=epochs, seq_len=16)
+                # train メソッドを使用（seq_lenを適切に設定）
+                model.train(combined_data, epochs=epochs, seq_len=32)
                 
                 # 学習後の確認
                 if model.model is None:
@@ -253,9 +291,9 @@ def pretrain_model(model, max_records: int = 50, epochs: int = 5):
                 <USER>こんにちは<ASSISTANT>こんにちは！私はニューロQです。
                 <USER>量子とは<ASSISTANT>量子は物質やエネルギーの最小単位です。
                 <USER>Hello<ASSISTANT>Hello! I'm NeuroQ. How can I help you?
-                """ * 20
+                """ * 30
                 print("🔄 最小サンプルデータで再学習を試みます...")
-                model.train([minimal_text], epochs=5, seq_len=16)
+                model.train([minimal_text], epochs=8, seq_len=32)
                 
                 # 学習後の確認
                 if model.model is None:
@@ -372,7 +410,7 @@ def handler(event: Dict[str, Any]) -> Dict[str, Any]:
             # 初期化後の確認
             if layered_ai is not None and layered_ai.model is None:
                 print("⚠️ 初期化後もlayered_ai.modelがNoneです。再度学習を試みます...")
-                retrained = pretrain_model(layered_ai, max_records=30, epochs=5)
+                retrained = pretrain_model(layered_ai, max_records=50, epochs=10)
                 if retrained and layered_ai.model is not None:
                     is_pretrained = True
                     print("✅ layered_aiの再学習が完了しました")
@@ -405,7 +443,7 @@ def handler(event: Dict[str, Any]) -> Dict[str, Any]:
                     print("⚠️ Layeredモデルが未学習です。事前学習を実行します...")
                     if layered_ai is None:
                         layered_ai = NeuroQuantumAI()
-                    success = pretrain_model(layered_ai, max_records=30, epochs=5)
+                    success = pretrain_model(layered_ai, max_records=50, epochs=10)
                     if not success or layered_ai.model is None:
                         return {
                             "status": "error",
@@ -415,13 +453,13 @@ def handler(event: Dict[str, Any]) -> Dict[str, Any]:
                     print("✅ 生成前の事前学習が完了しました")
                 else:
                     print("✅ Layeredモデルは既に学習済みです")
-                    
+
             elif mode == "brain":
                 if brain_ai is None or brain_ai.model is None:
                     print("⚠️ Brainモデルが未学習です。事前学習を実行します...")
                     if brain_ai is None:
                         brain_ai = NeuroQuantumBrainAI()
-                    success = pretrain_model(brain_ai, max_records=30, epochs=5)
+                    success = pretrain_model(brain_ai, max_records=50, epochs=10)
                     if not success or brain_ai.model is None:
                         return {
                             "status": "error",
@@ -474,11 +512,11 @@ def handler(event: Dict[str, Any]) -> Dict[str, Any]:
                             # 拡張サンプルデータを使用（対話形式を含む）
                             sample_data = get_extended_training_data()
                             # 短いテキストを結合して長くする（十分な長さを確保）
-                            long_text = " ".join(sample_data) * 10
+                            long_text = " ".join(sample_data) * 12
                             combined_data = [long_text]
                             print(f"   結合後のテキスト長: {len(long_text)}")
-                            # seq_lenを短く設定（16）、エポック数を増やす
-                            model.train(combined_data, epochs=5, seq_len=16)
+                            # seq_lenを適切に設定、エポック数を増やす
+                            model.train(combined_data, epochs=8, seq_len=32)
                             print("✅ サンプルデータでの学習完了")
                             print(f"   model.model is None: {model.model is None}")
                             
@@ -546,9 +584,9 @@ def handler(event: Dict[str, Any]) -> Dict[str, Any]:
                         try:
                             # 拡張サンプルデータを使用（対話形式を含む）
                             sample_data = get_extended_training_data()
-                            long_text = " ".join(sample_data) * 10
+                            long_text = " ".join(sample_data) * 12
                             combined_data = [long_text]
-                            model.train(combined_data, epochs=5, seq_len=16)
+                            model.train(combined_data, epochs=8, seq_len=32)
                             
                             if model.model is None:
                                 return {
@@ -708,7 +746,7 @@ def handler(event: Dict[str, Any]) -> Dict[str, Any]:
                     return {"status": "error", "error": "モデルの初期化に失敗しました"}
                 
                 try:
-                    model.train(combined_data, epochs=epochs, seq_len=16)
+                    model.train(combined_data, epochs=epochs, seq_len=32)
                     is_pretrained = True
                     return {
                         "status": "success",
@@ -726,7 +764,7 @@ def handler(event: Dict[str, Any]) -> Dict[str, Any]:
                     return {"status": "error", "error": "モデルの初期化に失敗しました"}
                 
                 try:
-                    model.train(combined_data, epochs=epochs, seq_len=16)
+                    model.train(combined_data, epochs=epochs, seq_len=32)
                     is_pretrained = True
                     return {
                         "status": "success",
@@ -777,7 +815,7 @@ def initialize_models():
                 # 再度学習を試みる
                 if model is not None and model.model is None:
                     print("🔄 Layeredモデルの再学習を試みます...")
-                    retrained = pretrain_model(model, max_records=30, epochs=5)
+                    retrained = pretrain_model(model, max_records=50, epochs=10)
                     if retrained and model.model is not None:
                         print("✅ Layeredモデルの再学習が完了しました")
                         is_pretrained = True
@@ -797,7 +835,7 @@ def initialize_models():
                 # 再度学習を試みる
                 if model is not None and model.model is None:
                     print("🔄 Brainモデルの再学習を試みます...")
-                    retrained = pretrain_model(model, max_records=30, epochs=5)
+                    retrained = pretrain_model(model, max_records=50, epochs=10)
                     if retrained and model.model is not None:
                         print("✅ Brainモデルの再学習が完了しました")
         except Exception as e:
