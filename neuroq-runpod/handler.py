@@ -392,6 +392,45 @@ def handler(event: Dict[str, Any]) -> Dict[str, Any]:
         if action == "generate":
             mode = input_data.get("mode", "layered")
             prompt = input_data.get("prompt", "")
+            
+            print(f"🎯 生成開始: mode={mode}, prompt='{prompt[:50]}...'")
+            
+            # ========================================
+            # 生成前の事前学習確認（強制）
+            # ========================================
+            print("🔍 生成前のモデル状態を確認中...")
+            
+            if mode == "layered":
+                if layered_ai is None or layered_ai.model is None:
+                    print("⚠️ Layeredモデルが未学習です。事前学習を実行します...")
+                    if layered_ai is None:
+                        layered_ai = NeuroQuantumAI()
+                    success = pretrain_model(layered_ai, max_records=30, epochs=5)
+                    if not success or layered_ai.model is None:
+                        return {
+                            "status": "error",
+                            "error": "事前学習に失敗しました。モデルを初期化できませんでした。"
+                        }
+                    is_pretrained = True
+                    print("✅ 生成前の事前学習が完了しました")
+                else:
+                    print("✅ Layeredモデルは既に学習済みです")
+                    
+            elif mode == "brain":
+                if brain_ai is None or brain_ai.model is None:
+                    print("⚠️ Brainモデルが未学習です。事前学習を実行します...")
+                    if brain_ai is None:
+                        brain_ai = NeuroQuantumBrainAI()
+                    success = pretrain_model(brain_ai, max_records=30, epochs=5)
+                    if not success or brain_ai.model is None:
+                        return {
+                            "status": "error",
+                            "error": "事前学習に失敗しました。モデルを初期化できませんでした。"
+                        }
+                    is_pretrained = True
+                    print("✅ 生成前の事前学習が完了しました")
+                else:
+                    print("✅ Brainモデルは既に学習済みです")
             max_length = input_data.get("max_length", 100)
             
             # 温度パラメータの処理（後方互換性対応）
