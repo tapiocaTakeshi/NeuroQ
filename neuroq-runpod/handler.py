@@ -209,25 +209,40 @@ def pretrain_model(model, max_records: int = 50, epochs: int = 5):
         long_text = " ".join(training_data) * 5
         combined_data = [long_text]
         print(f"📚 結合後テキスト長: {len(long_text)} で学習開始 (エポック: {epochs})")
-        try:
-            # train メソッドを使用（seq_lenを短く設定）
-            model.train(combined_data, epochs=epochs, seq_len=16)
-            
-            # 学習後の確認
-            if model.model is None:
-                print("⚠️ 学習後もmodel.modelがNoneです。再試行します...")
-                raise Exception("model.model is None after training")
-            
-            is_pretrained = True
-            print(f"✅ 事前学習完了 (model.model is None: {model.model is None})")
-            return True
-        except Exception as e:
-            print(f"⚠️ 学習エラー: {e}")
-            import traceback
-            traceback.print_exc()
+        
+        # 複数回の試行で学習を実行
+        max_retries = 3
+        for attempt in range(max_retries):
+            try:
+                print(f"🔄 学習試行 {attempt + 1}/{max_retries}...")
+                # train メソッドを使用（seq_lenを短く設定）
+                model.train(combined_data, epochs=epochs, seq_len=16)
+                
+                # 学習後の確認
+                if model.model is None:
+                    print(f"⚠️ 学習試行 {attempt + 1} 後もmodel.modelがNoneです")
+                    if attempt < max_retries - 1:
+                        print("   再試行します...")
+                        continue
+                    else:
+                        print("   すべての試行が失敗しました")
+                        raise Exception("model.model is None after all training attempts")
+                
+                is_pretrained = True
+                print(f"✅ 事前学習完了 (試行 {attempt + 1}, model.model is None: {model.model is None})")
+                return True
+            except Exception as e:
+                print(f"⚠️ 学習試行 {attempt + 1} エラー: {e}")
+                import traceback
+                traceback.print_exc()
+                
+                if attempt < max_retries - 1:
+                    print("   再試行します...")
+                    continue
+                else:
+                    print("   すべての試行が失敗しました。最小サンプルデータで再試行します...")
             
             # 最小限のサンプルデータで再試行
-            print("🔄 最小サンプルデータで再学習を試みます...")
             try:
                 minimal_text = """
                 人工知能は、人間の知能を模倣するコンピュータシステムです。
@@ -239,6 +254,7 @@ def pretrain_model(model, max_records: int = 50, epochs: int = 5):
                 <USER>量子とは<ASSISTANT>量子は物質やエネルギーの最小単位です。
                 <USER>Hello<ASSISTANT>Hello! I'm NeuroQ. How can I help you?
                 """ * 20
+                print("🔄 最小サンプルデータで再学習を試みます...")
                 model.train([minimal_text], epochs=5, seq_len=16)
                 
                 # 学習後の確認
@@ -344,9 +360,22 @@ def handler(event: Dict[str, Any]) -> Dict[str, Any]:
         # ========================================
         # 毎回モデルの状態を確認し、必要に応じて初期化
         # ========================================
-        if not is_pretrained or (layered_ai is not None and layered_ai.model is None):
+        if not is_pretrained or (layered_ai is not None and layered_ai.model is None) or (brain_ai is not None and brain_ai.model is None):
             print("⚠️ モデルが未初期化または未学習です。初期化を実行します...")
+            print(f"   is_pretrained={is_pretrained}")
+            print(f"   layered_ai is None={layered_ai is None}")
+            print(f"   layered_ai.model is None={layered_ai.model is None if layered_ai else 'N/A'}")
+            print(f"   brain_ai is None={brain_ai is None}")
+            print(f"   brain_ai.model is None={brain_ai.model is None if brain_ai else 'N/A'}")
             initialize_models()
+            
+            # 初期化後の確認
+            if layered_ai is not None and layered_ai.model is None:
+                print("⚠️ 初期化後もlayered_ai.modelがNoneです。再度学習を試みます...")
+                retrained = pretrain_model(layered_ai, max_records=30, epochs=5)
+                if retrained and layered_ai.model is not None:
+                    is_pretrained = True
+                    print("✅ layered_aiの再学習が完了しました")
         
         # ヘルスチェック
         if action == "health":
@@ -395,32 +424,53 @@ def handler(event: Dict[str, Any]) -> Dict[str, Any]:
                     print(f"   カレントディレクトリ: {os.getcwd()}")
                     print(f"   トークナイザーファイル存在: {os.path.exists('neuroq_tokenizer.model')}")
                     print(f"   /app内のファイル: {os.listdir('/app') if os.path.exists('/app') else 'N/A'}")
-                    try:
-                        # 拡張サンプルデータを使用（対話形式を含む）
-                        sample_data = get_extended_training_data()
-                        # 短いテキストを結合して長くする（十分な長さを確保）
-                        long_text = " ".join(sample_data) * 10
-                        combined_data = [long_text]
-                        print(f"   結合後のテキスト長: {len(long_text)}")
-                        # seq_lenを短く設定（16）、エポック数を増やす
-                        model.train(combined_data, epochs=5, seq_len=16)
-                        print("✅ サンプルデータでの学習完了")
-                        print(f"   model.model is None: {model.model is None}")
-                        
-                        # 学習後の確認
-                        if model.model is None:
-                            raise Exception("学習後もmodel.modelがNoneです")
-                        
-                        global is_pretrained
-                        is_pretrained = True
-                        
-                    except Exception as train_error:
-                        print(f"⚠️ サンプルデータでの学習失敗: {train_error}")
-                        import traceback
-                        traceback.print_exc()
+                    
+                    # 複数回の試行で学習を実行
+                    max_retries = 3
+                    training_success = False
+                    
+                    for attempt in range(max_retries):
+                        try:
+                            print(f"🔄 学習試行 {attempt + 1}/{max_retries}...")
+                            # 拡張サンプルデータを使用（対話形式を含む）
+                            sample_data = get_extended_training_data()
+                            # 短いテキストを結合して長くする（十分な長さを確保）
+                            long_text = " ".join(sample_data) * 10
+                            combined_data = [long_text]
+                            print(f"   結合後のテキスト長: {len(long_text)}")
+                            # seq_lenを短く設定（16）、エポック数を増やす
+                            model.train(combined_data, epochs=5, seq_len=16)
+                            print("✅ サンプルデータでの学習完了")
+                            print(f"   model.model is None: {model.model is None}")
+                            
+                            # 学習後の確認
+                            if model.model is None:
+                                if attempt < max_retries - 1:
+                                    print(f"   学習試行 {attempt + 1} 後もmodel.modelがNoneです。再試行します...")
+                                    continue
+                                else:
+                                    raise Exception("すべての学習試行後もmodel.modelがNoneです")
+                            
+                            training_success = True
+                            global is_pretrained
+                            is_pretrained = True
+                            break
+                            
+                        except Exception as train_error:
+                            print(f"⚠️ 学習試行 {attempt + 1} 失敗: {train_error}")
+                            import traceback
+                            traceback.print_exc()
+                            
+                            if attempt < max_retries - 1:
+                                print("   再試行します...")
+                                continue
+                            else:
+                                print("   すべての学習試行が失敗しました")
+                    
+                    if not training_success or model.model is None:
                         return {
                             "status": "error",
-                            "error": f"モデルの学習に失敗しました: {str(train_error)}"
+                            "error": "モデルの学習に失敗しました。すべての試行が失敗しました。"
                         }
                 
                 try:
@@ -447,13 +497,52 @@ def handler(event: Dict[str, Any]) -> Dict[str, Any]:
                     else:
                         raise e
                 except ValueError as e:
-                    # 自動学習も失敗した場合
+                    # 自動学習も失敗した場合、再度学習を試みる
                     error_msg = str(e)
                     print(f"⚠️ generate ValueError: {error_msg}")
-                    return {
-                        "status": "error",
-                        "error": f"テキスト生成エラー: {error_msg}"
-                    }
+                    
+                    # モデルが未学習の場合、再度学習を試みる
+                    if "モデルが学習されていません" in error_msg or "model.model is None" in error_msg or model.model is None:
+                        print("🔄 モデルが未学習のため、再度学習を試みます...")
+                        try:
+                            # 拡張サンプルデータを使用（対話形式を含む）
+                            sample_data = get_extended_training_data()
+                            long_text = " ".join(sample_data) * 10
+                            combined_data = [long_text]
+                            model.train(combined_data, epochs=5, seq_len=16)
+                            
+                            if model.model is None:
+                                return {
+                                    "status": "error",
+                                    "error": "モデルの学習に失敗しました。再学習後もmodel.modelがNoneです。"
+                                }
+                            
+                            global is_pretrained
+                            is_pretrained = True
+                            
+                            # 再学習後、再度生成を試みる
+                            print("✅ 再学習完了。再度生成を試みます...")
+                            result = model.generate(
+                                prompt=prompt,
+                                max_length=max_length,
+                                temp_min=temp_min,
+                                temp_max=temp_max,
+                                top_k=top_k,
+                                top_p=top_p
+                            )
+                        except Exception as retry_error:
+                            print(f"⚠️ 再学習も失敗: {retry_error}")
+                            import traceback
+                            traceback.print_exc()
+                            return {
+                                "status": "error",
+                                "error": f"モデルの再学習に失敗しました: {str(retry_error)}"
+                            }
+                    else:
+                        return {
+                            "status": "error",
+                            "error": f"テキスト生成エラー: {error_msg}"
+                        }
                 except Exception as e:
                     # その他のエラー
                     error_msg = str(e)
@@ -641,11 +730,18 @@ def initialize_models():
     if LAYERED_AVAILABLE:
         try:
             model, trained = get_layered_model(pretrain=True)
-            if trained and model.model is not None:
+            if trained and model is not None and model.model is not None:
                 print("✅ Layeredモデルの事前学習が完了しました")
                 is_pretrained = True
             else:
-                print(f"⚠️ Layeredモデル: trained={trained}, model.model is None={model.model is None if model else 'N/A'}")
+                print(f"⚠️ Layeredモデル: trained={trained}, model is None={model is None}, model.model is None={model.model is None if model else 'N/A'}")
+                # 再度学習を試みる
+                if model is not None and model.model is None:
+                    print("🔄 Layeredモデルの再学習を試みます...")
+                    retrained = pretrain_model(model, max_records=30, epochs=5)
+                    if retrained and model.model is not None:
+                        print("✅ Layeredモデルの再学習が完了しました")
+                        is_pretrained = True
         except Exception as e:
             print(f"⚠️ Layeredモデルの初期化エラー: {e}")
             import traceback
@@ -655,10 +751,16 @@ def initialize_models():
     if BRAIN_AVAILABLE:
         try:
             model, trained = get_brain_model(pretrain=True)
-            if trained:
+            if trained and model is not None and model.model is not None:
                 print("✅ Brainモデルの事前学習が完了しました")
             else:
-                print("⚠️ Brainモデルの事前学習が完了しましたが、確認してください")
+                print(f"⚠️ Brainモデル: trained={trained}, model is None={model is None}, model.model is None={model.model is None if model else 'N/A'}")
+                # 再度学習を試みる
+                if model is not None and model.model is None:
+                    print("🔄 Brainモデルの再学習を試みます...")
+                    retrained = pretrain_model(model, max_records=30, epochs=5)
+                    if retrained and model.model is not None:
+                        print("✅ Brainモデルの再学習が完了しました")
         except Exception as e:
             print(f"⚠️ Brainモデルの初期化エラー: {e}")
     
