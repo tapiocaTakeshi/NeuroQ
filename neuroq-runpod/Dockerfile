@@ -1,12 +1,16 @@
 # NeuroQ RunPod Serverless Worker
 # ================================
 # Brain & Layered モード対応
+# Version: 2.0.1 (train_on_texts alias added)
 #
 # Build Context: neuroq-runpod ディレクトリ
 # Usage: cd neuroq-runpod && docker build -t neuroq-runpod .
 # または: docker build -t neuroq-runpod neuroq-runpod/
 
 FROM runpod/pytorch:2.1.0-py3.10-cuda11.8.0-devel
+
+# キャッシュバスト用（ビルドのたびに変更）
+ARG CACHEBUST=1
 
 WORKDIR /app
 
