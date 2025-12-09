@@ -10,27 +10,31 @@
 FROM runpod/pytorch:2.1.0-py3.10-cuda11.8.0-devel
 
 # キャッシュバスト用（ビルドのたびに変更）
-# Last update: 2025-12-08 07:15 JST
-ARG CACHEBUST=2
+# Last update: 2025-12-08 07:20 JST - FORCE REBUILD
+ARG CACHEBUST=3
+RUN echo "Build timestamp: $(date) - CACHEBUST=3"
 
 WORKDIR /app
 
-# 必要なファイルをコピー（カレントディレクトリから）
-COPY handler.py /app/
+# 依存関係を先にインストール（キャッシュ効率化）
 COPY requirements.txt /app/
+RUN pip install --no-cache-dir -r requirements.txt
 
-# 参照元ファイルをコピー
-COPY neuroquantum_brain.py /app/
+# 参照元ファイルをコピー（train_on_textsメソッド含む）
 COPY neuroquantum_layered.py /app/
+RUN echo "neuroquantum_layered.py copied at $(date)"
+COPY neuroquantum_brain.py /app/
+RUN echo "neuroquantum_brain.py copied at $(date)"
 COPY qbnn_layered.py /app/
 COPY qbnn_brain.py /app/
+
+# ハンドラーをコピー
+COPY handler.py /app/
+RUN echo "handler.py copied at $(date)"
 
 # SentencePiece トークナイザーモデルをコピー
 COPY neuroq_tokenizer.model /app/
 COPY neuroq_tokenizer.vocab /app/
-
-# 依存関係をインストール
-RUN pip install --no-cache-dir -r requirements.txt
 
 # ========================================
 # 環境変数（デフォルト設定）
