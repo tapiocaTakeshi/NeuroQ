@@ -10,9 +10,9 @@
 FROM runpod/pytorch:2.1.0-py3.10-cuda11.8.0-devel
 
 # キャッシュバスト用（ビルドのたびに変更）
-# Last update: 2025-12-08 07:20 JST - FORCE REBUILD
-ARG CACHEBUST=3
-RUN echo "Build timestamp: $(date) - CACHEBUST=3"
+# Last update: 2025-12-08 07:25 JST - Pre-training enforcement added
+ARG CACHEBUST=4
+RUN echo "Build timestamp: $(date) - CACHEBUST=4 - Pre-training before generation"
 
 WORKDIR /app
 
