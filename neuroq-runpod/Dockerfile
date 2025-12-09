@@ -10,7 +10,8 @@
 FROM runpod/pytorch:2.1.0-py3.10-cuda11.8.0-devel
 
 # キャッシュバスト用（ビルドのたびに変更）
-ARG CACHEBUST=1
+# Last update: 2025-12-08 07:15 JST
+ARG CACHEBUST=2
 
 WORKDIR /app
 
