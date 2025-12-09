@@ -148,6 +148,29 @@ def get_sample_training_data() -> List[str]:
     ]
 
 
+def get_extended_training_data() -> List[str]:
+    """拡張サンプル学習データ（対話形式を含む）"""
+    # 基本的なサンプルデータ
+    base_data = get_sample_training_data()
+    
+    # 対話形式のデータを追加
+    dialogues = [
+        "<USER>こんにちは<ASSISTANT>こんにちは！私はニューロQです。何かお手伝いできることはありますか？",
+        "<USER>あなたは誰ですか<ASSISTANT>私はニューロQという名前の生成AIです。よろしくお願いします。",
+        "<USER>量子とは何ですか<ASSISTANT>量子とは、物質やエネルギーの最小単位のことです。量子力学では、粒子は波の性質も持ちます。",
+        "<USER>AIとは何ですか<ASSISTANT>AIは人工知能（Artificial Intelligence）の略で、機械に知的な振る舞いをさせる技術です。",
+        "<USER>Hello<ASSISTANT>Hello! I'm NeuroQ. How can I help you today?",
+        "<USER>What is quantum computing<ASSISTANT>Quantum computing uses quantum mechanics principles to perform calculations much faster than classical computers.",
+        "<USER>ありがとう<ASSISTANT>どういたしまして！お役に立てて嬉しいです。",
+        "<USER>教えてください<ASSISTANT>はい、何について知りたいですか？具体的に教えてください。",
+    ]
+    
+    # すべてのデータを結合
+    all_data = base_data + dialogues
+    
+    return all_data
+
+
 def pretrain_model(model, max_records: int = 50, epochs: int = 5):
     """
     Common Crawlから事前学習を実行
@@ -168,9 +191,8 @@ def pretrain_model(model, max_records: int = 50, epochs: int = 5):
     print(f"   カレントディレクトリ: {os.getcwd()}")
     print(f"   トークナイザー存在: {os.path.exists('neuroq_tokenizer.model')}")
     
-    # まずサンプルデータで確実に学習（フォールバックとして）
-    # これにより、Common Crawl取得に失敗しても動作を保証
-    training_data = get_sample_training_data()
+    # 拡張サンプルデータを取得（対話形式を含む）
+    training_data = get_extended_training_data()
     
     # Common Crawlからデータ取得を試みる（追加データとして）
     try:
@@ -183,15 +205,22 @@ def pretrain_model(model, max_records: int = 50, epochs: int = 5):
     
     if training_data:
         # データを結合して長いテキストを作成（シーケンス作成のため）
-        long_text = " ".join(training_data) * 3
+        # 十分な長さを確保するために繰り返し回数を増やす
+        long_text = " ".join(training_data) * 5
         combined_data = [long_text]
         print(f"📚 結合後テキスト長: {len(long_text)} で学習開始 (エポック: {epochs})")
         try:
             # train メソッドを使用（seq_lenを短く設定）
             model.train(combined_data, epochs=epochs, seq_len=16)
+            
+            # 学習後の確認
+            if model.model is None:
+                print("⚠️ 学習後もmodel.modelがNoneです。再試行します...")
+                raise Exception("model.model is None after training")
+            
             is_pretrained = True
             print(f"✅ 事前学習完了 (model.model is None: {model.model is None})")
-            return model.model is not None
+            return True
         except Exception as e:
             print(f"⚠️ 学習エラー: {e}")
             import traceback
@@ -206,11 +235,20 @@ def pretrain_model(model, max_records: int = 50, epochs: int = 5):
                 自然言語処理は、コンピュータが人間の言語を理解し生成するための技術です。
                 こんにちは。私はニューロQです。何かお手伝いできることはありますか？
                 ディープラーニングは、多層のニューラルネットワークを使用する機械学習の手法です。
-                """ * 10
-                model.train([minimal_text], epochs=3, seq_len=16)
+                <USER>こんにちは<ASSISTANT>こんにちは！私はニューロQです。
+                <USER>量子とは<ASSISTANT>量子は物質やエネルギーの最小単位です。
+                <USER>Hello<ASSISTANT>Hello! I'm NeuroQ. How can I help you?
+                """ * 20
+                model.train([minimal_text], epochs=5, seq_len=16)
+                
+                # 学習後の確認
+                if model.model is None:
+                    print("⚠️ 最小データでの学習後もmodel.modelがNoneです")
+                    return False
+                
                 is_pretrained = True
                 print(f"✅ 最小サンプルデータでの学習完了 (model.model is None: {model.model is None})")
-                return model.model is not None
+                return True
             except Exception as e2:
                 print(f"⚠️ 最小サンプルデータでの学習も失敗: {e2}")
                 import traceback
@@ -297,11 +335,17 @@ def handler(event: Dict[str, Any]) -> Dict[str, Any]:
         action = input_data.get("action", "generate")
         pretrain = input_data.get("pretrain", True)
         
+        # デバッグ情報を出力
+        print(f"📥 リクエスト受信: action={action}, pretrain={pretrain}")
+        print(f"   is_pretrained={is_pretrained}")
+        print(f"   layered_ai is None={layered_ai is None}")
+        print(f"   layered_ai.model is None={layered_ai.model is None if layered_ai else 'N/A'}")
+        
         # ========================================
         # 毎回モデルの状態を確認し、必要に応じて初期化
         # ========================================
-        if not is_pretrained:
-            print("⚠️ モデルが未初期化です。初期化を実行します...")
+        if not is_pretrained or (layered_ai is not None and layered_ai.model is None):
+            print("⚠️ モデルが未初期化または未学習です。初期化を実行します...")
             initialize_models()
         
         # ヘルスチェック
@@ -352,16 +396,24 @@ def handler(event: Dict[str, Any]) -> Dict[str, Any]:
                     print(f"   トークナイザーファイル存在: {os.path.exists('neuroq_tokenizer.model')}")
                     print(f"   /app内のファイル: {os.listdir('/app') if os.path.exists('/app') else 'N/A'}")
                     try:
-                        # より長いサンプルデータを使用（シーケンス作成のため）
-                        sample_data = get_sample_training_data()
-                        # 短いテキストを結合して長くする
-                        long_text = " ".join(sample_data) * 5
+                        # 拡張サンプルデータを使用（対話形式を含む）
+                        sample_data = get_extended_training_data()
+                        # 短いテキストを結合して長くする（十分な長さを確保）
+                        long_text = " ".join(sample_data) * 10
                         combined_data = [long_text]
                         print(f"   結合後のテキスト長: {len(long_text)}")
-                        # seq_lenを短く設定（16）
-                        model.train(combined_data, epochs=3, seq_len=16)
+                        # seq_lenを短く設定（16）、エポック数を増やす
+                        model.train(combined_data, epochs=5, seq_len=16)
                         print("✅ サンプルデータでの学習完了")
                         print(f"   model.model is None: {model.model is None}")
+                        
+                        # 学習後の確認
+                        if model.model is None:
+                            raise Exception("学習後もmodel.modelがNoneです")
+                        
+                        global is_pretrained
+                        is_pretrained = True
+                        
                     except Exception as train_error:
                         print(f"⚠️ サンプルデータでの学習失敗: {train_error}")
                         import traceback
