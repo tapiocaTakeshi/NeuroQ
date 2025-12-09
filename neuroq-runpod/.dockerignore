@@ -1,15 +1,33 @@
-# 余計なキャッシュなどだけ無視する
-__pycache__/
+# Git
+.git
+.gitignore
+
+# Python
+__pycache__
 *.pyc
 *.pyo
+*.pyd
+.Python
+venv
+env
+.venv
+
+# IDE
+.idea
+.vscode
+*.swp
+*.swo
+
+# Documentation
+*.md
+!README.md
+
+# Temporary files
 *.tmp
 *.log
+*.bak
 
-# 仮想環境は無視
-venv/
-.env/
-.ipynb_checkpoints/
+# OS files
+.DS_Store
+Thumbs.db
 
-# Git 系
-.git/
-.gitignore
