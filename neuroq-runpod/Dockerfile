@@ -58,4 +58,4 @@ ARG OPENAI_API_KEY
 ENV OPENAI_API_KEY="${OPENAI_API_KEY}"
 
 # エントリポイント
-CMD ["python", "/app/handler.py"]
+CMD ["python", "handler.py"]
