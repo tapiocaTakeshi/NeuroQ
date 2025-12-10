@@ -860,8 +860,15 @@ print(f"   Common Crawl: {'✅' if COMMON_CRAWL_AVAILABLE else '❌'}")
 print(f"   Layered: {'✅' if LAYERED_AVAILABLE else '❌'}")
 print(f"   Brain: {'✅' if BRAIN_AVAILABLE else '❌'}")
 
-# 起動時に事前学習を実行（重要！）
-initialize_models()
+# ========================================
+# 起動時の初期化を無効化（unhealthy 対策）
+# ========================================
+# 起動時に事前学習を実行すると、RunPodのヘルスチェックがタイムアウトする
+# 代わりに、最初のリクエスト時に初期化する（handler関数内で実行）
+# initialize_models()  # ← コメントアウト
+
+print("✅ RunPod Serverless Handler 起動完了（遅延初期化モード）")
+print("   初回リクエスト時にモデルを初期化・学習します")
 
 # RunPod Serverless 起動
 runpod.serverless.start({"handler": handler})
