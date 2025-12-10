@@ -7,7 +7,7 @@
 # Usage: cd neuroq-runpod && docker build -t neuroq-runpod .
 # または: docker build -t neuroq-runpod neuroq-runpod/
 
-FROM runpod/pytorch:2.1.1-py3.10-cuda11.8.0-devel
+FROM runpod/pytorch:2.1.0-py3.10-cuda11.8.0-devel
 
 # キャッシュバスト用（ビルドのたびに変更）
 # Last update: 2025-12-08 07:40 JST - Enhanced training data and lazy init
