@@ -7,12 +7,12 @@
 # Usage: cd neuroq-runpod && docker build -t neuroq-runpod .
 # または: docker build -t neuroq-runpod neuroq-runpod/
 
-FROM runpod/pytorch:2.1.0-py3.10-cuda11.8.0-devel
+FROM runpod/pytorch:2.1.1-py3.10-cuda11.8.0-devel
 
 # キャッシュバスト用（ビルドのたびに変更）
-# Last update: 2025-12-08 07:30 JST - transformers added
-ARG CACHEBUST=5
-RUN echo "Build timestamp: $(date) - CACHEBUST=5 - transformers library added"
+# Last update: 2025-12-08 07:40 JST - Enhanced training data and lazy init
+ARG CACHEBUST=6
+RUN echo "Build timestamp: $(date) - CACHEBUST=6 - Enhanced training with lazy initialization"
 
 WORKDIR /app
 
