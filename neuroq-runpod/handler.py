@@ -529,7 +529,6 @@ def handler(event: Dict[str, Any]) -> Dict[str, Any]:
                                     raise Exception("すべての学習試行後もmodel.modelがNoneです")
                             
                             training_success = True
-                            global is_pretrained
                             is_pretrained = True
                             break
                             
@@ -593,10 +592,9 @@ def handler(event: Dict[str, Any]) -> Dict[str, Any]:
                                     "status": "error",
                                     "error": "モデルの学習に失敗しました。再学習後もmodel.modelがNoneです。"
                                 }
-                            
-                            global is_pretrained
+
                             is_pretrained = True
-                            
+
                             # 再学習後、再度生成を試みる
                             print("✅ 再学習完了。再度生成を試みます...")
                             result = model.generate(
