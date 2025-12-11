@@ -111,7 +111,7 @@ def initialize_model():
             
             is_initialized = True
             return True
-        
+
         # ========================================
         # 方法2: 簡易学習（事前学習済みモデルがない場合）
         # ========================================
@@ -127,7 +127,7 @@ def initialize_model():
             dropout=0.1,
             lambda_entangle=0.5
         )
-        
+
         # トークナイザー確認
         if os.path.exists("neuroq_tokenizer.model"):
             print("✅ トークナイザー: neuroq_tokenizer.model")
@@ -150,7 +150,7 @@ def initialize_model():
         is_initialized = True
         print("✅ 簡易学習完了!")
         return True
-        
+    
     except Exception as e:
         print(f"❌ モデル初期化エラー: {e}")
         import traceback
