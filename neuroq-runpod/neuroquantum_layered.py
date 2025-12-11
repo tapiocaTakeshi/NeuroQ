@@ -1036,7 +1036,7 @@ class NeuroQuantumAI:
             # 新規に語彙を構築
             print("   新規に語彙を構築します...")
             self.tokenizer = NeuroQuantumTokenizer(vocab_size=8000)
-            self.tokenizer.build_vocab(texts)
+            self.tokenizer.build_vocab(texts, model_prefix="neuroq_tokenizer")
 
         # 語彙サイズを取得（actual_vocab_sizeがNoneの場合はvocab_sizeを使用）
         effective_vocab_size = self.tokenizer.actual_vocab_size
