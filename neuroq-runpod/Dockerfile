@@ -25,6 +25,10 @@ COPY handler.py /app/
 COPY neuroq_tokenizer.model /app/
 COPY neuroq_tokenizer.vocab /app/
 
+# 事前学習済みモデル（存在する場合のみコピー）
+# ワイルドカードを使用してファイルがない場合もエラーにしない
+COPY neuroq_pretrained*.pt /app/
+
 # 環境変数（デフォルト設定）
 ENV NEUROQ_MODE="layered"
 ENV NEUROQ_VOCAB_SIZE="8000"
