@@ -10,9 +10,9 @@
 FROM runpod/pytorch:2.1.0-py3.10-cuda11.8.0-devel
 
 # キャッシュバスト用（ビルドのたびに変更）
-# Last update: 2025-12-11 20:50 JST - Fix seq_len/seq_length mismatch and transformers compatibility
-ARG CACHEBUST=8
-RUN echo "Build timestamp: $(date) - CACHEBUST=8 - Fix training args and transformers"
+# Last update: 2025-12-11 21:15 JST - Add QBNN Transformer (no transformers lib needed)
+ARG CACHEBUST=9
+RUN echo "Build timestamp: $(date) - CACHEBUST=9 - Add QBNN Transformer"
 
 WORKDIR /app
 
@@ -30,6 +30,9 @@ COPY neuroquantum_brain.py /app/
 RUN echo "neuroquantum_brain.py copied at $(date)"
 COPY qbnn_layered.py /app/
 COPY qbnn_brain.py /app/
+
+# QBNN Transformer (transformersライブラリ不要)
+COPY qbnn_transformer.py /app/
 
 # Copy quantum_computer.py (required by neuroquantum_layered.py)
 COPY quantum_computer.py /app/
