@@ -1,29 +1,13 @@
-# =============================================
-# NeuroQ RunPod Serverless - Dependencies
-# =============================================
+# NeuroQ RunPod - Minimal Dependencies
+# =====================================
+# 最小限の依存関係で高速起動
 
-# === Core ML Framework ===
-torch>=2.0.0
+# Core (PyTorchはベースイメージに含まれる)
 numpy>=1.24.0
-
-# === RunPod SDK ===
-runpod>=1.7.0
-
-# === Tokenizer ===
 sentencepiece>=0.1.99
 
-# === HTTP & Network ===
-requests>=2.31.0
-urllib3>=1.26.0
-certifi>=2023.0.0
+# RunPod SDK
+runpod>=1.7.0
 
-# === Common Crawl & HTML Parsing ===
-warcio>=1.7.4
-beautifulsoup4>=4.12.0
-lxml>=4.9.0
-
-# === Data Processing ===
-tqdm>=4.65.0
-
-# === Type Hints ===
-typing_extensions>=4.0.0
+# HTTP (最小限)
+requests>=2.28.0
