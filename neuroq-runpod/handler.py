@@ -10,6 +10,7 @@ import torch
 import requests
 import re
 import os
+import sys
 from typing import Dict, Any, List
 from io import BytesIO
 
@@ -415,16 +416,19 @@ def handler(event: Dict[str, Any]) -> Dict[str, Any]:
                     is_pretrained = True
                     print("✅ layered_aiの再学習が完了しました")
         
-        # ヘルスチェック
+        # ヘルスチェック（最優先で処理）
         if action == "health":
-            return {
+            health_response = {
                 "status": "healthy",
                 "layered_available": LAYERED_AVAILABLE,
                 "brain_available": BRAIN_AVAILABLE,
                 "common_crawl_available": COMMON_CRAWL_AVAILABLE,
                 "cuda_available": torch.cuda.is_available(),
-                "is_pretrained": is_pretrained
+                "is_pretrained": is_pretrained,
+                "pytorch_version": torch.__version__
             }
+            print(f"✅ Health check passed: {health_response}")
+            return health_response
         
         # テキスト生成
         if action == "generate":
@@ -857,6 +861,9 @@ print("🚀 NeuroQ RunPod Serverless Handler を起動します...")
 print(f"   Common Crawl: {'✅' if COMMON_CRAWL_AVAILABLE else '❌'}")
 print(f"   Layered: {'✅' if LAYERED_AVAILABLE else '❌'}")
 print(f"   Brain: {'✅' if BRAIN_AVAILABLE else '❌'}")
+print(f"   PyTorch: {torch.__version__}")
+print(f"   CUDA Available: {torch.cuda.is_available()}")
+print(f"   Python: {sys.version.split()[0]}")
 
 # ========================================
 # 起動時の初期化を無効化（unhealthy 対策）
@@ -867,6 +874,15 @@ print(f"   Brain: {'✅' if BRAIN_AVAILABLE else '❌'}")
 
 print("✅ RunPod Serverless Handler 起動完了（遅延初期化モード）")
 print("   初回リクエスト時にモデルを初期化・学習します")
+print("="*60)
 
 # RunPod Serverless 起動
-runpod.serverless.start({"handler": handler})
+try:
+    print("🔄 Starting RunPod serverless worker...")
+    runpod.serverless.start({"handler": handler})
+    print("✅ RunPod serverless worker started successfully")
+except Exception as e:
+    print(f"❌ Failed to start RunPod serverless worker: {e}")
+    import traceback
+    traceback.print_exc()
+    raise
