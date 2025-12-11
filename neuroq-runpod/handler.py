@@ -49,11 +49,10 @@ def initialize_model():
     print("🔄 モデル初期化開始...")
     
     try:
-        from neuroquantum_layered import NeuroQuantumAI, NeuroQuantumConfig
+        from neuroquantum_layered import NeuroQuantumAI
         
-        # 設定
-        config = NeuroQuantumConfig(
-            vocab_size=VOCAB_SIZE,
+        # モデル作成（個別パラメータで初期化）
+        model = NeuroQuantumAI(
             embed_dim=128,
             hidden_dim=256,
             num_heads=4,
@@ -62,9 +61,6 @@ def initialize_model():
             dropout=0.1,
             lambda_entangle=0.5
         )
-        
-        # モデル作成
-        model = NeuroQuantumAI(config)
         
         # トークナイザー確認
         if os.path.exists("neuroq_tokenizer.model"):
