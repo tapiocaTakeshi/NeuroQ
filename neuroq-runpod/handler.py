@@ -37,6 +37,12 @@ if torch.cuda.is_available():
 
 
 # ========================================
+# 事前学習済みモデルのパス
+# ========================================
+PRETRAINED_MODEL_PATH = "neuroq_pretrained.pt"
+
+
+# ========================================
 # Lazy Model Loading（初回リクエスト時のみ）
 # ========================================
 def initialize_model():
@@ -49,7 +55,67 @@ def initialize_model():
     print("🔄 モデル初期化開始...")
     
     try:
-        from neuroquantum_layered import NeuroQuantumAI
+        from neuroquantum_layered import NeuroQuantumAI, NeuroQuantum, NeuroQuantumConfig, NeuroQuantumTokenizer
+        
+        # ========================================
+        # 方法1: 事前学習済みモデルをロード（推奨）
+        # ========================================
+        # ファイルが存在し、サイズが1KB以上の場合のみロード
+        if os.path.exists(PRETRAINED_MODEL_PATH) and os.path.getsize(PRETRAINED_MODEL_PATH) > 1024:
+            print(f"📦 事前学習済みモデルをロード: {PRETRAINED_MODEL_PATH}")
+            
+            checkpoint = torch.load(PRETRAINED_MODEL_PATH, map_location=DEVICE)
+            config_dict = checkpoint['config']
+            
+            # Configを復元
+            config = NeuroQuantumConfig(
+                vocab_size=config_dict['vocab_size'],
+                embed_dim=config_dict['embed_dim'],
+                hidden_dim=config_dict['hidden_dim'],
+                num_heads=config_dict['num_heads'],
+                num_layers=config_dict['num_layers'],
+                max_seq_len=config_dict['max_seq_len'],
+                dropout=config_dict['dropout'],
+                lambda_entangle=config_dict['lambda_entangle'],
+            )
+            
+            # トークナイザーをロード
+            tokenizer = NeuroQuantumTokenizer(
+                vocab_size=config_dict['vocab_size'],
+                model_file="neuroq_tokenizer.model"
+            )
+            
+            # モデルを構築してウェイトをロード
+            nn_model = NeuroQuantum(config).to(DEVICE)
+            nn_model.load_state_dict(checkpoint['model_state_dict'])
+            nn_model.eval()
+            
+            # NeuroQuantumAI のラッパーを作成
+            model = NeuroQuantumAI(
+                embed_dim=config_dict['embed_dim'],
+                hidden_dim=config_dict['hidden_dim'],
+                num_heads=config_dict['num_heads'],
+                num_layers=config_dict['num_layers'],
+                max_seq_len=config_dict['max_seq_len'],
+                dropout=config_dict['dropout'],
+                lambda_entangle=config_dict['lambda_entangle'],
+            )
+            model.model = nn_model
+            model.config = config
+            model.tokenizer = tokenizer
+            
+            print(f"✅ 事前学習済みモデルロード完了!")
+            print(f"   vocab_size: {config_dict['vocab_size']}")
+            print(f"   embed_dim: {config_dict['embed_dim']}")
+            print(f"   パラメータ数: {nn_model.num_params:,}")
+            
+            is_initialized = True
+            return True
+        
+        # ========================================
+        # 方法2: 簡易学習（事前学習済みモデルがない場合）
+        # ========================================
+        print("⚠️ 事前学習済みモデルが見つかりません。簡易学習を実行...")
         
         # モデル作成（個別パラメータで初期化）
         model = NeuroQuantumAI(
@@ -68,41 +134,21 @@ def initialize_model():
         else:
             print("⚠️ トークナイザーファイルが見つかりません")
         
-        # 学習データ（より多くの文章でモデルを学習）
-        print("🔄 学習開始...")
+        # 簡易学習データ
+        print("🔄 簡易学習開始...")
         training_data = [
-            # 基本的な挨拶と自己紹介
             "こんにちは。私はニューロQです。量子ビットニューラルネットワークを使った人工知能です。",
             "ニューロQは量子コンピュータの原理を活用した次世代のAIシステムです。",
-            "私は日本語で会話ができる人工知能アシスタントです。何でも聞いてください。",
-            
-            # 量子コンピュータについて
             "量子コンピュータは量子力学の原理を利用した次世代の計算機です。",
-            "量子ビットは重ね合わせ状態を取ることができ、並列計算が可能になります。",
-            "量子もつれは二つの量子ビットが相関を持つ現象で、量子コンピュータの基礎となります。",
-            "量子コンピュータは暗号解読や最適化問題で従来のコンピュータを凌駕する可能性があります。",
-            
-            # 人工知能について
             "人工知能は人間の知能を模倣するコンピュータシステムです。",
             "機械学習はデータからパターンを学習するAIの手法です。",
             "ディープラーニングはニューラルネットワークを多層化した技術です。",
-            "自然言語処理はコンピュータが人間の言語を理解し生成する技術です。",
-            "トランスフォーマーモデルは現代のAIの基盤となるアーキテクチャです。",
-            
-            # 技術的な説明
-            "ニューラルネットワークは脳の神経回路を模倣した計算モデルです。",
-            "重み付けとバイアスを調整することでモデルは学習します。",
-            "損失関数を最小化することが機械学習の目標です。",
-            "勾配降下法は最適なパラメータを見つけるためのアルゴリズムです。",
-        ]
+        ] * 10
         
-        # 学習データを繰り返して量を増やす
-        training_data = training_data * 5
-        
-        model.train(training_data, epochs=10, seq_len=64)
+        model.train(training_data, epochs=5, seq_len=64)
         
         is_initialized = True
-        print("✅ モデル初期化完了!")
+        print("✅ 簡易学習完了!")
         return True
         
     except Exception as e:
