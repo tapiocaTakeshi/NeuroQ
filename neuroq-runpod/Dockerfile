@@ -10,9 +10,9 @@
 FROM runpod/pytorch:2.1.0-py3.10-cuda11.8.0-devel
 
 # キャッシュバスト用（ビルドのたびに変更）
-# Last update: 2025-12-08 07:40 JST - Enhanced training data and lazy init
-ARG CACHEBUST=6
-RUN echo "Build timestamp: $(date) - CACHEBUST=6 - Enhanced training with lazy initialization"
+# Last update: 2025-12-11 18:23 JST - Fix unhealthy workers: add quantum_computer.py, update runpod lib
+ARG CACHEBUST=7
+RUN echo "Build timestamp: $(date) - CACHEBUST=7 - Fix unhealthy workers"
 
 WORKDIR /app
 
@@ -27,6 +27,9 @@ COPY neuroquantum_brain.py /app/
 RUN echo "neuroquantum_brain.py copied at $(date)"
 COPY qbnn_layered.py /app/
 COPY qbnn_brain.py /app/
+
+# Copy quantum_computer.py (required by neuroquantum_layered.py)
+COPY quantum_computer.py /app/
 
 # ハンドラーをコピー
 COPY handler.py /app/
