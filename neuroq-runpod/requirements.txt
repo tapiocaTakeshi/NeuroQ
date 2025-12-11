@@ -6,8 +6,11 @@
 numpy>=1.24.0
 sentencepiece>=0.1.99
 
-# RunPod SDK
-runpod>=1.7.0
+# RunPod SDK (互換性のあるバージョン)
+runpod==1.6.2
+aiohttp>=3.8.0,<3.10.0
+aiodns>=3.0.0,<3.2.0
+pycares>=4.3.0,<4.4.0
 
 # HTTP
 requests>=2.28.0
