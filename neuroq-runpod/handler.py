@@ -251,11 +251,18 @@ def pretrain_model(model, max_records: int = 50, epochs: int = 10):
 
         # 複数回の試行で学習を実行
         max_retries = 3
+        
+        # モデルタイプを判定（Brainモデルはseq_length、Layeredはseq_len）
+        is_brain_model = hasattr(model, '__class__') and 'Brain' in model.__class__.__name__
+        
         for attempt in range(max_retries):
             try:
                 print(f"🔄 学習試行 {attempt + 1}/{max_retries}...")
-                # train メソッドを使用（seq_lenを適切に設定）
-                model.train(combined_data, epochs=epochs, seq_len=32)
+                # train メソッドを使用（モデルタイプに応じた引数を使用）
+                if is_brain_model:
+                    model.train(combined_data, epochs=epochs, seq_length=32)
+                else:
+                    model.train(combined_data, epochs=epochs, seq_len=32)
                 
                 # 学習後の確認
                 if model.model is None:
@@ -294,7 +301,11 @@ def pretrain_model(model, max_records: int = 50, epochs: int = 10):
                 <USER>Hello<ASSISTANT>Hello! I'm NeuroQ. How can I help you?
                 """ * 30
                 print("🔄 最小サンプルデータで再学習を試みます...")
-                model.train([minimal_text], epochs=8, seq_len=32)
+                # モデルタイプに応じた引数を使用
+                if is_brain_model:
+                    model.train([minimal_text], epochs=8, seq_length=32)
+                else:
+                    model.train([minimal_text], epochs=8, seq_len=32)
                 
                 # 学習後の確認
                 if model.model is None:

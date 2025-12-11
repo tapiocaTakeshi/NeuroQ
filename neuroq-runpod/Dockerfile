@@ -10,11 +10,14 @@
 FROM runpod/pytorch:2.1.0-py3.10-cuda11.8.0-devel
 
 # キャッシュバスト用（ビルドのたびに変更）
-# Last update: 2025-12-11 18:23 JST - Fix unhealthy workers: add quantum_computer.py, update runpod lib
-ARG CACHEBUST=7
-RUN echo "Build timestamp: $(date) - CACHEBUST=7 - Fix unhealthy workers"
+# Last update: 2025-12-11 20:50 JST - Fix seq_len/seq_length mismatch and transformers compatibility
+ARG CACHEBUST=8
+RUN echo "Build timestamp: $(date) - CACHEBUST=8 - Fix training args and transformers"
 
 WORKDIR /app
+
+# transformersをアンインストール（torch.utils._pytree互換性問題を回避）
+RUN pip uninstall -y transformers || true
 
 # 依存関係を先にインストール（キャッシュ効率化）
 COPY requirements.txt /app/
