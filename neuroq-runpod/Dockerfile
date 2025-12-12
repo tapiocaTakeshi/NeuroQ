@@ -24,6 +24,9 @@ COPY qbnn_brain.py /app/
 COPY handler.py /app/
 COPY pretrain_openai.py /app/
 
+# 事前学習済みモデルモジュール（親ディレクトリから読み込むため）
+COPY neuroq_pretrained.py /home/user/
+
 # トークナイザー
 COPY neuroq_tokenizer.model /app/
 COPY neuroq_tokenizer.vocab /app/

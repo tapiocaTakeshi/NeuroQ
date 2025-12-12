@@ -20,6 +20,11 @@ import threading
 import time
 from pathlib import Path
 
+# 親ディレクトリをパスに追加（neuroq_pretrained.pyをインポートするため）
+parent_dir = str(Path(__file__).parent.parent.parent)
+if parent_dir not in sys.path:
+    sys.path.insert(0, parent_dir)
+
 print("=" * 60)
 print("⚛️ NeuroQ RunPod Serverless - Starting...")
 print("=" * 60)
@@ -196,20 +201,98 @@ def validate_pt_file(file_path: str) -> dict:
 def initialize_model():
     """モデルを初期化（初回リクエスト時のみ呼ばれる）"""
     global model, is_initialized
-    
+
     if is_initialized:
         return True
-    
+
     print("🔄 モデル初期化開始...")
-    
+
     try:
         from neuroquantum_layered import NeuroQuantumAI, NeuroQuantum, NeuroQuantumConfig, NeuroQuantumTokenizer
-        
+
         # ========================================
-        # 方法1: 事前学習済みモデルをロード（推奨）
+        # 方法1: neuroq_pretrained.py を使用してロード（推奨）
+        # ========================================
+        try:
+            print("📦 Importing neuroq_pretrained module from parent directory...")
+            import neuroq_pretrained
+
+            # 事前学習済みモデルをロード
+            nn_model, config_dict, checkpoint = neuroq_pretrained.load_pretrained_model(
+                model_path=PRETRAINED_MODEL_PATH,
+                device=DEVICE,
+                verbose=True
+            )
+
+            if nn_model is not None and config_dict is not None:
+                # トークナイザーをロード
+                tokenizer = NeuroQuantumTokenizer(
+                    vocab_size=config_dict['vocab_size'],
+                    model_file="neuroq_tokenizer.model"
+                )
+
+                # vocab_size の整合性確認
+                tokenizer_vocab_size = tokenizer.actual_vocab_size or tokenizer.vocab_size
+                config_vocab_size = config_dict['vocab_size']
+                print(f"🔍 Vocab size validation:")
+                print(f"   Config vocab_size: {config_vocab_size}")
+                print(f"   Tokenizer actual_vocab_size: {tokenizer_vocab_size}")
+
+                if config_vocab_size != tokenizer_vocab_size:
+                    print(f"❌ CRITICAL: vocab_size mismatch detected!")
+                    print(f"   Model was trained with vocab_size={config_vocab_size}")
+                    print(f"   But tokenizer has vocab_size={tokenizer_vocab_size}")
+                    print(f"   This will cause generation errors. Please retrain the model.")
+                    # Note: We continue loading but generation may be broken
+
+                # Configオブジェクトを作成
+                config = NeuroQuantumConfig(
+                    vocab_size=config_dict['vocab_size'],
+                    embed_dim=config_dict['embed_dim'],
+                    hidden_dim=config_dict['hidden_dim'],
+                    num_heads=config_dict['num_heads'],
+                    num_layers=config_dict['num_layers'],
+                    max_seq_len=config_dict['max_seq_len'],
+                    dropout=config_dict.get('dropout', 0.1),
+                    lambda_entangle=config_dict.get('lambda_entangle', 0.5),
+                )
+
+                # NeuroQuantumAI のラッパーを作成
+                model = NeuroQuantumAI(
+                    embed_dim=config_dict['embed_dim'],
+                    hidden_dim=config_dict['hidden_dim'],
+                    num_heads=config_dict['num_heads'],
+                    num_layers=config_dict['num_layers'],
+                    max_seq_len=config_dict['max_seq_len'],
+                    dropout=config_dict.get('dropout', 0.1),
+                    lambda_entangle=config_dict.get('lambda_entangle', 0.5),
+                )
+                model.model = nn_model
+                model.config = config
+                model.tokenizer = tokenizer
+
+                print(f"✅ 事前学習済みモデルロード完了 (via neuroq_pretrained.py)!")
+                print(f"   vocab_size: {config_dict['vocab_size']}")
+                print(f"   embed_dim: {config_dict['embed_dim']}")
+                print(f"   パラメータ数: {nn_model.num_params:,}")
+
+                is_initialized = True
+                return True
+            else:
+                print("⚠️ neuroq_pretrained.py でのロードに失敗。従来の方法にフォールバック...")
+
+        except ImportError as e:
+            print(f"⚠️ neuroq_pretrained module not found: {e}")
+            print("   Falling back to traditional loading method...")
+        except Exception as e:
+            print(f"⚠️ Error using neuroq_pretrained module: {e}")
+            print("   Falling back to traditional loading method...")
+
+        # ========================================
+        # 方法2: 従来の方法でロード（フォールバック）
         # ========================================
         if os.path.exists(PRETRAINED_MODEL_PATH):
-            print(f"📦 事前学習済みモデルをロード: {PRETRAINED_MODEL_PATH}")
+            print(f"📦 事前学習済みモデルをロード (traditional method): {PRETRAINED_MODEL_PATH}")
 
             # ファイルの検証
             validation_result = validate_pt_file(PRETRAINED_MODEL_PATH)
