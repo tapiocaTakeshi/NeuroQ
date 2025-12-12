@@ -20,6 +20,7 @@ RUN pip install --no-cache-dir -r requirements.txt && \
 COPY neuroquantum_layered.py /app/
 COPY qbnn_layered.py /app/
 COPY handler.py /app/
+COPY pretrain_openai.py /app/
 
 # トークナイザー
 COPY neuroq_tokenizer.model /app/
