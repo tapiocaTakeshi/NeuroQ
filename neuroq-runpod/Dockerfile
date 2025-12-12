@@ -29,7 +29,7 @@ COPY neuroq_tokenizer.model /app/
 COPY neuroq_tokenizer.vocab /app/
 
 # 事前学習済みモデル
-COPY neuroq_pretrained.pt /app/
+COPY ../neuroq_pretrained.pt /app/
 
 # 環境変数（デフォルト設定）
 ENV NEUROQ_MODE="layered"
