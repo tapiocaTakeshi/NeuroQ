@@ -15,6 +15,10 @@ import runpod
 import torch
 import os
 import sys
+import subprocess
+import threading
+import time
+from pathlib import Path
 
 print("=" * 60)
 print("⚛️ NeuroQ RunPod Serverless - Starting...")
@@ -25,6 +29,11 @@ print("=" * 60)
 # ========================================
 model = None
 is_initialized = False
+
+# 学習状態管理
+pretrain_process = None
+pretrain_status = "idle"  # idle, running, completed, error
+pretrain_log_file = "training_openai.log"
 
 # 設定
 VOCAB_SIZE = 8000
@@ -248,6 +257,98 @@ def handler(job):
         }
     
     # ========================================
+    # PRETRAIN_OPENAI（OpenAIデータセット事前学習）
+    # ========================================
+    if action == "pretrain_openai":
+        global pretrain_process, pretrain_status
+
+        # 既に実行中の場合
+        if pretrain_status == "running":
+            return {
+                "status": "error",
+                "error": "Pretraining is already running",
+                "pretrain_status": pretrain_status
+            }
+
+        # ログファイルのパスを確認
+        log_path = Path(pretrain_log_file)
+
+        try:
+            # バックグラウンドでpretrain_openai.pyを実行
+            print("🚀 Starting OpenAI pretraining...")
+            pretrain_status = "running"
+
+            # python -u で unbuffered output
+            cmd = [
+                sys.executable, "-u",
+                "pretrain_openai.py"
+            ]
+
+            # ログファイルを開いてsubprocessを起動
+            with open(log_path, 'w') as log_file:
+                pretrain_process = subprocess.Popen(
+                    cmd,
+                    stdout=log_file,
+                    stderr=subprocess.STDOUT,
+                    cwd=os.path.dirname(os.path.abspath(__file__))
+                )
+
+            # 非同期でプロセスを監視
+            def monitor_pretrain():
+                global pretrain_status, pretrain_process
+                pretrain_process.wait()
+                if pretrain_process.returncode == 0:
+                    pretrain_status = "completed"
+                    print("✅ Pretraining completed successfully")
+                else:
+                    pretrain_status = "error"
+                    print(f"❌ Pretraining failed with code {pretrain_process.returncode}")
+
+            monitor_thread = threading.Thread(target=monitor_pretrain, daemon=True)
+            monitor_thread.start()
+
+            return {
+                "status": "success",
+                "message": "Pretraining started",
+                "pretrain_status": pretrain_status,
+                "log_file": str(log_path),
+                "pid": pretrain_process.pid
+            }
+
+        except Exception as e:
+            pretrain_status = "error"
+            return {
+                "status": "error",
+                "error": str(e),
+                "pretrain_status": pretrain_status
+            }
+
+    # ========================================
+    # PRETRAIN_STATUS（事前学習ステータス確認）
+    # ========================================
+    if action == "pretrain_status":
+        log_path = Path(pretrain_log_file)
+
+        # ログファイルの最後の数行を読む
+        log_tail = ""
+        if log_path.exists():
+            try:
+                with open(log_path, 'r') as f:
+                    lines = f.readlines()
+                    log_tail = ''.join(lines[-20:])  # 最後の20行
+            except Exception as e:
+                log_tail = f"Error reading log: {e}"
+
+        return {
+            "status": "success",
+            "pretrain_status": pretrain_status,
+            "log_file": str(log_path),
+            "log_exists": log_path.exists(),
+            "log_tail": log_tail,
+            "process_running": pretrain_process is not None and pretrain_process.poll() is None
+        }
+
+    # ========================================
     # TRAIN（学習）
     # ========================================
     if action == "train":
@@ -285,7 +386,7 @@ def handler(job):
     return {
         "status": "error",
         "error": f"Unknown action: {action}",
-        "available_actions": ["health", "status", "generate", "train"]
+        "available_actions": ["health", "status", "generate", "train", "pretrain_openai", "pretrain_status"]
     }
 
 
