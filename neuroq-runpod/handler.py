@@ -285,18 +285,27 @@ def handler(job):
             ]
 
             # ログファイルを開いてsubprocessを起動
-            with open(log_path, 'w') as log_file:
-                pretrain_process = subprocess.Popen(
-                    cmd,
-                    stdout=log_file,
-                    stderr=subprocess.STDOUT,
-                    cwd=os.path.dirname(os.path.abspath(__file__))
-                )
+            # IMPORTANT: Don't use 'with' statement as the file needs to stay open
+            # for the entire duration of the subprocess
+            log_file = open(log_path, 'w', buffering=1)  # Line buffered
+            pretrain_process = subprocess.Popen(
+                cmd,
+                stdout=log_file,
+                stderr=subprocess.STDOUT,
+                cwd=os.path.dirname(os.path.abspath(__file__))
+            )
 
             # 非同期でプロセスを監視
             def monitor_pretrain():
                 global pretrain_status, pretrain_process
                 pretrain_process.wait()
+
+                # Close the log file after the process finishes
+                try:
+                    log_file.close()
+                except:
+                    pass
+
                 if pretrain_process.returncode == 0:
                     pretrain_status = "completed"
                     print("✅ Pretraining completed successfully")
