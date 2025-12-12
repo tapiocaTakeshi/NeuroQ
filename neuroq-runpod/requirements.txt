@@ -2,9 +2,11 @@
 # =====================================
 # 最小限の依存関係で高速起動
 
-# Core (PyTorchはベースイメージに含まれる)
+# Core
 numpy>=1.24.0
 sentencepiece>=0.1.99
+torch>=2.0.0
+datasets>=2.14.0
 
 # RunPod SDK (互換性のあるバージョン)
 runpod==1.6.2
