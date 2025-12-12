@@ -19,7 +19,9 @@ RUN pip install --no-cache-dir -r requirements.txt && \
 # コアファイルのみコピー（軽量化）
 COPY neuroquantum_layered.py /app/
 COPY qbnn_layered.py /app/
+COPY quantum_computer.py /app/
 COPY handler.py /app/
+COPY pretrain_openai.py /app/
 
 # トークナイザー
 COPY neuroq_tokenizer.model /app/
