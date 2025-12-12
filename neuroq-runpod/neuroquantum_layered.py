@@ -1117,41 +1117,48 @@ class NeuroQuantumAI:
         optimizer = torch.optim.AdamW(self.model.parameters(), lr=lr, weight_decay=0.01)
         scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=epochs)
         criterion = nn.CrossEntropyLoss()
-        
+
         print("\n🚀 学習ループ...")
         self.model.train()
-        
+
+        import random
         for epoch in range(epochs):
             total_loss = 0
-            np.random.shuffle(sequences)
-            
-            for i in range(0, len(sequences), batch_size):
+            # Use Python's random.shuffle instead of numpy for better compatibility
+            random.shuffle(sequences)
+            print(f"   Epoch {epoch+1}/{epochs} - シャッフル完了, バッチ処理開始...", flush=True)
+
+            num_batches = len(sequences) // batch_size
+            for batch_idx, i in enumerate(range(0, len(sequences), batch_size)):
                 batch = sequences[i:i+batch_size]
                 if len(batch) == 0:
                     continue
-                
+
                 x_batch = torch.stack([s[0] for s in batch]).to(self.device)
                 y_batch = torch.stack([s[1] for s in batch]).to(self.device)
-                
+
                 optimizer.zero_grad()
                 logits = self.model(x_batch)
-                
+
                 loss = criterion(
                     logits.view(-1, self.config.vocab_size),
                     y_batch.view(-1)
                 )
-                
+
                 loss.backward()
                 torch.nn.utils.clip_grad_norm_(self.model.parameters(), 1.0)
                 optimizer.step()
-                
+
                 total_loss += loss.item()
-            
+
+                # Progress indicator every 500 batches
+                if (batch_idx + 1) % 500 == 0:
+                    print(f"      バッチ {batch_idx+1}/{num_batches} - Loss: {loss.item():.4f}", flush=True)
+
             scheduler.step()
             avg_loss = total_loss / max(1, len(sequences) // batch_size)
-            
-            if (epoch + 1) % 5 == 0 or epoch == 0:
-                print(f"   Epoch {epoch+1:3d}/{epochs}: Loss = {avg_loss:.4f}")
+
+            print(f"   Epoch {epoch+1:3d}/{epochs}: Loss = {avg_loss:.4f}", flush=True)
         
         print("\n✅ 学習完了！")
         
