@@ -52,6 +52,145 @@ PRETRAINED_MODEL_PATH = "neuroq_pretrained.pt"
 
 
 # ========================================
+# PyTorch .ptファイルの検証
+# ========================================
+def validate_pt_file(file_path: str) -> dict:
+    """
+    PyTorchの.ptファイルを検証する
+
+    Args:
+        file_path: 検証するptファイルのパス
+
+    Returns:
+        dict: 検証結果
+            - valid: bool - ファイルが有効かどうか
+            - error: str - エラーメッセージ（エラーがある場合）
+            - info: dict - ファイル情報
+    """
+    result = {
+        "valid": False,
+        "error": None,
+        "info": {}
+    }
+
+    try:
+        # 1. ファイル存在チェック
+        if not os.path.exists(file_path):
+            result["error"] = f"File not found: {file_path}"
+            return result
+
+        # 2. ファイルサイズチェック
+        file_size = os.path.getsize(file_path)
+        result["info"]["file_size_bytes"] = file_size
+        result["info"]["file_size_mb"] = round(file_size / (1024 * 1024), 2)
+
+        if file_size < 1024:  # 1KB未満
+            result["error"] = f"File too small ({file_size} bytes). Possibly corrupted or empty."
+            return result
+
+        if file_size > 5 * 1024 * 1024 * 1024:  # 5GB以上
+            result["error"] = f"File too large ({result['info']['file_size_mb']} MB). May cause memory issues."
+            print(f"⚠️ Warning: {result['error']}")
+            # 警告のみで続行
+
+        # 3. PyTorchで読み込めるかチェック
+        print(f"🔍 Loading checkpoint from {file_path}...")
+        try:
+            checkpoint = torch.load(file_path, map_location='cpu')
+        except Exception as e:
+            result["error"] = f"Failed to load PyTorch checkpoint: {str(e)}"
+            return result
+
+        # 4. チェックポイントの型チェック
+        if not isinstance(checkpoint, dict):
+            result["error"] = f"Invalid checkpoint format. Expected dict, got {type(checkpoint).__name__}"
+            return result
+
+        result["info"]["checkpoint_keys"] = list(checkpoint.keys())
+
+        # 5. 必須キーの存在チェック
+        required_keys = ['config', 'model_state_dict']
+        missing_keys = [key for key in required_keys if key not in checkpoint]
+
+        if missing_keys:
+            result["error"] = f"Missing required keys: {missing_keys}. Found keys: {list(checkpoint.keys())}"
+            return result
+
+        # 6. Config情報の検証
+        config = checkpoint['config']
+        if not isinstance(config, dict):
+            result["error"] = f"Invalid config format. Expected dict, got {type(config).__name__}"
+            return result
+
+        # 必須のconfig項目
+        required_config_keys = ['vocab_size', 'embed_dim', 'hidden_dim', 'num_heads', 'num_layers']
+        missing_config_keys = [key for key in required_config_keys if key not in config]
+
+        if missing_config_keys:
+            result["error"] = f"Missing required config keys: {missing_config_keys}"
+            return result
+
+        # Config情報を結果に追加
+        result["info"]["config"] = {
+            "vocab_size": config.get('vocab_size'),
+            "embed_dim": config.get('embed_dim'),
+            "hidden_dim": config.get('hidden_dim'),
+            "num_heads": config.get('num_heads'),
+            "num_layers": config.get('num_layers'),
+            "max_seq_len": config.get('max_seq_len'),
+            "dropout": config.get('dropout'),
+            "lambda_entangle": config.get('lambda_entangle'),
+        }
+
+        # 7. Config値の妥当性チェック
+        vocab_size = config.get('vocab_size', 0)
+        if vocab_size < 100 or vocab_size > 100000:
+            result["error"] = f"Invalid vocab_size: {vocab_size}. Expected range: 100-100000"
+            return result
+
+        embed_dim = config.get('embed_dim', 0)
+        if embed_dim < 32 or embed_dim > 4096:
+            result["error"] = f"Invalid embed_dim: {embed_dim}. Expected range: 32-4096"
+            return result
+
+        # 8. model_state_dictの検証
+        model_state_dict = checkpoint['model_state_dict']
+        if not isinstance(model_state_dict, dict):
+            result["error"] = f"Invalid model_state_dict format. Expected dict, got {type(model_state_dict).__name__}"
+            return result
+
+        result["info"]["num_model_parameters"] = len(model_state_dict)
+
+        if len(model_state_dict) == 0:
+            result["error"] = "model_state_dict is empty"
+            return result
+
+        # 9. その他の情報を追加
+        if 'epoch' in checkpoint:
+            result["info"]["epoch"] = checkpoint['epoch']
+        if 'optimizer_state_dict' in checkpoint:
+            result["info"]["has_optimizer_state"] = True
+        if 'loss' in checkpoint:
+            result["info"]["loss"] = checkpoint['loss']
+
+        # すべての検証をパス
+        result["valid"] = True
+        print(f"✅ Validation passed for {file_path}")
+        print(f"   File size: {result['info']['file_size_mb']} MB")
+        print(f"   Vocab size: {result['info']['config']['vocab_size']}")
+        print(f"   Embed dim: {result['info']['config']['embed_dim']}")
+        print(f"   Model parameters: {result['info']['num_model_parameters']}")
+
+        return result
+
+    except Exception as e:
+        result["error"] = f"Unexpected error during validation: {str(e)}"
+        import traceback
+        traceback.print_exc()
+        return result
+
+
+# ========================================
 # Lazy Model Loading（初回リクエスト時のみ）
 # ========================================
 def initialize_model():
@@ -69,71 +208,82 @@ def initialize_model():
         # ========================================
         # 方法1: 事前学習済みモデルをロード（推奨）
         # ========================================
-        # ファイルが存在し、サイズが1KB以上の場合のみロード
-        if os.path.exists(PRETRAINED_MODEL_PATH) and os.path.getsize(PRETRAINED_MODEL_PATH) > 1024:
+        if os.path.exists(PRETRAINED_MODEL_PATH):
             print(f"📦 事前学習済みモデルをロード: {PRETRAINED_MODEL_PATH}")
-            
-            checkpoint = torch.load(PRETRAINED_MODEL_PATH, map_location=DEVICE)
-            config_dict = checkpoint['config']
-            
-            # Configを復元
-            config = NeuroQuantumConfig(
-                vocab_size=config_dict['vocab_size'],
-                embed_dim=config_dict['embed_dim'],
-                hidden_dim=config_dict['hidden_dim'],
-                num_heads=config_dict['num_heads'],
-                num_layers=config_dict['num_layers'],
-                max_seq_len=config_dict['max_seq_len'],
-                dropout=config_dict['dropout'],
-                lambda_entangle=config_dict['lambda_entangle'],
-            )
-            
-            # トークナイザーをロード
-            tokenizer = NeuroQuantumTokenizer(
-                vocab_size=config_dict['vocab_size'],
-                model_file="neuroq_tokenizer.model"
-            )
 
-            # vocab_size の整合性確認
-            tokenizer_vocab_size = tokenizer.actual_vocab_size or tokenizer.vocab_size
-            config_vocab_size = config_dict['vocab_size']
-            print(f"🔍 Vocab size validation:")
-            print(f"   Config vocab_size: {config_vocab_size}")
-            print(f"   Tokenizer actual_vocab_size: {tokenizer_vocab_size}")
+            # ファイルの検証
+            validation_result = validate_pt_file(PRETRAINED_MODEL_PATH)
 
-            if config_vocab_size != tokenizer_vocab_size:
-                print(f"❌ CRITICAL: vocab_size mismatch detected!")
-                print(f"   Model was trained with vocab_size={config_vocab_size}")
-                print(f"   But tokenizer has vocab_size={tokenizer_vocab_size}")
-                print(f"   This will cause generation errors. Please retrain the model.")
-                # Note: We continue loading but generation may be broken
+            if not validation_result["valid"]:
+                print(f"❌ モデルファイルの検証に失敗: {validation_result['error']}")
+                print(f"   簡易学習モードにフォールバック...")
+                # 検証失敗時は簡易学習モードへ（以下のコードにフォールスルー）
+            else:
+                # 検証成功 - モデルをロード
+                print(f"✅ ファイル検証成功")
 
-            # モデルを構築してウェイトをロード
-            nn_model = NeuroQuantum(config).to(DEVICE)
-            nn_model.load_state_dict(checkpoint['model_state_dict'])
-            nn_model.eval()
-            
-            # NeuroQuantumAI のラッパーを作成
-            model = NeuroQuantumAI(
-                embed_dim=config_dict['embed_dim'],
-                hidden_dim=config_dict['hidden_dim'],
-                num_heads=config_dict['num_heads'],
-                num_layers=config_dict['num_layers'],
-                max_seq_len=config_dict['max_seq_len'],
-                dropout=config_dict['dropout'],
-                lambda_entangle=config_dict['lambda_entangle'],
-            )
-            model.model = nn_model
-            model.config = config
-            model.tokenizer = tokenizer
-            
-            print(f"✅ 事前学習済みモデルロード完了!")
-            print(f"   vocab_size: {config_dict['vocab_size']}")
-            print(f"   embed_dim: {config_dict['embed_dim']}")
-            print(f"   パラメータ数: {nn_model.num_params:,}")
-            
-            is_initialized = True
-            return True
+                # 再度読み込み（検証時はCPUで読み込んだため）
+                checkpoint = torch.load(PRETRAINED_MODEL_PATH, map_location=DEVICE)
+                config_dict = checkpoint['config']
+
+                # Configを復元
+                config = NeuroQuantumConfig(
+                    vocab_size=config_dict['vocab_size'],
+                    embed_dim=config_dict['embed_dim'],
+                    hidden_dim=config_dict['hidden_dim'],
+                    num_heads=config_dict['num_heads'],
+                    num_layers=config_dict['num_layers'],
+                    max_seq_len=config_dict['max_seq_len'],
+                    dropout=config_dict['dropout'],
+                    lambda_entangle=config_dict['lambda_entangle'],
+                )
+
+                # トークナイザーをロード
+                tokenizer = NeuroQuantumTokenizer(
+                    vocab_size=config_dict['vocab_size'],
+                    model_file="neuroq_tokenizer.model"
+                )
+
+                # vocab_size の整合性確認
+                tokenizer_vocab_size = tokenizer.actual_vocab_size or tokenizer.vocab_size
+                config_vocab_size = config_dict['vocab_size']
+                print(f"🔍 Vocab size validation:")
+                print(f"   Config vocab_size: {config_vocab_size}")
+                print(f"   Tokenizer actual_vocab_size: {tokenizer_vocab_size}")
+
+                if config_vocab_size != tokenizer_vocab_size:
+                    print(f"❌ CRITICAL: vocab_size mismatch detected!")
+                    print(f"   Model was trained with vocab_size={config_vocab_size}")
+                    print(f"   But tokenizer has vocab_size={tokenizer_vocab_size}")
+                    print(f"   This will cause generation errors. Please retrain the model.")
+                    # Note: We continue loading but generation may be broken
+
+                # モデルを構築してウェイトをロード
+                nn_model = NeuroQuantum(config).to(DEVICE)
+                nn_model.load_state_dict(checkpoint['model_state_dict'])
+                nn_model.eval()
+
+                # NeuroQuantumAI のラッパーを作成
+                model = NeuroQuantumAI(
+                    embed_dim=config_dict['embed_dim'],
+                    hidden_dim=config_dict['hidden_dim'],
+                    num_heads=config_dict['num_heads'],
+                    num_layers=config_dict['num_layers'],
+                    max_seq_len=config_dict['max_seq_len'],
+                    dropout=config_dict['dropout'],
+                    lambda_entangle=config_dict['lambda_entangle'],
+                )
+                model.model = nn_model
+                model.config = config
+                model.tokenizer = tokenizer
+
+                print(f"✅ 事前学習済みモデルロード完了!")
+                print(f"   vocab_size: {config_dict['vocab_size']}")
+                print(f"   embed_dim: {config_dict['embed_dim']}")
+                print(f"   パラメータ数: {nn_model.num_params:,}")
+
+                is_initialized = True
+                return True
 
         # ========================================
         # 方法2: 簡易学習（事前学習済みモデルがない場合）
