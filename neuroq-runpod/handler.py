@@ -93,7 +93,21 @@ def initialize_model():
                 vocab_size=config_dict['vocab_size'],
                 model_file="neuroq_tokenizer.model"
             )
-            
+
+            # vocab_size の整合性確認
+            tokenizer_vocab_size = tokenizer.actual_vocab_size or tokenizer.vocab_size
+            config_vocab_size = config_dict['vocab_size']
+            print(f"🔍 Vocab size validation:")
+            print(f"   Config vocab_size: {config_vocab_size}")
+            print(f"   Tokenizer actual_vocab_size: {tokenizer_vocab_size}")
+
+            if config_vocab_size != tokenizer_vocab_size:
+                print(f"❌ CRITICAL: vocab_size mismatch detected!")
+                print(f"   Model was trained with vocab_size={config_vocab_size}")
+                print(f"   But tokenizer has vocab_size={tokenizer_vocab_size}")
+                print(f"   This will cause generation errors. Please retrain the model.")
+                # Note: We continue loading but generation may be broken
+
             # モデルを構築してウェイトをロード
             nn_model = NeuroQuantum(config).to(DEVICE)
             nn_model.load_state_dict(checkpoint['model_state_dict'])
