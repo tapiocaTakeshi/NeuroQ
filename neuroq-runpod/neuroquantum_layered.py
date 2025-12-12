@@ -1118,15 +1118,36 @@ class NeuroQuantumAI:
         scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=epochs)
         criterion = nn.CrossEntropyLoss()
 
-        print("\n🚀 学習ループ...")
-        self.model.train()
+        print("\n🚀 学習ループ...", flush=True)
 
         import random
+        import sys
+
+        try:
+            self.model.train()
+            print(f"   モデルを学習モードに設定しました", flush=True)
+            sys.stdout.flush()
+        except Exception as e:
+            print(f"   ❌ モデル設定エラー: {e}", flush=True)
+            import traceback
+            traceback.print_exc()
+            raise
+
         for epoch in range(epochs):
             total_loss = 0
             # Use Python's random.shuffle instead of numpy for better compatibility
-            random.shuffle(sequences)
-            print(f"   Epoch {epoch+1}/{epochs} - シャッフル完了, バッチ処理開始...", flush=True)
+            print(f"   Epoch {epoch+1}/{epochs} - シャッフル開始...", flush=True)
+            sys.stdout.flush()
+
+            try:
+                # Shuffle sequences - use in-place shuffle for memory efficiency
+                random.shuffle(sequences)
+                print(f"   Epoch {epoch+1}/{epochs} - シャッフル完了, バッチ処理開始...", flush=True)
+                sys.stdout.flush()
+            except Exception as e:
+                print(f"   ⚠️ シャッフルエラー: {e}", flush=True)
+                print(f"   シャッフルをスキップして学習を続行します...", flush=True)
+                sys.stdout.flush()
 
             num_batches = len(sequences) // batch_size
             for batch_idx, i in enumerate(range(0, len(sequences), batch_size)):
