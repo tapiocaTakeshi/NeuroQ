@@ -1073,7 +1073,10 @@ class NeuroQuantumAI:
         print("\n📊 データ準備...")
         all_tokens = []
         for text in texts:
-            tokens = self.tokenizer.encode(text)
+            # IMPORTANT: Use add_special=False to match generation behavior
+            # Generation uses add_special=True for the prompt, but the model
+            # should learn to predict tokens without BOS/EOS in the middle of sequences
+            tokens = self.tokenizer.encode(text, add_special=False)
             all_tokens.extend(tokens)
         
         print(f"   総トークン数: {len(all_tokens):,}")
@@ -1362,13 +1365,35 @@ class NeuroQuantumAI:
             raise ValueError("モデルが学習されていません")
         
         self.model.eval()
-        
+
+        # デバッグ情報: vocab_size の整合性確認
+        model_vocab_size = self.config.vocab_size
+        tokenizer_vocab_size = self.tokenizer.actual_vocab_size or self.tokenizer.vocab_size
+        embedding_vocab_size = self.model.text_embedding.num_embeddings
+        print(f"🔍 Vocab size check:")
+        print(f"   Config vocab_size: {model_vocab_size}")
+        print(f"   Tokenizer vocab_size: {tokenizer_vocab_size}")
+        print(f"   Embedding vocab_size: {embedding_vocab_size}")
+
+        if model_vocab_size != tokenizer_vocab_size:
+            print(f"⚠️ WARNING: vocab_size mismatch! config={model_vocab_size}, tokenizer={tokenizer_vocab_size}")
+        if model_vocab_size != embedding_vocab_size:
+            print(f"⚠️ WARNING: vocab_size mismatch! config={model_vocab_size}, embedding={embedding_vocab_size}")
+
         # 対話形式のプロンプトを作成
         dialogue_prompt = f"<USER>{prompt}<ASSISTANT>"
-        
+
         # プロンプトエンコード
-        tokens = self.tokenizer.encode(dialogue_prompt, add_special=True)[:-1]
-        
+        # IMPORTANT: Use add_special=False to match training data format
+        # Training data does not include BOS/EOS tokens
+        tokens = self.tokenizer.encode(dialogue_prompt, add_special=False)
+
+        # デバッグ情報: トークンID範囲の確認
+        if tokens:
+            print(f"🔍 Token ID range: min={min(tokens)}, max={max(tokens)}, count={len(tokens)}")
+            if max(tokens) >= model_vocab_size:
+                print(f"❌ ERROR: Token ID {max(tokens)} exceeds vocab_size {model_vocab_size}!")
+
         tokens = torch.tensor(tokens, dtype=torch.long).unsqueeze(0).to(self.device)
         generated = tokens[0].tolist()
         
@@ -1418,18 +1443,26 @@ class NeuroQuantumAI:
                 # サンプリング
                 probs = F.softmax(next_logits, dim=-1)
                 next_token = torch.multinomial(probs, num_samples=1)
-                
+
+                # トークンID範囲チェック
+                next_token_id = next_token.item()
+                if next_token_id >= model_vocab_size:
+                    print(f"⚠️ Generated token ID {next_token_id} >= vocab_size {model_vocab_size}! Clamping to {model_vocab_size - 1}")
+                    next_token_id = model_vocab_size - 1
+                    next_token = torch.tensor([next_token_id], device=next_token.device)
+
                 # EOS検出
-                if next_token.item() == self.tokenizer.eos_id:
+                if next_token_id == self.tokenizer.eos_id:
                     break
                 
                 # <USER>トークンが出たら終了（次の質問に入らないように）
-                generated.append(next_token.item())
+                generated.append(next_token_id)
                 decoded_so_far = self.tokenizer.decode(generated)
                 if "<USER>" in decoded_so_far.split("<ASSISTANT>")[-1]:
                     break
-                
-                tokens = torch.cat([tokens, next_token.unsqueeze(0)], dim=1)
+
+                # 次のトークンをシーケンスに追加
+                tokens = torch.cat([tokens, torch.tensor([[next_token_id]], device=tokens.device)], dim=1)
         
         # 応答部分のみを抽出
         full_text = self.tokenizer.decode(generated)
