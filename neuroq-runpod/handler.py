@@ -281,7 +281,7 @@ def handler(job):
             # python -u で unbuffered output
             cmd = [
                 sys.executable, "-u",
-                "pretrain_openai.py"
+                "pretrain_openai_quick.py"
             ]
 
             # ログファイルを開いてsubprocessを起動
