@@ -76,8 +76,10 @@ RUN if [ ! -f "/app/neuroq_pretrained.pt" ]; then \
 
 # Copy the entire git repository to handle LFS files
 COPY --chown=root:root .git /tmp/build-repo/.git
-COPY --chown=root:root .gitattributes /tmp/build-repo/.gitattributes
 COPY --chown=root:root neuroq_pretrained.pt* /tmp/build-repo/
+
+# Create .gitattributes for Git LFS
+RUN echo '*.pt filter=lfs diff=lfs merge=lfs -text' > /tmp/build-repo/.gitattributes
 
 # If model file doesn't exist yet, try to pull it from Git LFS
 RUN if [ ! -f "/app/neuroq_pretrained.pt" ]; then \
