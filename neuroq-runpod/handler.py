@@ -242,8 +242,9 @@ def initialize_model():
                     print(f"❌ CRITICAL: vocab_size mismatch detected!")
                     print(f"   Model was trained with vocab_size={config_vocab_size}")
                     print(f"   But tokenizer has vocab_size={tokenizer_vocab_size}")
-                    print(f"   This will cause generation errors. Please retrain the model.")
-                    # Note: We continue loading but generation may be broken
+                    print(f"   ⚠️ WARNING: This may cause generation errors!")
+                    print(f"   Recommendation: Retrain the model with correct vocab_size.")
+                    # Note: We continue with a warning, as the model might still be usable
 
                 # Configオブジェクトを作成
                 config = NeuroQuantumConfig(
@@ -338,8 +339,9 @@ def initialize_model():
                     print(f"❌ CRITICAL: vocab_size mismatch detected!")
                     print(f"   Model was trained with vocab_size={config_vocab_size}")
                     print(f"   But tokenizer has vocab_size={tokenizer_vocab_size}")
-                    print(f"   This will cause generation errors. Please retrain the model.")
-                    # Note: We continue loading but generation may be broken
+                    print(f"   ⚠️ WARNING: This may cause generation errors!")
+                    print(f"   Recommendation: Retrain the model with correct vocab_size.")
+                    # Note: We continue with a warning, as the model might still be usable
 
                 # モデルを構築してウェイトをロード
                 nn_model = NeuroQuantum(config).to(DEVICE)
@@ -417,22 +419,48 @@ def initialize_model():
 # ========================================
 # テキスト生成
 # ========================================
-def generate_text(prompt: str, max_length: int = 100, 
-                  temperature: float = 0.7) -> str:
-    """テキスト生成"""
+def generate_text(prompt: str, max_length: int = 100,
+                  temp_min: float = None, temp_max: float = None,
+                  temperature: float = None) -> str:
+    """
+    テキスト生成
+
+    Args:
+        prompt: 入力プロンプト
+        max_length: 最大生成長
+        temp_min: 最低温度（指定された場合はtemp_min/temp_maxを使用）
+        temp_max: 最高温度
+        temperature: 互換性のための単一温度（指定された場合は自動的にtemp_min/temp_maxに変換）
+    """
     global model
-    
+
     if model is None:
         return "Error: Model not initialized"
-    
+
     try:
+        # temperatureが指定された場合、temp_min/temp_maxに変換
+        if temperature is not None and temp_min is None:
+            temp_min = temperature * 0.8
+            temp_max = temperature * 1.2
+
+        # デフォルト値（日本語生成に最適化）
+        if temp_min is None:
+            temp_min = 0.5  # より保守的な温度
+        if temp_max is None:
+            temp_max = 0.8
+
         result = model.generate(
             prompt=prompt,
             max_length=max_length,
-            temperature=temperature
+            temp_min=temp_min,
+            temp_max=temp_max,
+            repetition_penalty=2.0,  # 強力な繰り返しペナルティ
+            no_repeat_ngram_size=3,   # 3-gramの繰り返し防止
         )
         return result
     except Exception as e:
+        import traceback
+        traceback.print_exc()
         return f"Error: {str(e)}"
 
 
@@ -487,13 +515,19 @@ def handler(job):
         
         prompt = job_input.get("prompt", "こんにちは")
         max_length = job_input.get("max_length", 100)
-        temperature = job_input.get("temperature", 0.7)
-        
+
+        # 温度パラメータ（temp_min/temp_max優先、互換性のためtemperatureもサポート）
+        temp_min = job_input.get("temp_min")
+        temp_max = job_input.get("temp_max")
+        temperature = job_input.get("temperature", 0.6)  # 日本語生成向けに0.7→0.6に調整
+
         print(f"📝 Generate: prompt='{prompt[:30]}...'")
-        
+
         result = generate_text(
             prompt=prompt,
             max_length=max_length,
+            temp_min=temp_min,
+            temp_max=temp_max,
             temperature=temperature
         )
         

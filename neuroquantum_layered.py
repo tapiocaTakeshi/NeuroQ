@@ -1480,15 +1480,30 @@ class NeuroQuantumAI:
                 next_logits = self._quantum_circuit_influence(next_logits, step)
 
                 # 強化された繰り返しペナルティ（温度調整の前に適用）
-                # 最近のトークンに対する強力なペナルティ
+                # 最近のトークンに対する強力なペナルティ（recency-weighted）
                 if len(generated) > 0:
                     # 最近100トークンに重複ペナルティ（50 → 100に拡大）
-                    recent_tokens = generated[-100:]
-                    token_counts = Counter(recent_tokens)
+                    window_size = min(100, len(generated))
+                    recent_tokens = generated[-window_size:]
 
-                    for token_id, count in token_counts.items():
-                        # 頻出度に応じてペナルティを増加
-                        penalty = repetition_penalty ** (1 + count * 0.2)  # 0.1 → 0.2 により強く
+                    # トークンごとの出現位置を記録（recency tracking）
+                    token_positions = {}
+                    for pos, token_id in enumerate(recent_tokens):
+                        if token_id not in token_positions:
+                            token_positions[token_id] = []
+                        token_positions[token_id].append(pos)
+
+                    for token_id, positions in token_positions.items():
+                        count = len(positions)
+                        # 最も新しい出現位置（0が最古、window_size-1が最新）
+                        most_recent_pos = max(positions)
+
+                        # Recency weight: 最近のトークンほど強くペナルティ
+                        # 0.5（最古） 〜 1.0（最新）
+                        recency_weight = 0.5 + 0.5 * (most_recent_pos / max(window_size - 1, 1))
+
+                        # 頻出度とrecencyを組み合わせたペナルティ
+                        penalty = repetition_penalty ** (1 + count * 0.3 * recency_weight)
                         next_logits[token_id] /= penalty
 
                 # 動的温度: θが動けるように範囲内で変化させる
@@ -1501,11 +1516,24 @@ class NeuroQuantumAI:
                 
                 # N-gram重複防止
                 if no_repeat_ngram_size > 0 and len(generated) >= no_repeat_ngram_size - 1:
-                    last_ngram = tuple(generated[-(no_repeat_ngram_size-1):])
-                    # このN-gramが既に出現した場合、次のトークンに高いペナルティ
-                    if last_ngram in ngram_history[-20:]:  # 最近20のN-gramをチェック
-                        # 最近出現した次のトークンを特定してペナルティ
-                        pass  # 実装は簡略化（必要に応じて拡張可能）
+                    # 現在のN-gram prefix（次のトークンを除く）
+                    current_ngram_prefix = tuple(generated[-(no_repeat_ngram_size-1):])
+
+                    # 過去に同じN-gram prefixが出現した位置を探す
+                    banned_tokens = set()
+                    for i in range(len(generated) - no_repeat_ngram_size + 1):
+                        # i番目から始まるN-gram prefix
+                        prev_ngram_prefix = tuple(generated[i:i + no_repeat_ngram_size - 1])
+
+                        # 現在のprefixと一致する場合、次のトークンをbanリストに追加
+                        if prev_ngram_prefix == current_ngram_prefix:
+                            next_token_id = generated[i + no_repeat_ngram_size - 1]
+                            banned_tokens.add(next_token_id)
+
+                    # banされたトークンに強力なペナルティを適用
+                    if banned_tokens:
+                        for token_id in banned_tokens:
+                            next_logits[token_id] = float('-inf')
                 
                 # Top-K（より厳格に）
                 if top_k > 0:
