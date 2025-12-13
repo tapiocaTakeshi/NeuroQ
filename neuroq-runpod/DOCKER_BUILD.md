@@ -1,8 +1,22 @@
 # Docker Build Instructions for NeuroQ RunPod
 
+## Important: Use the Build Script
+
+**Recommended approach:** Use the provided build script which handles all checks automatically:
+
+```bash
+./neuroq-runpod/build.sh
+```
+
+The build script will:
+- Check if Git LFS is installed
+- Verify the model file is pulled (not a pointer)
+- Pull LFS files if needed
+- Build the Docker image with the correct context
+
 ## Git LFS Support
 
-The Dockerfile now supports two methods for handling Git LFS files (like `neuroq_pretrained.pt`):
+The Dockerfile supports two methods for handling Git LFS files (like `neuroq_pretrained.pt`):
 
 ### Method 1: Local Build (Default)
 
@@ -71,6 +85,20 @@ Or warns if it might be an LFS pointer:
 
 ## Troubleshooting
 
+### Error: "/.git": not found
+
+**Symptoms:**
+```
+ERROR: failed to compute cache key: "/.git": not found
+```
+
+**Cause:** Earlier versions tried to copy the `.git` directory during Docker build, which is incompatible with Docker BuildKit.
+
+**Solution:** This has been fixed in the latest version. The Dockerfile no longer copies `.git`. Instead:
+1. Use the `build.sh` script (recommended)
+2. Or ensure LFS files are pulled before manual build
+3. Or use the `GIT_REPO_URL` build arg to clone fresh
+
 ### Error: "neuroq_pretrained.pt is very small"
 
 This means you're copying an LFS pointer file instead of the actual model.
@@ -83,8 +111,8 @@ git lfs install
 # Pull LFS files
 git lfs pull
 
-# Rebuild
-docker build -t neuroq:latest .
+# Rebuild using the build script
+./neuroq-runpod/build.sh
 ```
 
 ### Error: "Failed to clone repository"
@@ -94,6 +122,17 @@ If using Method 2 and the clone fails:
 1. Check the repository URL is correct
 2. Ensure you have network access
 3. For private repos, you may need to use SSH keys or access tokens
+
+### Manual Build (Advanced)
+
+If you need to build manually without the build script:
+
+```bash
+# From repository root
+docker build -f neuroq-runpod/Dockerfile -t neuroq:latest .
+```
+
+**Important:** Make sure the model file is pulled from LFS first!
 
 ## CI/CD Usage
 

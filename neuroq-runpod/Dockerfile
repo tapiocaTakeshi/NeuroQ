@@ -68,37 +68,19 @@ RUN if [ -f "/tmp/neuroq-repo/neuroq_pretrained.pt" ]; then \
     fi
 
 # ローカルからコピー（git cloneしなかった場合のみ）
-# LFSポインタファイルでないことを事前にチェック
 # Only copy if file doesn't already exist from git clone
 RUN if [ ! -f "/app/neuroq_pretrained.pt" ]; then \
         echo "📋 Copying neuroq_pretrained.pt from local build context..."; \
     fi
 
-# Copy the entire git repository to handle LFS files
-COPY --chown=root:root .git /tmp/build-repo/.git
-COPY --chown=root:root neuroq_pretrained.pt* /tmp/build-repo/
+# Copy model file from build context (ensure it's already pulled from LFS)
+COPY --chown=root:root neuroq_pretrained.pt /tmp/neuroq_pretrained.pt
 
-# Create .gitattributes for Git LFS
-RUN echo '*.pt filter=lfs diff=lfs merge=lfs -text' > /tmp/build-repo/.gitattributes
-
-# If model file doesn't exist yet, try to pull it from Git LFS
+# Copy to app directory if not already present from git clone
 RUN if [ ! -f "/app/neuroq_pretrained.pt" ]; then \
-        cd /tmp/build-repo && \
-        FILE_SIZE=$(stat -c%s neuroq_pretrained.pt) && \
-        if [ "$FILE_SIZE" -lt 10000 ]; then \
-            echo "🔍 Detected Git LFS pointer file (${FILE_SIZE} bytes)" && \
-            echo "📥 Attempting to pull actual model file from Git LFS..." && \
-            if git lfs pull --include="neuroq_pretrained.pt"; then \
-                NEW_SIZE=$(stat -c%s neuroq_pretrained.pt) && \
-                echo "✅ Successfully pulled model file: ${NEW_SIZE} bytes"; \
-            else \
-                echo "❌ Failed to pull from Git LFS." && \
-                echo "   Please try building with: docker build --build-arg GIT_REPO_URL=<repo-url> ." && \
-                exit 1; \
-            fi; \
-        fi && \
-        cp neuroq_pretrained.pt /app/neuroq_pretrained.pt; \
-    fi
+        cp /tmp/neuroq_pretrained.pt /app/neuroq_pretrained.pt; \
+    fi && \
+    rm -f /tmp/neuroq_pretrained.pt
 
 # ファイルサイズを確認（LFSポインタファイルでないことを確認）
 RUN echo "📊 Checking neuroq_pretrained.pt file size..." && \
@@ -120,8 +102,7 @@ RUN echo "📊 Checking neuroq_pretrained.pt file size..." && \
     fi
 
 # クローンしたリポジトリをクリーンアップ（不要なファイルを削除してイメージサイズ削減）
-RUN if [ -d "/tmp/neuroq-repo" ]; then rm -rf /tmp/neuroq-repo; fi && \
-    if [ -d "/tmp/build-repo" ]; then rm -rf /tmp/build-repo; fi
+RUN if [ -d "/tmp/neuroq-repo" ]; then rm -rf /tmp/neuroq-repo; fi
 
 # 環境変数（デフォルト設定）
 ENV NEUROQ_MODE="layered"
