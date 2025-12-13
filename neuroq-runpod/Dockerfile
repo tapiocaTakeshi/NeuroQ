@@ -70,13 +70,26 @@ RUN if [ -f "/tmp/neuroq-repo/neuroq_pretrained.pt" ]; then \
 # ローカルからコピー（git cloneしなかった場合のみ）
 # LFSポインタファイルでないことを事前にチェック
 # Only copy if file doesn't already exist from git clone
-RUN if [ ! -f "/app/neuroq_pretrained.pt" ]; then \
-        echo "📋 Copying neuroq_pretrained.pt from local build context..."; \
-    fi
-
 COPY --chown=root:root neuroq_pretrained.pt* /tmp/
+
 RUN if [ ! -f "/app/neuroq_pretrained.pt" ]; then \
-        cp /tmp/neuroq_pretrained.pt /app/neuroq_pretrained.pt; \
+        echo "📋 Checking local neuroq_pretrained.pt before copying..."; \
+        LOCAL_FILE_SIZE=$(stat -c%s /tmp/neuroq_pretrained.pt 2>/dev/null || echo "0"); \
+        if [ "$LOCAL_FILE_SIZE" -lt 10000 ]; then \
+            echo "❌ ERROR: Local neuroq_pretrained.pt is a Git LFS pointer file ($LOCAL_FILE_SIZE bytes)"; \
+            echo ""; \
+            echo "   To build this Docker image, choose one of:"; \
+            echo "   1. Pull LFS files locally first: git lfs install && git lfs pull"; \
+            echo "   2. Build with repo URL: docker build --build-arg GIT_REPO_URL=https://github.com/your-repo ."; \
+            echo "   3. Download the actual model file (58MB) and replace the pointer file"; \
+            echo ""; \
+            exit 1; \
+        else \
+            echo "✅ Local file size OK ($LOCAL_FILE_SIZE bytes), copying to /app/"; \
+            cp /tmp/neuroq_pretrained.pt /app/neuroq_pretrained.pt; \
+        fi; \
+    else \
+        echo "✅ Using neuroq_pretrained.pt from git clone (already exists)"; \
     fi
 
 # ファイルサイズを確認（LFSポインタファイルでないことを確認）
