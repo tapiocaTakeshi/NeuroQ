@@ -20,10 +20,10 @@ import threading
 import time
 from pathlib import Path
 
-# 親ディレクトリをパスに追加（neuroq_pretrained.pyをインポートするため）
-parent_dir = str(Path(__file__).parent.parent.parent)
-if parent_dir not in sys.path:
-    sys.path.insert(0, parent_dir)
+# 現在のディレクトリをパスに追加（neuroq_pretrained.pyをインポートするため）
+current_dir = str(Path(__file__).parent)
+if current_dir not in sys.path:
+    sys.path.insert(0, current_dir)
 
 print("=" * 60)
 print("⚛️ NeuroQ RunPod Serverless - Starting...")
