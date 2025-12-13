@@ -70,6 +70,7 @@ RUN if [ -f "/tmp/neuroq-repo/neuroq_pretrained.pt" ]; then \
     fi
 
 # ローカルからコピー（git cloneしない場合のデフォルト）
+# LFSポインタファイルでないことを事前にチェック
 COPY neuroq_pretrained.pt /app/
 
 # ファイルサイズを確認（LFSポインタファイルでないことを確認）
@@ -77,9 +78,15 @@ RUN echo "📊 Checking neuroq_pretrained.pt file size..." && \
     ls -lh /app/neuroq_pretrained.pt && \
     FILE_SIZE=$(stat -c%s /app/neuroq_pretrained.pt) && \
     if [ "$FILE_SIZE" -lt 10000 ]; then \
-        echo "❌ WARNING: neuroq_pretrained.pt is very small ($FILE_SIZE bytes)"; \
-        echo "   This might be a Git LFS pointer file, not the actual model!"; \
-        echo "   Run 'git lfs pull' locally before building, or use --build-arg GIT_REPO_URL=<url>"; \
+        echo "❌ ERROR: neuroq_pretrained.pt is too small ($FILE_SIZE bytes)"; \
+        echo "   This is a Git LFS pointer file, not the actual model!"; \
+        echo ""; \
+        echo "   To fix this, choose one of the following options:"; \
+        echo "   1. Run 'git lfs pull' locally before building"; \
+        echo "   2. Use: docker build --build-arg GIT_REPO_URL=<your-repo-url> ."; \
+        echo "   3. Download the model file manually and place it in the directory"; \
+        echo ""; \
+        exit 1; \
     else \
         echo "✅ neuroq_pretrained.pt size OK: $FILE_SIZE bytes"; \
     fi
