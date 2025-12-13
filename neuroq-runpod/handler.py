@@ -59,6 +59,30 @@ PRETRAINED_MODEL_PATH = "neuroq_pretrained.pt"
 # ========================================
 # PyTorch .ptファイルの検証
 # ========================================
+def is_lfs_pointer_file(file_path: str) -> bool:
+    """
+    Check if a file is a Git LFS pointer file.
+
+    Args:
+        file_path: Path to the file to check
+
+    Returns:
+        bool: True if the file is an LFS pointer, False otherwise
+    """
+    try:
+        # LFS pointer files are typically very small (< 200 bytes)
+        file_size = os.path.getsize(file_path)
+        if file_size > 1024:
+            return False
+
+        # Read the first few bytes to check for LFS marker
+        with open(file_path, 'rb') as f:
+            header = f.read(50).decode('utf-8', errors='ignore')
+            return header.startswith('version https://git-lfs.github.com/spec/')
+    except:
+        return False
+
+
 def validate_pt_file(file_path: str) -> dict:
     """
     PyTorchの.ptファイルを検証する
@@ -90,7 +114,15 @@ def validate_pt_file(file_path: str) -> dict:
         result["info"]["file_size_mb"] = round(file_size / (1024 * 1024), 2)
 
         if file_size < 1024:  # 1KB未満
-            result["error"] = f"File too small ({file_size} bytes). Possibly corrupted or empty."
+            # Check if it's a Git LFS pointer file
+            if is_lfs_pointer_file(file_path):
+                result["error"] = (
+                    f"Git LFS pointer file detected ({file_size} bytes). "
+                    f"Run 'python download_model.py' or 'git lfs pull' to download the actual model file."
+                )
+                result["info"]["is_lfs_pointer"] = True
+            else:
+                result["error"] = f"File too small ({file_size} bytes). Possibly corrupted or empty."
             return result
 
         if file_size > 5 * 1024 * 1024 * 1024:  # 5GB以上
