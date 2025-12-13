@@ -1,5 +1,6 @@
 # Git
-.git
+# Note: .git is needed for Git LFS to pull model files during build
+# .git
 .gitignore
 
 # Python

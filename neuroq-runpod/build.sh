@@ -85,8 +85,9 @@ echo ""
 echo "🚀 Starting Docker build..."
 echo ""
 
-cd "$SCRIPT_DIR"
-docker build -t neuroq:latest .
+# Build from parent directory to include .git for LFS
+cd "$SCRIPT_DIR/.."
+docker build -f neuroq-runpod/Dockerfile -t neuroq:latest .
 
 echo ""
 echo "✅ Docker image built successfully!"
