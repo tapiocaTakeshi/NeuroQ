@@ -47,10 +47,10 @@ cd neuroq-runpod
 docker build -t neuroq:latest .
 ```
 
-方法2: リポジトリURLを指定（Git LFSファイルを自動取得）
+方法2: リポジトリURLを指定（Git LFSファイルを自動取得）**推奨**
 ```bash
 docker build \
-  --build-arg GIT_REPO_URL=https://github.com/yourusername/NeuroQ.git \
+  --build-arg GIT_REPO_URL=https://github.com/tapiocaTakeshi/NeuroQ.git \
   --build-arg GIT_BRANCH=main \
   -t neuroq:latest .
 ```
@@ -63,11 +63,28 @@ docker run --gpus all -p 8000:8000 neuroq:latest
 
 ## 🔧 トラブルシューティング
 
-### ❌ エラー: "File too small (133 bytes)"
+### ❌ エラー: "File too small (133 bytes)" または "This is a Git LFS pointer file"
 
 これは、Git LFSファイルが正しくダウンロードされていないことを示しています。
 
-**解決方法**:
+**推奨解決方法: リポジトリURLを使用したビルド（最も確実）**
+
+ローカルでのLFSプルが失敗する場合、または環境にGit LFSがインストールされていない場合、Dockerビルド時にリポジトリから直接LFSファイルを取得できます：
+
+```bash
+docker build \
+  --build-arg GIT_REPO_URL=https://github.com/tapiocaTakeshi/NeuroQ.git \
+  --build-arg GIT_BRANCH=main \
+  -t neuroq:latest .
+```
+
+この方法では：
+- Dockerビルド中にリポジトリをクローン
+- Docker内でGit LFSをインストール
+- `git lfs pull`を自動実行
+- 正しいモデルファイルを取得
+
+**代替方法: ローカルでLFSファイルをプル**
 
 1. Git LFSをインストールして初期化：
    ```bash
@@ -91,19 +108,6 @@ docker run --gpus all -p 8000:8000 neuroq:latest
    cd neuroq-runpod
    ./build.sh
    ```
-
-### 🔄 代替方法: リポジトリURLを使用したビルド
-
-ローカルでのLFSプルが失敗する場合、DockerビルドプロセスでGitリポジトリから直接クローン＆プルできます：
-
-```bash
-docker build \
-  --build-arg GIT_REPO_URL=https://github.com/yourusername/NeuroQ.git \
-  --build-arg GIT_BRANCH=main \
-  -t neuroq:latest .
-```
-
-この方法では、Dockerビルド中にリポジトリをクローンして`git lfs pull`を実行します。
 
 ## 📝 ファイル構成
 

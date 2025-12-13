@@ -65,13 +65,19 @@ RUN if [ -f "/tmp/neuroq-repo/neuroq_pretrained.pt" ]; then \
         echo "📦 Using LFS-pulled pretrained model from git clone" && \
         cp /tmp/neuroq-repo/neuroq_pretrained.pt /app/neuroq_pretrained.pt && \
         ls -lh /app/neuroq_pretrained.pt; \
-    else \
-        echo "⚠️ No git clone found, will use local COPY for neuroq_pretrained.pt"; \
     fi
 
-# ローカルからコピー（git cloneしない場合のデフォルト）
+# ローカルからコピー（git cloneしなかった場合のみ）
 # LFSポインタファイルでないことを事前にチェック
-COPY neuroq_pretrained.pt /app/
+# Only copy if file doesn't already exist from git clone
+RUN if [ ! -f "/app/neuroq_pretrained.pt" ]; then \
+        echo "📋 Copying neuroq_pretrained.pt from local build context..."; \
+    fi
+
+COPY --chown=root:root neuroq_pretrained.pt* /tmp/
+RUN if [ ! -f "/app/neuroq_pretrained.pt" ]; then \
+        cp /tmp/neuroq_pretrained.pt /app/neuroq_pretrained.pt; \
+    fi
 
 # ファイルサイズを確認（LFSポインタファイルでないことを確認）
 RUN echo "📊 Checking neuroq_pretrained.pt file size..." && \
