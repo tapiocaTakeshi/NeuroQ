@@ -1274,6 +1274,7 @@ class NeuroQuantumAI:
         top_k: int = 40,
         top_p: float = 0.9,
         repetition_penalty: float = 2.0,
+        no_repeat_ngram_size: int = 3,  # N-gram重複防止
         temperature: float = None,   # 後方互換性のため（指定された場合temp_min/temp_maxを自動計算）
     ) -> str:
         """
@@ -1421,7 +1422,28 @@ class NeuroQuantumAI:
 
                 # 温度調整
                 next_logits = next_logits / temperature
-                
+
+                # N-gram重複防止
+                if no_repeat_ngram_size > 0 and len(generated) >= no_repeat_ngram_size - 1:
+                    # 現在のN-gram prefix（次のトークンを除く）
+                    current_ngram_prefix = tuple(generated[-(no_repeat_ngram_size-1):])
+
+                    # 過去に同じN-gram prefixが出現した位置を探す
+                    banned_tokens = set()
+                    for i in range(len(generated) - no_repeat_ngram_size + 1):
+                        # i番目から始まるN-gram prefix
+                        prev_ngram_prefix = tuple(generated[i:i + no_repeat_ngram_size - 1])
+
+                        # 現在のprefixと一致する場合、次のトークンをbanリストに追加
+                        if prev_ngram_prefix == current_ngram_prefix:
+                            next_token_id = generated[i + no_repeat_ngram_size - 1]
+                            banned_tokens.add(next_token_id)
+
+                    # banされたトークンに強力なペナルティを適用
+                    if banned_tokens:
+                        for token_id in banned_tokens:
+                            next_logits[token_id] = float('-inf')
+
                 # Top-K
                 if top_k > 0:
                     top_k_vals, _ = torch.topk(next_logits, min(top_k, next_logits.size(-1)))
