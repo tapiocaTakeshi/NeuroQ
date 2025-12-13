@@ -44,12 +44,17 @@ cd neuroq-runpod
 
 方法1: ローカルのファイルを使用（`git lfs pull`実行済みの場合）
 ```bash
-docker build -t neuroq:latest .
+# リポジトリのルートディレクトリから実行
+cd ..
+docker build -f neuroq-runpod/Dockerfile -t neuroq:latest .
 ```
 
 方法2: リポジトリURLを指定（Git LFSファイルを自動取得）**推奨**
 ```bash
+# リポジトリのルートディレクトリから実行
+cd ..
 docker build \
+  -f neuroq-runpod/Dockerfile \
   --build-arg GIT_REPO_URL=https://github.com/tapiocaTakeshi/NeuroQ.git \
   --build-arg GIT_BRANCH=main \
   -t neuroq:latest .
@@ -72,7 +77,10 @@ docker run --gpus all -p 8000:8000 neuroq:latest
 ローカルでのLFSプルが失敗する場合、または環境にGit LFSがインストールされていない場合、Dockerビルド時にリポジトリから直接LFSファイルを取得できます：
 
 ```bash
+# リポジトリのルートディレクトリから実行
+cd ..
 docker build \
+  -f neuroq-runpod/Dockerfile \
   --build-arg GIT_REPO_URL=https://github.com/tapiocaTakeshi/NeuroQ.git \
   --build-arg GIT_BRANCH=main \
   -t neuroq:latest .
