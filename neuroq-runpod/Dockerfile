@@ -10,6 +10,13 @@ ENV PYTHONDONTWRITEBYTECODE=1
 
 WORKDIR /app
 
+# Git LFSをインストール
+RUN apt-get update && \
+    apt-get install -y git-lfs && \
+    git lfs install && \
+    apt-get clean && \
+    rm -rf /var/lib/apt/lists/*
+
 # 依存関係をインストール（最小限）
 COPY requirements.txt /app/
 RUN pip install --no-cache-dir -r requirements.txt && \
