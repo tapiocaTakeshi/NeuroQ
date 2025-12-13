@@ -53,6 +53,30 @@ def get_model_path():
     return str(current_dir / 'NeuroQ' / 'neuroq_pretrained.pt')
 
 
+def is_lfs_pointer_file(file_path):
+    """
+    Check if a file is a Git LFS pointer file.
+
+    Args:
+        file_path: Path to the file to check
+
+    Returns:
+        bool: True if the file is an LFS pointer, False otherwise
+    """
+    try:
+        # LFS pointer files are typically very small (< 200 bytes)
+        file_size = os.path.getsize(file_path)
+        if file_size > 1024:
+            return False
+
+        # Read the first few bytes to check for LFS marker
+        with open(file_path, 'rb') as f:
+            header = f.read(50).decode('utf-8', errors='ignore')
+            return header.startswith('version https://git-lfs.github.com/spec/')
+    except:
+        return False
+
+
 def validate_checkpoint(checkpoint):
     """
     チェックポイントの妥当性を検証
@@ -116,10 +140,32 @@ def load_pretrained_model(model_path=None, device='cpu', verbose=True):
         if verbose:
             print(f"📊 File size: {file_size / (1024 * 1024):.2f} MB")
 
+        # Check for Git LFS pointer file
         if file_size < 1024:  # 1KB未満
-            if verbose:
-                print(f"❌ File too small ({file_size} bytes). Possibly corrupted.")
-            return None, None, None
+            if is_lfs_pointer_file(model_path):
+                if verbose:
+                    print(f"❌ Git LFS pointer file detected ({file_size} bytes)")
+                    print(f"")
+                    print(f"   The model file has not been downloaded from Git LFS.")
+                    print(f"   Please run one of the following:")
+                    print(f"")
+                    print(f"   1. Use the helper script:")
+                    print(f"      $ python download_model.py")
+                    print(f"")
+                    print(f"   2. Pull from Git LFS manually:")
+                    print(f"      $ git lfs install")
+                    print(f"      $ git lfs pull")
+                    print(f"")
+                    print(f"   3. Use Docker with automatic LFS pull:")
+                    print(f"      $ docker build \\")
+                    print(f"          --build-arg GIT_REPO_URL=https://github.com/tapiocaTakeshi/NeuroQ.git \\")
+                    print(f"          -t neuroq:latest .")
+                    print(f"")
+                return None, None, None
+            else:
+                if verbose:
+                    print(f"❌ File too small ({file_size} bytes). Possibly corrupted.")
+                return None, None, None
 
         # チェックポイントをロード
         checkpoint = torch.load(model_path, map_location=device)
