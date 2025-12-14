@@ -27,8 +27,8 @@ RUN pip install --no-cache-dir -r requirements.txt && \
 # （事前学習済みモデルなどのLFSファイル用）
 RUN if [ -d "/tmp/neuroq-repo" ]; then rm -rf /tmp/neuroq-repo; fi
 
-# ARGでリポジトリURLを指定可能にする（デフォルトは空）
-ARG GIT_REPO_URL=""
+# ARGでリポジトリURLを指定可能にする（デフォルトはNeuroQリポジトリ）
+ARG GIT_REPO_URL="https://github.com/tapiocaTakeshi/NeuroQ.git"
 ARG GIT_BRANCH="main"
 
 # リポジトリが指定されている場合はクローン＆LFS pull
