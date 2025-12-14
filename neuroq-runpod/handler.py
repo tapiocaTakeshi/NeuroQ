@@ -40,9 +40,20 @@ pretrain_process = None
 pretrain_status = "idle"  # idle, running, completed, error
 pretrain_log_file = "training_openai.log"
 
+# 会話履歴管理
+conversation_sessions = {}  # session_id -> list of {role, content}
+
 # 設定
 VOCAB_SIZE = 8000
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
+
+# システムプロンプト（会話指示）
+SYSTEM_PROMPT = """あなたは親切で正確なアシスタントです。
+以下のルールに従ってください：
+1. ユーザーの質問に短く正確に答える
+2. わからないことは質問する
+3. 聞かれたことだけに答える（余計な情報を追加しない）
+4. 前の文脈を踏まえて返答する"""
 
 print(f"📊 Device: {DEVICE}")
 print(f"📊 CUDA Available: {torch.cuda.is_available()}")
@@ -449,13 +460,83 @@ def initialize_model():
 
 
 # ========================================
+# 会話履歴管理
+# ========================================
+def build_conversation_prompt(session_id: str, user_message: str, max_history: int = 4) -> str:
+    """
+    会話履歴を含むプロンプトを構築
+
+    Args:
+        session_id: セッションID
+        user_message: ユーザーメッセージ
+        max_history: 最大履歴ターン数（直近のターンのみ使用）
+
+    Returns:
+        会話フォーマットのプロンプト
+    """
+    global conversation_sessions
+
+    # セッションが存在しない場合は作成
+    if session_id not in conversation_sessions:
+        conversation_sessions[session_id] = []
+
+    # 履歴を取得（最新のmax_historyターンのみ）
+    history = conversation_sessions[session_id][-max_history:]
+
+    # プロンプトを構築（システムプロンプトは省略し、直接対話形式で）
+    # 学習データと同じフォーマット: <USER>...<ASSISTANT>...
+    conversation_text = ""
+
+    # 履歴を追加
+    for turn in history:
+        if turn["role"] == "user":
+            conversation_text += f"<USER>{turn['content']}"
+        elif turn["role"] == "assistant":
+            conversation_text += f"<ASSISTANT>{turn['content']}"
+
+    # 現在のユーザーメッセージを追加
+    conversation_text += f"<USER>{user_message}<ASSISTANT>"
+
+    return conversation_text
+
+
+def save_conversation_turn(session_id: str, user_message: str, assistant_response: str):
+    """
+    会話ターンを履歴に保存
+
+    Args:
+        session_id: セッションID
+        user_message: ユーザーメッセージ
+        assistant_response: アシスタントの応答
+    """
+    global conversation_sessions
+
+    if session_id not in conversation_sessions:
+        conversation_sessions[session_id] = []
+
+    # ユーザーメッセージとアシスタントの応答を保存
+    conversation_sessions[session_id].append({
+        "role": "user",
+        "content": user_message
+    })
+    conversation_sessions[session_id].append({
+        "role": "assistant",
+        "content": assistant_response
+    })
+
+    # 古い履歴を削除（最大10ターン = 20メッセージ）
+    if len(conversation_sessions[session_id]) > 20:
+        conversation_sessions[session_id] = conversation_sessions[session_id][-20:]
+
+
+# ========================================
 # テキスト生成
 # ========================================
 def generate_text(prompt: str, max_length: int = 100,
                   temp_min: float = None, temp_max: float = None,
-                  temperature: float = None) -> str:
+                  temperature: float = None, session_id: str = "default") -> str:
     """
-    テキスト生成
+    テキスト生成（会話対応版）
 
     Args:
         prompt: 入力プロンプト
@@ -463,6 +544,10 @@ def generate_text(prompt: str, max_length: int = 100,
         temp_min: 最低温度（指定された場合はtemp_min/temp_maxを使用）
         temp_max: 最高温度
         temperature: 互換性のための単一温度（指定された場合は自動的にtemp_min/temp_maxに変換）
+        session_id: 会話セッションID（会話履歴管理用）
+
+    Returns:
+        生成されたテキスト
     """
     global model
 
@@ -481,14 +566,22 @@ def generate_text(prompt: str, max_length: int = 100,
         if temp_max is None:
             temp_max = 0.8
 
+        # 会話履歴を含むプロンプトを構築
+        conversation_prompt = build_conversation_prompt(session_id, prompt)
+
+        # 生成実行
         result = model.generate(
-            prompt=prompt,
+            prompt=conversation_prompt,
             max_length=max_length,
             temp_min=temp_min,
             temp_max=temp_max,
             repetition_penalty=2.0,  # 強力な繰り返しペナルティ
             no_repeat_ngram_size=3,   # 3-gramの繰り返し防止
         )
+
+        # 会話履歴に保存
+        save_conversation_turn(session_id, prompt, result)
+
         return result
     except Exception as e:
         import traceback
@@ -544,29 +637,32 @@ def handler(job):
                     "status": "error",
                     "error": "Failed to initialize model"
                 }
-        
+
         prompt = job_input.get("prompt", "こんにちは")
         max_length = job_input.get("max_length", 100)
+        session_id = job_input.get("session_id", "default")  # 会話セッションID
 
         # 温度パラメータ（temp_min/temp_max優先、互換性のためtemperatureもサポート）
         temp_min = job_input.get("temp_min")
         temp_max = job_input.get("temp_max")
         temperature = job_input.get("temperature", 0.6)  # 日本語生成向けに0.7→0.6に調整
 
-        print(f"📝 Generate: prompt='{prompt[:30]}...'")
+        print(f"📝 Generate: session_id='{session_id}', prompt='{prompt[:30]}...'")
 
         result = generate_text(
             prompt=prompt,
             max_length=max_length,
             temp_min=temp_min,
             temp_max=temp_max,
-            temperature=temperature
+            temperature=temperature,
+            session_id=session_id
         )
-        
+
         return {
             "status": "success",
             "prompt": prompt,
-            "generated": result
+            "generated": result,
+            "session_id": session_id
         }
     
     # ========================================
@@ -703,12 +799,31 @@ def handler(job):
             }
     
     # ========================================
+    # CLEAR_SESSION（会話履歴クリア）
+    # ========================================
+    if action == "clear_session":
+        global conversation_sessions
+        session_id = job_input.get("session_id", "default")
+
+        if session_id in conversation_sessions:
+            del conversation_sessions[session_id]
+            return {
+                "status": "success",
+                "message": f"Session '{session_id}' cleared"
+            }
+        else:
+            return {
+                "status": "success",
+                "message": f"Session '{session_id}' not found (already empty)"
+            }
+
+    # ========================================
     # UNKNOWN ACTION
     # ========================================
     return {
         "status": "error",
         "error": f"Unknown action: {action}",
-        "available_actions": ["health", "status", "generate", "train", "pretrain_openai", "pretrain_status"]
+        "available_actions": ["health", "status", "generate", "train", "pretrain_openai", "pretrain_status", "clear_session"]
     }
 
 
