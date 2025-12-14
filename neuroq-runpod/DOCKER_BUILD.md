@@ -35,12 +35,12 @@ The Dockerfile will:
 2. Verify it's not an LFS pointer file (checks if size > 10KB)
 3. Warn if it appears to be a pointer file
 
-### Method 2: Clone from Git Repository
+### Method 2: Clone from Git Repository (RECOMMENDED when Git LFS not available locally)
 
 Build with the repository URL to automatically clone and pull LFS files during build:
 
 ```bash
-docker build \
+docker build -f neuroq-runpod/Dockerfile \
   --build-arg GIT_REPO_URL=https://github.com/tapiocaTakeshi/NeuroQ.git \
   --build-arg GIT_BRANCH=main \
   -t neuroq:latest .
@@ -99,11 +99,27 @@ ERROR: failed to compute cache key: "/.git": not found
 2. Or ensure LFS files are pulled before manual build
 3. Or use the `GIT_REPO_URL` build arg to clone fresh
 
-### Error: "neuroq_pretrained.pt is very small"
+### Error: "neuroq_pretrained.pt is a Git LFS pointer file"
 
-This means you're copying an LFS pointer file instead of the actual model.
+**Full error message:**
+```
+❌ ERROR: neuroq_pretrained.pt is a Git LFS pointer file (133 bytes)
+   The actual model file was not pulled from Git LFS.
+```
 
-**Solution:**
+This means you're trying to build with an LFS pointer file instead of the actual model.
+
+**Solution - Choose ONE of these methods:**
+
+**Method 1: Build with repository URL (RECOMMENDED if Git LFS not installed locally)**
+```bash
+docker build -f neuroq-runpod/Dockerfile \
+  --build-arg GIT_REPO_URL=https://github.com/tapiocaTakeshi/NeuroQ.git \
+  --build-arg GIT_BRANCH=main \
+  -t neuroq:latest .
+```
+
+**Method 2: Pull LFS files locally first**
 ```bash
 # Install git-lfs if not already installed
 git lfs install
@@ -114,6 +130,12 @@ git lfs pull
 # Rebuild using the build script
 ./neuroq-runpod/build.sh
 ```
+
+**Method 3: Use the build helper script**
+```bash
+./neuroq-runpod/build.sh
+```
+The script will automatically check for LFS files and guide you through the process.
 
 ### Error: "Failed to clone repository"
 
