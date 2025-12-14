@@ -31,11 +31,13 @@ fi
 
 # Check if git remote is using local proxy and fix if needed
 REMOTE_URL=$(git config --get remote.origin.url)
+ORIGINAL_REMOTE_URL=""
 if [[ "$REMOTE_URL" == *"127.0.0.1"* ]] || [[ "$REMOTE_URL" == *"local_proxy"* ]]; then
     echo "⚠️  Detected local proxy in git remote URL"
-    echo "   Switching to GitHub URL for LFS file access..."
+    echo "   Temporarily switching to GitHub URL for LFS file access..."
+    ORIGINAL_REMOTE_URL="$REMOTE_URL"
     git remote set-url origin https://github.com/tapiocaTakeshi/NeuroQ.git
-    echo "✅ Git remote updated to GitHub"
+    echo "✅ Git remote updated to GitHub for LFS operations"
 fi
 
 # neuroq_pretrained.ptのサイズをチェック
@@ -90,6 +92,14 @@ if [ "$FILE_SIZE" -lt 10000 ]; then
     fi
 else
     echo "✅ $MODEL_FILE size OK!"
+fi
+
+# Restore original remote URL if it was changed
+if [ -n "$ORIGINAL_REMOTE_URL" ]; then
+    echo ""
+    echo "🔄 Restoring original git remote URL..."
+    git remote set-url origin "$ORIGINAL_REMOTE_URL"
+    echo "✅ Git remote restored"
 fi
 
 echo ""
