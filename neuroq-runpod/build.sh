@@ -56,9 +56,10 @@ if [ "$FILE_SIZE" -lt 10000 ]; then
             echo "❌ Failed to pull LFS files properly."
             echo ""
             echo "Alternative build method:"
-            echo "   docker build --build-arg GIT_REPO_URL=https://github.com/yourusername/NeuroQ.git \\"
+            echo "   docker build -f neuroq-runpod/Dockerfile \\"
+            echo "                --build-arg GIT_REPO_URL=https://github.com/tapiocaTakeshi/NeuroQ.git \\"
             echo "                --build-arg GIT_BRANCH=main \\"
-            echo "                -t neuroq:latest neuroq-runpod/"
+            echo "                -t neuroq:latest ."
             exit 1
         fi
     else
@@ -72,9 +73,10 @@ if [ "$FILE_SIZE" -lt 10000 ]; then
         echo "   - Try: git lfs fetch --all"
         echo ""
         echo "2. Use repository URL to build (Docker will clone and pull LFS):"
-        echo "   docker build --build-arg GIT_REPO_URL=https://github.com/yourusername/NeuroQ.git \\"
+        echo "   docker build -f neuroq-runpod/Dockerfile \\"
+        echo "                --build-arg GIT_REPO_URL=https://github.com/tapiocaTakeshi/NeuroQ.git \\"
         echo "                --build-arg GIT_BRANCH=main \\"
-        echo "                -t neuroq:latest neuroq-runpod/"
+        echo "                -t neuroq:latest ."
         exit 1
     fi
 else
