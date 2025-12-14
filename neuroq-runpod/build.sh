@@ -29,6 +29,15 @@ if ! git lfs env &> /dev/null; then
     git lfs install
 fi
 
+# Check if git remote is using local proxy and fix if needed
+REMOTE_URL=$(git config --get remote.origin.url)
+if [[ "$REMOTE_URL" == *"127.0.0.1"* ]] || [[ "$REMOTE_URL" == *"local_proxy"* ]]; then
+    echo "⚠️  Detected local proxy in git remote URL"
+    echo "   Switching to GitHub URL for LFS file access..."
+    git remote set-url origin https://github.com/tapiocaTakeshi/NeuroQ.git
+    echo "✅ Git remote updated to GitHub"
+fi
+
 # neuroq_pretrained.ptのサイズをチェック
 MODEL_FILE="neuroq_pretrained.pt"
 if [ ! -f "$MODEL_FILE" ]; then
