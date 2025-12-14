@@ -60,46 +60,65 @@ COPY neuroq_tokenizer.vocab /app/
 
 # 事前学習済みモデル（LFSファイル）
 # オプション1: git cloneからコピー（GIT_REPO_URLが指定されている場合）
-# オプション2: ローカルからコピー（デフォルト）
 RUN if [ -f "/tmp/neuroq-repo/neuroq_pretrained.pt" ]; then \
         echo "📦 Using LFS-pulled pretrained model from git clone" && \
-        cp /tmp/neuroq-repo/neuroq_pretrained.pt /app/neuroq_pretrained.pt && \
-        ls -lh /app/neuroq_pretrained.pt; \
+        MODEL_SIZE=$(stat -c%s /tmp/neuroq-repo/neuroq_pretrained.pt) && \
+        if [ "$MODEL_SIZE" -ge 10000 ]; then \
+            cp /tmp/neuroq-repo/neuroq_pretrained.pt /app/neuroq_pretrained.pt && \
+            echo "✅ Model file from git clone: $MODEL_SIZE bytes" && \
+            ls -lh /app/neuroq_pretrained.pt; \
+        else \
+            echo "⚠️ Model file from git clone is too small ($MODEL_SIZE bytes), trying local copy..."; \
+        fi; \
     fi
 
-# ローカルからコピー（git cloneしなかった場合のみ）
-# Only copy if file doesn't already exist from git clone
-RUN if [ ! -f "/app/neuroq_pretrained.pt" ]; then \
-        echo "📋 Copying neuroq_pretrained.pt from local build context..."; \
-    fi
+# オプション2: ローカルからコピー（git cloneが成功しなかった場合）
+# Copy model file from build context to temp location for validation
+COPY --chown=root:root neuroq_pretrained.pt /tmp/neuroq_pretrained_local.pt
 
-# Copy model file from build context (ensure it's already pulled from LFS)
-COPY --chown=root:root neuroq_pretrained.pt /tmp/neuroq_pretrained.pt
-
-# Copy to app directory if not already present from git clone
+# Validate and copy from local build context if not already present
 RUN if [ ! -f "/app/neuroq_pretrained.pt" ]; then \
-        cp /tmp/neuroq_pretrained.pt /app/neuroq_pretrained.pt; \
+        echo "📋 Validating neuroq_pretrained.pt from local build context..." && \
+        LOCAL_SIZE=$(stat -c%s /tmp/neuroq_pretrained_local.pt) && \
+        echo "   Local file size: $LOCAL_SIZE bytes" && \
+        if [ "$LOCAL_SIZE" -lt 10000 ]; then \
+            echo "" && \
+            echo "❌ ERROR: neuroq_pretrained.pt is a Git LFS pointer file ($LOCAL_SIZE bytes)" && \
+            echo "   The actual model file was not pulled from Git LFS." && \
+            echo "" && \
+            echo "   This happened because:" && \
+            echo "   - No GIT_REPO_URL was provided to clone and pull LFS files" && \
+            echo "   - The local file is an LFS pointer, not the actual model" && \
+            echo "" && \
+            echo "   To fix this, use ONE of the following methods:" && \
+            echo "" && \
+            echo "   1. Build with repository URL (RECOMMENDED):" && \
+            echo "      docker build -f neuroq-runpod/Dockerfile \\" && \
+            echo "        --build-arg GIT_REPO_URL=https://github.com/tapiocaTakeshi/NeuroQ.git \\" && \
+            echo "        --build-arg GIT_BRANCH=main \\" && \
+            echo "        -t neuroq:latest ." && \
+            echo "" && \
+            echo "   2. Pull LFS files locally first:" && \
+            echo "      git lfs install" && \
+            echo "      git lfs pull" && \
+            echo "      docker build -f neuroq-runpod/Dockerfile -t neuroq:latest ." && \
+            echo "" && \
+            echo "   3. Use the build helper script:" && \
+            echo "      ./neuroq-runpod/build.sh" && \
+            echo "" && \
+            exit 1; \
+        else \
+            cp /tmp/neuroq_pretrained_local.pt /app/neuroq_pretrained.pt && \
+            echo "✅ Using local model file: $LOCAL_SIZE bytes"; \
+        fi; \
     fi && \
-    rm -f /tmp/neuroq_pretrained.pt
+    rm -f /tmp/neuroq_pretrained_local.pt
 
-# ファイルサイズを確認（LFSポインタファイルでないことを確認）
-RUN echo "📊 Checking neuroq_pretrained.pt file size..." && \
+# 最終確認
+RUN echo "📊 Final validation of neuroq_pretrained.pt..." && \
     ls -lh /app/neuroq_pretrained.pt && \
-    FILE_SIZE=$(stat -c%s /app/neuroq_pretrained.pt) && \
-    if [ "$FILE_SIZE" -lt 10000 ]; then \
-        echo "❌ ERROR: neuroq_pretrained.pt is too small ($FILE_SIZE bytes)"; \
-        echo "   This is a Git LFS pointer file, not the actual model!"; \
-        echo ""; \
-        echo "   To fix this, choose one of the following options:"; \
-        echo "   1. Use the build script: ./neuroq-runpod/build.sh"; \
-        echo "   2. Run 'git lfs pull' before building"; \
-        echo "   3. Use: docker build -f neuroq-runpod/Dockerfile --build-arg GIT_REPO_URL=<repo-url> ."; \
-        echo "   4. Download the model file manually and place it in the repository root"; \
-        echo ""; \
-        exit 1; \
-    else \
-        echo "✅ neuroq_pretrained.pt size OK: $FILE_SIZE bytes"; \
-    fi
+    FINAL_SIZE=$(stat -c%s /app/neuroq_pretrained.pt) && \
+    echo "✅ Model file ready: $FINAL_SIZE bytes"
 
 # クローンしたリポジトリをクリーンアップ（不要なファイルを削除してイメージサイズ削減）
 RUN if [ -d "/tmp/neuroq-repo" ]; then rm -rf /tmp/neuroq-repo; fi
