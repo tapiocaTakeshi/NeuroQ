@@ -294,10 +294,10 @@ def main():
     # データセットをロード
     all_texts = []
     
-    # 1. openai/mrcr - スキップ（データセットが大きすぎる）
-    # mrcr_texts = load_mrcr_data()
-    # all_texts.extend(mrcr_texts)
-    print("\n⏭️ openai/mrcr をスキップ（ディスク容量節約）")
+    # 1. openai/mrcr - 推論チェーンデータ
+    mrcr_texts = load_mrcr_data()
+    all_texts.extend(mrcr_texts)
+    print(f"✅ openai/mrcr: {len(mrcr_texts)} テキスト追加")
     
     # 2. openai/openai_humaneval
     humaneval_texts = load_humaneval_data()
@@ -363,7 +363,7 @@ def main():
         },
         'tokenizer_vocab_size': model.tokenizer.actual_vocab_size or model.tokenizer.vocab_size,
         'training_info': {
-            'datasets': ['openai/openai_humaneval', 'openai/MMMLU', 'japanese_instructions', 'knowledge'],
+            'datasets': ['openai/mrcr', 'openai/openai_humaneval', 'openai/MMMLU', 'japanese_instructions', 'knowledge'],
             'total_texts': len(all_texts),
             'epochs': 25,
         }
