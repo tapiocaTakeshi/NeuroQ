@@ -881,7 +881,21 @@ class NeuroQuantumTokenizer:
         """デコード"""
         if self.sp_model is not None:
             # SentencePiece使用
-            return self.sp_model.decode(token_ids)
+            # Ensure token_ids are integers (not numpy types or tensors)
+            token_ids_list = [int(tid) for tid in token_ids]
+
+            # Decode and ensure proper UTF-8 encoding
+            result = self.sp_model.decode(token_ids_list)
+
+            # Handle both string and bytes returns from SentencePiece
+            if isinstance(result, bytes):
+                return result.decode('utf-8', errors='replace')
+            elif isinstance(result, str):
+                # Ensure the string is properly encoded by encoding and decoding
+                # This handles any encoding inconsistencies
+                return result.encode('utf-8', errors='replace').decode('utf-8', errors='replace')
+            else:
+                return str(result)
         else:
             # フォールバック
             chars = []
