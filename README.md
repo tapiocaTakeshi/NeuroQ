@@ -151,7 +151,49 @@ docker run --gpus all -p 8000:8000 neuroq:latest
 
 ## 🚀 使用方法
 
-### 基本的な使い方
+### Hugging Face (GPT-2) + OpenAI + QBNN パイプライン 【NEW!】
+
+最新の統合パイプラインでは、Hugging FaceのGPT-2トークナイザー、OpenAI Embedding、QBNN処理を組み合わせることができます。
+
+```python
+from hf_openai_qbnn_pipeline import HFOpenAIQBNNPipeline, HFQBNNConfig
+
+# Config設定
+config = HFQBNNConfig(
+    tokenizer_name='gpt2',      # GPT-2トークナイザー
+    embed_dim=256,               # 埋め込み次元
+    num_heads=8,                 # アテンションヘッド数
+    num_layers=6,                # Transformerレイヤー数
+    hidden_dim=512,              # 隠れ層次元
+    use_qbnn_attention=True,     # QBNN拡張アテンション
+    lambda_entangle=0.35         # 量子もつれ強度
+)
+
+# パイプライン作成
+pipeline = HFOpenAIQBNNPipeline(
+    config=config,
+    use_openai_embedding=False,  # OpenAI APIを使う場合はTrue
+    openai_api_key=None          # APIキーを設定
+)
+
+# 学習
+texts = [
+    "量子コンピュータは革新的な技術です。",
+    "Transformerは強力なアーキテクチャです。",
+    # ... more texts
+]
+pipeline.train_model(texts, epochs=20, batch_size=8)
+
+# テキスト生成
+output = pipeline.generate(
+    "量子コンピュータは",
+    max_length=50,
+    temperature=0.8
+)
+print(output)
+```
+
+### 基本的な使い方（APQB Framework）
 
 ```python
 from apqb_framework import APQB
@@ -212,6 +254,16 @@ all_correlations = multi_body.get_all_correlations()
   - 単一APQBの定義
   - N体系への一般化
   - APQBニューラルネットワーク
+
+### 統合パイプライン 【NEW!】
+
+- `hf_openai_qbnn_pipeline.py` - Hugging Face + OpenAI + QBNN 統合パイプライン
+  - GPT-2トークナイザー (Hugging Face)
+  - Hybrid Embedding (HF + OpenAI)
+  - GPT-2スタイルの因果的アテンション
+  - QBNN拡張レイヤー
+  - テキスト生成機能
+- `test_hf_qbnn_basic.py` - 統合パイプラインの基本テスト
 
 ### 応用例
 
