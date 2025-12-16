@@ -532,7 +532,7 @@ def save_conversation_turn(session_id: str, user_message: str, assistant_respons
 # ========================================
 # テキスト生成
 # ========================================
-def generate_text(prompt: str, max_length: int = 100,
+def generate_text(prompt: str, max_length: int = 50,
                   temp_min: float = None, temp_max: float = None,
                   temperature: float = None, session_id: str = "default") -> str:
     """
@@ -540,7 +540,7 @@ def generate_text(prompt: str, max_length: int = 100,
 
     Args:
         prompt: 入力プロンプト
-        max_length: 最大生成長
+        max_length: 最大生成長（デフォルト50 - 会話向けに短く制限）
         temp_min: 最低温度（指定された場合はtemp_min/temp_maxを使用）
         temp_max: 最高温度
         temperature: 互換性のための単一温度（指定された場合は自動的にtemp_min/temp_maxに変換）
@@ -560,23 +560,25 @@ def generate_text(prompt: str, max_length: int = 100,
             temp_min = temperature * 0.8
             temp_max = temperature * 1.2
 
-        # デフォルト値（日本語生成に最適化）
+        # デフォルト値（会話生成に最適化 - より保守的）
         if temp_min is None:
-            temp_min = 0.5  # より保守的な温度
+            temp_min = 0.4  # 会話向けにより保守的な温度
         if temp_max is None:
-            temp_max = 0.8
+            temp_max = 0.7  # 0.8 → 0.7 に下げて暴走を防ぐ
 
         # 会話履歴を含むプロンプトを構築
         conversation_prompt = build_conversation_prompt(session_id, prompt)
 
-        # 生成実行
+        # 生成実行（会話向けに短く制限）
         result = model.generate(
             prompt=conversation_prompt,
             max_length=max_length,
             temp_min=temp_min,
             temp_max=temp_max,
-            repetition_penalty=2.0,  # 強力な繰り返しペナルティ
+            repetition_penalty=2.5,  # 2.0 → 2.5 に強化（繰り返しをより強く抑制）
             no_repeat_ngram_size=3,   # 3-gramの繰り返し防止
+            top_k=40,                  # top_k を明示的に指定
+            top_p=0.9,                 # top_p を明示的に指定
         )
 
         # 会話履歴に保存
@@ -639,13 +641,13 @@ def handler(job):
                 }
 
         prompt = job_input.get("prompt", "こんにちは")
-        max_length = job_input.get("max_length", 100)
+        max_length = job_input.get("max_length", 50)  # 100 → 50 に変更（会話向け）
         session_id = job_input.get("session_id", "default")  # 会話セッションID
 
         # 温度パラメータ（temp_min/temp_max優先、互換性のためtemperatureもサポート）
         temp_min = job_input.get("temp_min")
         temp_max = job_input.get("temp_max")
-        temperature = job_input.get("temperature", 0.6)  # 日本語生成向けに0.7→0.6に調整
+        temperature = job_input.get("temperature", 0.5)  # 0.6 → 0.5 に下げて安定性向上
 
         print(f"📝 Generate: session_id='{session_id}', prompt='{prompt[:30]}...'")
 
