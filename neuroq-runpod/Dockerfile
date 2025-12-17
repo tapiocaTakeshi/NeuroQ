@@ -84,7 +84,7 @@ RUN if [ -f "/tmp/neuroq-repo/neuroq_pretrained.pt" ]; then \
 
 # オプション2: ローカルからコピー（利用可能な場合のみ）
 # LFSポインタファイルの場合でもエラーにせず、起動時にダウンロードします
-COPY --chown=root:root neuroq_pretrained.pt /tmp/neuroq_pretrained_local.pt || true
+COPY --chown=root:root neuroq_pretrained.pt /tmp/neuroq_pretrained_local.pt
 
 RUN if [ -f "/tmp/neuroq_pretrained_local.pt" ] && [ ! -f "/app/neuroq_pretrained.pt" ]; then \
         LOCAL_SIZE=$(stat -c%s /tmp/neuroq_pretrained_local.pt 2>/dev/null || echo "0") && \
