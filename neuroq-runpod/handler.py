@@ -570,6 +570,8 @@ def generate_text(prompt: str, max_length: int = 50,
         conversation_prompt = build_conversation_prompt(session_id, prompt)
 
         # 生成実行（会話向けに短く制限）
+        # skip_format=True: すでにbuild_conversation_prompt()でフォーマット済みなので、
+        # generate()メソッド内での再フォーマットをスキップ
         result = model.generate(
             prompt=conversation_prompt,
             max_length=max_length,
@@ -579,6 +581,7 @@ def generate_text(prompt: str, max_length: int = 50,
             no_repeat_ngram_size=3,   # 3-gramの繰り返し防止
             top_k=40,                  # top_k を明示的に指定
             top_p=0.9,                 # top_p を明示的に指定
+            skip_format=True,          # 二重フォーマット防止（すでにフォーマット済み）
         )
 
         # 会話履歴に保存
