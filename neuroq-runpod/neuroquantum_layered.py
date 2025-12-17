@@ -1290,6 +1290,7 @@ class NeuroQuantumAI:
         repetition_penalty: float = 2.0,
         no_repeat_ngram_size: int = 3,  # N-gram重複防止
         temperature: float = None,   # 後方互換性のため（指定された場合temp_min/temp_maxを自動計算）
+        skip_format: bool = False,   # Trueの場合、対話形式のフォーマットをスキップ（既にフォーマット済みの場合）
     ) -> str:
         """
         テキスト生成（対話形式）
@@ -1396,7 +1397,11 @@ class NeuroQuantumAI:
             print(f"⚠️ WARNING: vocab_size mismatch! config={model_vocab_size}, embedding={embedding_vocab_size}")
 
         # 対話形式のプロンプトを作成
-        dialogue_prompt = f"<USER>{prompt}<ASSISTANT>"
+        # skip_format=Trueの場合はすでにフォーマット済みなのでそのまま使用
+        if skip_format:
+            dialogue_prompt = prompt
+        else:
+            dialogue_prompt = f"<USER>{prompt}<ASSISTANT>"
 
         # プロンプトエンコード
         # IMPORTANT: Use add_special=False to match training data format
