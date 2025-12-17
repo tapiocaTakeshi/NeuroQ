@@ -51,12 +51,14 @@ def load_mrcr_data() -> List[str]:
         dataset = load_dataset("openai/mrcr", split="test")
         print(f"   ✅ {len(dataset)} サンプルをロードしました")
         
-        for item in dataset:
+        for idx, item in enumerate(dataset):
+            if idx >= 100:  # 最大100サンプルに制限（日本語データ優先のため）
+                break
             # 様々なフィールドからテキストを抽出
             if "haystack" in item and item["haystack"]:
-                for doc in item["haystack"][:5]:  # 最初の5つ
+                for doc in item["haystack"][:3]:  # 最初の3つに制限
                     if isinstance(doc, str) and len(doc) > 20:
-                        texts.append(doc[:500])
+                        texts.append(doc[:300])
             
             if "needle" in item and item["needle"]:
                 needle = item["needle"]
@@ -221,12 +223,28 @@ def generate_japanese_instruction_data() -> List[str]:
         "<USER>プログラミングとは？<ASSISTANT>プログラミングはコンピュータに指示を与えるためのコードを書く作業です。Python、JavaScript、Java、C++など様々な言語があり、それぞれ得意な分野があります。論理的思考力と問題解決能力が重要です。",
         "<USER>機械学習のライブラリは？<ASSISTANT>機械学習で人気のライブラリには、PyTorch、TensorFlow、scikit-learn、Kerasなどがあります。PyTorchは研究用途で人気があり、TensorFlowは本番環境での利用が多いです。",
         
-        # 挨拶
-        "<USER>こんにちは<ASSISTANT>こんにちは！私はニューロQです。何かお手伝いできることはありますか？質問があればお気軽にどうぞ。",
-        "<USER>おはよう<ASSISTANT>おはようございます！今日も一日頑張りましょう。何か知りたいことがあれば聞いてください。",
-        "<USER>こんばんは<ASSISTANT>こんばんは！夜遅くまでお疲れ様です。何かお手伝いできることはありますか？",
-        "<USER>ありがとう<ASSISTANT>どういたしまして！お役に立てて嬉しいです。他に何かあればお聞きください。",
-        "<USER>さようなら<ASSISTANT>さようなら！またお話できることを楽しみにしています。良い一日をお過ごしください。",
+        # 挨拶（多様なパターン）
+        "<USER>こんにちは<ASSISTANT>こんにちは！私はニューロQです。何かお手伝いできることはありますか？",
+        "<USER>こんにちは<ASSISTANT>こんにちは！ご質問があればお気軽にどうぞ。",
+        "<USER>こんにちは<ASSISTANT>こんにちは！今日は何をお手伝いしましょうか？",
+        "<USER>こんにちは！<ASSISTANT>こんにちは！元気ですか？何か知りたいことがあれば聞いてください。",
+        "<USER>おはよう<ASSISTANT>おはようございます！今日も一日頑張りましょう。",
+        "<USER>おはようございます<ASSISTANT>おはようございます！良い一日になりますように。何かお手伝いできることはありますか？",
+        "<USER>こんばんは<ASSISTANT>こんばんは！夜遅くまでお疲れ様です。",
+        "<USER>こんばんは<ASSISTANT>こんばんは！何かご質問はありますか？",
+        "<USER>ありがとう<ASSISTANT>どういたしまして！お役に立てて嬉しいです。",
+        "<USER>ありがとうございます<ASSISTANT>こちらこそありがとうございます！他に何かあればお聞きください。",
+        "<USER>さようなら<ASSISTANT>さようなら！またお話できることを楽しみにしています。",
+        "<USER>バイバイ<ASSISTANT>バイバイ！良い一日を！",
+        "<USER>お疲れ様<ASSISTANT>お疲れ様です！ゆっくり休んでくださいね。",
+        "<USER>助けて<ASSISTANT>はい、どうしましたか？お困りのことがあればお聞かせください。",
+        "<USER>教えて<ASSISTANT>はい、何について知りたいですか？",
+        "<USER>質問があります<ASSISTANT>はい、どうぞ！何でも聞いてください。",
+        "<USER>ねえ<ASSISTANT>はい、何ですか？",
+        "<USER>すみません<ASSISTANT>はい、どうしましたか？",
+        "<USER>お願いします<ASSISTANT>はい、何をお手伝いしましょうか？",
+        "<USER>調子はどう？<ASSISTANT>元気ですよ！ありがとうございます。あなたはいかがですか？",
+        "<USER>元気？<ASSISTANT>はい、元気です！あなたも元気そうで何よりです。",
         
         # 一般的な質問
         "<USER>日本の首都はどこですか？<ASSISTANT>日本の首都は東京です。東京は政治、経済、文化の中心地で、人口は約1,400万人です。1868年の明治維新で京都から遷都されました。",
@@ -307,15 +325,15 @@ def main():
     mmmlu_texts = load_mmmlu_data()
     all_texts.extend(mmmlu_texts)
     
-    # 4. 日本語指示データ
+    # 4. 日本語指示データ（最優先・大量に追加）
     print("\n📚 日本語指示データを追加中...")
     instruction_texts = generate_japanese_instruction_data()
-    all_texts.extend(instruction_texts * 50)  # 50倍に増やす
+    all_texts.extend(instruction_texts * 500)  # 500倍に増やす（最重要）
     
-    # 5. 一般知識データ
+    # 5. 一般知識データ（増量）
     print("📚 一般知識データを追加中...")
     knowledge_texts = generate_knowledge_data()
-    all_texts.extend(knowledge_texts)
+    all_texts.extend(knowledge_texts * 10)  # 10倍に増やす
     
     print(f"\n📊 最終学習データ:")
     print(f"   総テキスト数: {len(all_texts):,}")
