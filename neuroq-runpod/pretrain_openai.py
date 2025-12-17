@@ -126,55 +126,55 @@ def load_mmmlu_data() -> List[str]:
     """
     print("\n📥 openai/MMMLU データセットをロード中...")
     texts = []
-    
+
     try:
         # 日本語サブセットをロード
         dataset = load_dataset("openai/MMMLU", "JA_JP", split="test")
         print(f"   ✅ MMMLU日本語: {len(dataset)} サンプルをロードしました")
-        
+
         for item in dataset:
             # 質問
             if "Question" in item and item["Question"]:
                 q = item["Question"]
-                
+
                 # 選択肢を取得
                 choices = []
                 for key in ["A", "B", "C", "D"]:
                     if key in item and item[key]:
                         choices.append(f"{key}. {item[key]}")
-                
+
                 # 正解
                 answer = item.get("Answer", "")
-                
+
                 # Q&A形式でテキスト作成
                 if choices:
                     choices_text = "\n".join(choices)
                     qa_text = f"問題: {q}\n選択肢:\n{choices_text}\n正解: {answer}"
                     texts.append(qa_text)
-                
+
                 # 質問と回答のペア
                 if answer and answer in ["A", "B", "C", "D"]:
                     answer_text = item.get(answer, "")
                     if answer_text:
                         texts.append(f"<USER>{q}<ASSISTANT>{answer_text}")
-            
+
             # Subject（科目）も追加
             if "Subject" in item and item["Subject"]:
                 subject = item["Subject"]
                 if "Question" in item:
                     texts.append(f"科目「{subject}」の問題: {item['Question']}")
-        
+
         print(f"   ✅ MMMLU から {len(texts)} テキストを抽出")
-        
+
     except Exception as e:
         print(f"   ⚠️ MMMLU ロードエラー: {e}")
-        
+
         # フォールバック: 英語版を試す
         try:
             print("   📥 英語版MMMMLUを試行中...")
             dataset = load_dataset("openai/MMMLU", "EN_US", split="test")
             print(f"   ✅ MMMLU英語: {len(dataset)} サンプルをロードしました")
-            
+
             for item in dataset:
                 if "Question" in item and item["Question"]:
                     q = item["Question"]
@@ -184,12 +184,109 @@ def load_mmmlu_data() -> List[str]:
                         if answer_text:
                             # 英語Q&Aも追加
                             texts.append(f"Question: {q}\nAnswer: {answer_text}")
-            
+
             print(f"   ✅ MMMLU英語から {len(texts)} テキストを抽出")
-            
+
         except Exception as e2:
             print(f"   ⚠️ MMMLU英語ロードエラー: {e2}")
-    
+
+    return texts
+
+
+def load_oasst1_data() -> List[str]:
+    """
+    OpenAssistant/oasst1 データセットをロード
+    高品質な人間のフィードバックで評価された会話データセット
+    """
+    print("\n📥 OpenAssistant/oasst1 データセットをロード中...")
+    texts = []
+
+    try:
+        # oasst1データセットをロード
+        dataset = load_dataset("OpenAssistant/oasst1", split="train")
+        print(f"   ✅ oasst1: {len(dataset)} サンプルをロードしました")
+
+        # メッセージをツリー構造から会話ペアに変換
+        # parent_id と message_id を使って会話ツリーを構築
+        messages_by_id = {}
+
+        for item in dataset:
+            msg_id = item.get("message_id", "")
+            parent_id = item.get("parent_id")
+            text = item.get("text", "")
+            role = item.get("role", "")
+            lang = item.get("lang", "")
+
+            if msg_id and text:
+                messages_by_id[msg_id] = {
+                    "text": text,
+                    "role": role,
+                    "parent_id": parent_id,
+                    "lang": lang
+                }
+
+        print(f"   📊 {len(messages_by_id)} メッセージを解析中...")
+
+        # 会話ペアを構築
+        conversation_pairs = []
+        for msg_id, msg_data in messages_by_id.items():
+            if msg_data["role"] == "assistant" and msg_data["parent_id"]:
+                parent = messages_by_id.get(msg_data["parent_id"])
+                if parent and parent["role"] == "prompter":
+                    # prompter（ユーザー）→ assistant のペアを作成
+                    user_text = parent["text"].strip()
+                    assistant_text = msg_data["text"].strip()
+                    lang = msg_data["lang"]
+
+                    # 長すぎるメッセージはスキップ
+                    if len(user_text) > 500 or len(assistant_text) > 1000:
+                        continue
+
+                    conversation_pairs.append({
+                        "user": user_text,
+                        "assistant": assistant_text,
+                        "lang": lang
+                    })
+
+        print(f"   ✅ {len(conversation_pairs)} 会話ペアを抽出")
+
+        # 日本語と英語の会話を優先的に抽出
+        ja_count = 0
+        en_count = 0
+        other_count = 0
+
+        for pair in conversation_pairs:
+            user_text = pair["user"]
+            assistant_text = pair["assistant"]
+            lang = pair["lang"]
+
+            # <USER><ASSISTANT> 形式で追加
+            conversation_text = f"<USER>{user_text}<ASSISTANT>{assistant_text}"
+            texts.append(conversation_text)
+
+            # Q&A形式でも追加（多様性のため）
+            qa_text = f"質問: {user_text}\n回答: {assistant_text}"
+            texts.append(qa_text)
+
+            # 言語別カウント
+            if lang == "ja":
+                ja_count += 1
+            elif lang == "en":
+                en_count += 1
+            else:
+                other_count += 1
+
+        print(f"   📊 言語分布:")
+        print(f"      日本語: {ja_count} ペア")
+        print(f"      英語: {en_count} ペア")
+        print(f"      その他: {other_count} ペア")
+        print(f"   ✅ oasst1 から {len(texts)} テキストを抽出")
+
+    except Exception as e:
+        print(f"   ⚠️ oasst1 ロードエラー: {e}")
+        import traceback
+        traceback.print_exc()
+
     return texts
 
 
@@ -308,33 +405,38 @@ def main():
     else:
         device = "cpu"
         print("💻 CPU")
-    
+
     # データセットをロード
     all_texts = []
-    
-    # 1. openai/mrcr - 推論チェーンデータ
+
+    # 1. OpenAssistant/oasst1 - 高品質な会話データ（最優先）
+    oasst1_texts = load_oasst1_data()
+    all_texts.extend(oasst1_texts * 3)  # 3倍に増やす（高品質データなので重視）
+    print(f"✅ OpenAssistant/oasst1: {len(oasst1_texts)} テキスト × 3 = {len(oasst1_texts) * 3} テキスト追加")
+
+    # 2. openai/mrcr - 推論チェーンデータ
     mrcr_texts = load_mrcr_data()
     all_texts.extend(mrcr_texts)
     print(f"✅ openai/mrcr: {len(mrcr_texts)} テキスト追加")
-    
-    # 2. openai/openai_humaneval
+
+    # 3. openai/openai_humaneval
     humaneval_texts = load_humaneval_data()
     all_texts.extend(humaneval_texts)
-    
-    # 3. openai/MMMLU (Multilingual MMLU)
+
+    # 4. openai/MMMLU (Multilingual MMLU)
     mmmlu_texts = load_mmmlu_data()
     all_texts.extend(mmmlu_texts)
-    
-    # 4. 日本語指示データ（最優先・大量に追加）
+
+    # 5. 日本語指示データ（最優先・大量に追加）
     print("\n📚 日本語指示データを追加中...")
     instruction_texts = generate_japanese_instruction_data()
     all_texts.extend(instruction_texts * 500)  # 500倍に増やす（最重要）
-    
-    # 5. 一般知識データ（増量）
+
+    # 6. 一般知識データ（増量）
     print("📚 一般知識データを追加中...")
     knowledge_texts = generate_knowledge_data()
     all_texts.extend(knowledge_texts * 10)  # 10倍に増やす
-    
+
     print(f"\n📊 最終学習データ:")
     print(f"   総テキスト数: {len(all_texts):,}")
     print(f"   総文字数: {sum(len(s) for s in all_texts):,}")
@@ -381,7 +483,7 @@ def main():
         },
         'tokenizer_vocab_size': model.tokenizer.actual_vocab_size or model.tokenizer.vocab_size,
         'training_info': {
-            'datasets': ['openai/mrcr', 'openai/openai_humaneval', 'openai/MMMLU', 'japanese_instructions', 'knowledge'],
+            'datasets': ['OpenAssistant/oasst1', 'openai/mrcr', 'openai/openai_humaneval', 'openai/MMMLU', 'japanese_instructions', 'knowledge'],
             'total_texts': len(all_texts),
             'epochs': 25,
         }
@@ -408,12 +510,12 @@ def main():
         print(f"   出力: {result[:200]}...")
     
     print("\n" + "=" * 60)
-    print("✅ OpenAIデータセット事前学習完了！")
+    print("✅ OpenAssistant/oasst1 + OpenAIデータセット事前学習完了！")
     print("=" * 60)
     print("\n次のステップ:")
     print("1. git add neuroq_pretrained.pt")
-    print("2. git commit -m 'Update pretrained model with OpenAI datasets'")
-    print("3. git push origin main")
+    print("2. git commit -m 'Train model with OpenAssistant/oasst1 dataset'")
+    print("3. git push origin claude/train-oasst1-model-c3NHA")
     print("4. RunPodでRebuild")
 
 
