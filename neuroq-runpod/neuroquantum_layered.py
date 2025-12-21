@@ -29,9 +29,9 @@ import math
 import json
 import os
 from collections import Counter
+import re
 from typing import List, Dict, Optional, Tuple
 import warnings
-warnings.filterwarnings('ignore')
 
 # SentencePiece（トークナイザー用）
 try:
@@ -40,6 +40,25 @@ try:
 except ImportError:
     SENTENCEPIECE_AVAILABLE = False
     warnings.warn("sentencepieceライブラリがインストールされていません。pip install sentencepiece を実行してください。")
+
+# Transformersライブラリ（アテンション用）
+try:
+    from transformers import (
+        GPT2Config,
+        GPT2Attention,
+    )
+    TRANSFORMERS_AVAILABLE = True
+except ImportError:
+    TRANSFORMERS_AVAILABLE = False
+    # 警告は表示しない（フォールバックモードで動作可能なため）
+
+# OpenAI API（オプション）
+try:
+    from openai import OpenAI
+    OPENAI_AVAILABLE = True
+except ImportError:
+    OPENAI_AVAILABLE = False
+    warnings.warn("OpenAI APIが利用できません。openai>=1.0.0をインストールしてください。")
 
 # ========================================
 # qbnn_layered.py からコアコンポーネントをインポート
@@ -61,9 +80,6 @@ except ImportError:
 # quantum_computer.py から量子回路シミュレーターをインポート
 # ========================================
 try:
-    # 親ディレクトリから quantum_computer.py をインポート
-    import sys
-    sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
     from quantum_computer import (
         QuantumComputer,
         QuantumCircuit,
@@ -253,18 +269,18 @@ class QBNNLayer(nn.Module):
 
 
 # ========================================
-# Part 2: QBNN-Attention（量子もつれアテンション）
+# Part 2: QBNN-Attention（transformersライブラリベース + QBNN拡張）
 # ========================================
 
 class QBNNAttention(nn.Module):
     """
-    QBNN拡張Self-Attention
+    QBNN拡張Self-Attention（transformersライブラリベース）
     
-    通常のAttentionに量子もつれ補正を追加
+    transformersのGPT2Attentionをベースに、QBNN量子もつれ補正を追加
     """
     
     def __init__(self, embed_dim: int, num_heads: int, dropout: float = 0.1, 
-                 lambda_val: float = 0.5):
+                 lambda_val: float = 0.5, max_positions: int = 1024):
         super().__init__()
         self.embed_dim = embed_dim
         self.num_heads = num_heads
@@ -272,69 +288,103 @@ class QBNNAttention(nn.Module):
         
         assert self.head_dim * num_heads == embed_dim, "embed_dimはnum_headsで割り切れる必要があります"
         
-        # Q, K, V プロジェクション
-        self.q_proj = nn.Linear(embed_dim, embed_dim)
-        self.k_proj = nn.Linear(embed_dim, embed_dim)
-        self.v_proj = nn.Linear(embed_dim, embed_dim)
-        self.out_proj = nn.Linear(embed_dim, embed_dim)
-        
-        # QBNN量子もつれ補正
-        self.J_attn = nn.Parameter(torch.randn(num_heads, self.head_dim, self.head_dim) * 0.02)
-        self.lambda_attn = nn.Parameter(torch.tensor(float(lambda_val)))
-        
-        self.dropout = nn.Dropout(dropout)
-        self.scale = math.sqrt(self.head_dim)
+        # transformersのGPT2Attentionを使用
+        if TRANSFORMERS_AVAILABLE:
+            # GPT2Configでアテンション設定を作成
+            config = GPT2Config(
+                n_embd=embed_dim,
+                n_head=num_heads,
+                attn_pdrop=dropout,
+                resid_pdrop=dropout,
+                max_position_embeddings=max_positions,
+            )
+            # GPT2Attentionのインスタンスを作成
+            self.attention = GPT2Attention(config, layer_idx=None)
+            # QBNN量子もつれ補正パラメータ
+            self.J_attn = nn.Parameter(torch.randn(num_heads, self.head_dim, self.head_dim) * 0.02)
+            self.lambda_attn = nn.Parameter(torch.tensor(float(lambda_val)))
+        else:
+            # フォールバック：簡易実装
+            warnings.warn("transformersが利用できないため、簡易アテンションを使用します。")
+            self.q_proj = nn.Linear(embed_dim, embed_dim)
+            self.k_proj = nn.Linear(embed_dim, embed_dim)
+            self.v_proj = nn.Linear(embed_dim, embed_dim)
+            self.out_proj = nn.Linear(embed_dim, embed_dim)
+            self.J_attn = nn.Parameter(torch.randn(num_heads, self.head_dim, self.head_dim) * 0.02)
+            self.lambda_attn = nn.Parameter(torch.tensor(float(lambda_val)))
+            self.dropout = nn.Dropout(dropout)
+            self.scale = math.sqrt(self.head_dim)
+            self.attention = None
     
     def forward(self, x: torch.Tensor, mask: Optional[torch.Tensor] = None) -> torch.Tensor:
         """
-        GPT標準: Multi-Head Causal Self-Attention（QBNN拡張版）
+        transformersベースのMulti-Head Causal Self-Attention（QBNN拡張版）
         
         Args:
             x: (batch, seq, embed_dim)
-            mask: Optional attention mask (Noneの場合はCausal Maskを自動生成)
+            mask: Optional attention mask
         
         Returns:
             (batch, seq, embed_dim)
         """
-        batch_size, seq_len, _ = x.shape
-        
-        # GPT標準: Q, K, V 計算
-        Q = self.q_proj(x).view(batch_size, seq_len, self.num_heads, self.head_dim).transpose(1, 2)  # (batch, heads, seq, head_dim)
-        K = self.k_proj(x).view(batch_size, seq_len, self.num_heads, self.head_dim).transpose(1, 2)
-        V = self.v_proj(x).view(batch_size, seq_len, self.num_heads, self.head_dim).transpose(1, 2)
-        
-        # GPT標準: アテンションスコア計算
-        attn_scores = torch.matmul(Q, K.transpose(-2, -1)) / self.scale  # (batch, heads, seq, seq)
-        
-        # QBNN拡張: 量子もつれ補正
-        Q_norm = torch.tanh(Q)
-        K_norm = torch.tanh(K)
-        # もつれ補正項（ヘッドごと）
-        delta = torch.einsum('bhid,hde,bhje->bhij', Q_norm, self.J_attn, K_norm)
-        attn_scores = attn_scores + self.lambda_attn * delta
-        
-        # GPT標準: Causal Mask適用
-        if mask is not None:
-            # 提供されたマスクを使用
-            if mask.dim() == 2:
-                mask = mask.unsqueeze(0).unsqueeze(0)  # (1, 1, seq, seq)
-            attn_scores = attn_scores.masked_fill(mask == 0, float('-inf'))
+        if TRANSFORMERS_AVAILABLE and self.attention is not None:
+            # transformersのGPT2Attentionを使用
+            # GPT2Attentionの入力形式に合わせる
+            hidden_states = x
+            
+            # アテンション計算（transformersライブラリ）
+            attn_output = self.attention(hidden_states, layer_past=None, use_cache=False, output_attentions=False)[0]
+            
+            # QBNN拡張: 量子もつれ補正
+            batch_size, seq_len, _ = x.shape
+            Q = self.attention.c_attn(x).split(self.embed_dim, dim=-1)[0]  # Qプロジェクション
+            K = self.attention.c_attn(x).split(self.embed_dim, dim=-1)[1]  # Kプロジェクション
+            
+            Q = Q.view(batch_size, seq_len, self.num_heads, self.head_dim).transpose(1, 2)
+            K = K.view(batch_size, seq_len, self.num_heads, self.head_dim).transpose(1, 2)
+            
+            Q_norm = torch.tanh(Q)
+            K_norm = torch.tanh(K)
+            # もつれ補正項
+            delta = torch.einsum('bhid,hde,bhje->bhij', Q_norm, self.J_attn, K_norm)
+            
+            # 補正を適用（簡易版：出力に加算）
+            attn_output = attn_output + self.lambda_attn * delta.view(batch_size, seq_len, self.embed_dim)
+            
+            return attn_output
         else:
-            # Causal Mask自動生成（GPT標準）
-            causal_mask = torch.triu(torch.ones(seq_len, seq_len, device=x.device), diagonal=1).bool()
-            causal_mask = causal_mask.unsqueeze(0).unsqueeze(0)  # (1, 1, seq, seq)
-            attn_scores = attn_scores.masked_fill(causal_mask, float('-inf'))
-        
-        # GPT標準: Softmax + Dropout
-        attn_probs = F.softmax(attn_scores, dim=-1)
-        attn_probs = self.dropout(attn_probs)
-        
-        # GPT標準: アテンション適用
-        output = torch.matmul(attn_probs, V)  # (batch, heads, seq, head_dim)
-        output = output.transpose(1, 2).contiguous().view(batch_size, seq_len, self.embed_dim)
-        
-        # GPT標準: 出力射影
-        return self.out_proj(output)
+            # フォールバック：簡易実装
+            batch_size, seq_len, _ = x.shape
+            
+            Q = self.q_proj(x).view(batch_size, seq_len, self.num_heads, self.head_dim).transpose(1, 2)
+            K = self.k_proj(x).view(batch_size, seq_len, self.num_heads, self.head_dim).transpose(1, 2)
+            V = self.v_proj(x).view(batch_size, seq_len, self.num_heads, self.head_dim).transpose(1, 2)
+            
+            attn_scores = torch.matmul(Q, K.transpose(-2, -1)) / self.scale
+            
+            # QBNN拡張
+            Q_norm = torch.tanh(Q)
+            K_norm = torch.tanh(K)
+            delta = torch.einsum('bhid,hde,bhje->bhij', Q_norm, self.J_attn, K_norm)
+            attn_scores = attn_scores + self.lambda_attn * delta
+            
+            # Causal Mask
+            if mask is None:
+                causal_mask = torch.triu(torch.ones(seq_len, seq_len, device=x.device), diagonal=1).bool()
+                causal_mask = causal_mask.unsqueeze(0).unsqueeze(0)
+                attn_scores = attn_scores.masked_fill(causal_mask, float('-inf'))
+            else:
+                if mask.dim() == 2:
+                    mask = mask.unsqueeze(0).unsqueeze(0)
+                attn_scores = attn_scores.masked_fill(mask == 0, float('-inf'))
+            
+            attn_probs = F.softmax(attn_scores, dim=-1)
+            attn_probs = self.dropout(attn_probs)
+            
+            output = torch.matmul(attn_probs, V)
+            output = output.transpose(1, 2).contiguous().view(batch_size, seq_len, self.embed_dim)
+            
+            return self.out_proj(output)
 
 
 # ========================================
@@ -433,20 +483,129 @@ class QBNNTransformerBlock(nn.Module):
 # Part 4: Embedding（埋め込み層）
 # ========================================
 
+class OpenAIEmbeddingWrapper:
+    """
+    OpenAI Embedding API ラッパー
+    
+    テキストを直接OpenAI APIに送信してエンベディングを取得
+    """
+    
+    def __init__(self, api_key: Optional[str] = None, model: str = "text-embedding-3-large", dimensions: Optional[int] = None):
+        if not OPENAI_AVAILABLE:
+            raise ImportError("OpenAI APIが利用できません。openai>=1.0.0をインストールしてください。")
+        
+        self.api_key = api_key or os.getenv("OPENAI_API_KEY")
+        if not self.api_key:
+            raise ValueError("OpenAI APIキーが必要です。OPENAI_API_KEY環境変数を設定するか、api_key引数を指定してください。")
+        
+        self.client = OpenAI(api_key=self.api_key)
+        self.model = model
+        
+        # モデルごとのデフォルト次元
+        if dimensions is not None:
+            self.embed_dim = dimensions
+            self.dimensions = dimensions
+        elif "ada-002" in model:
+            self.embed_dim = 1536
+            self.dimensions = None
+        elif "embedding-3-large" in model:
+            self.embed_dim = 3072  # text-embedding-3-largeのデフォルト次元
+            self.dimensions = None
+        elif "embedding-3-small" in model:
+            self.embed_dim = 1536  # text-embedding-3-smallのデフォルト次元
+            self.dimensions = None
+        else:
+            self.embed_dim = 3072  # デフォルト
+            self.dimensions = None
+    
+    def get_embeddings(self, texts: List[str], batch_size: int = 100) -> np.ndarray:
+        """
+        テキストのリストからエンベディングを取得
+        
+        Args:
+            texts: テキストのリスト
+            batch_size: バッチサイズ（API制限を考慮）
+        
+        Returns:
+            (N, embed_dim) エンベディング配列
+        """
+        all_embeddings = []
+        
+        # バッチ処理
+        for i in range(0, len(texts), batch_size):
+            batch = texts[i:i + batch_size]
+            
+            try:
+                # dimensionsパラメータを指定可能（text-embedding-3-large等で使用）
+                params = {
+                    "model": self.model,
+                    "input": batch
+                }
+                if self.dimensions is not None:
+                    params["dimensions"] = self.dimensions
+                
+                response = self.client.embeddings.create(**params)
+                
+                batch_embeddings = [item.embedding for item in response.data]
+                all_embeddings.extend(batch_embeddings)
+            except Exception as e:
+                raise RuntimeError(f"OpenAI APIエラー: {e}")
+        
+        return np.array(all_embeddings)
+
+
 class NeuroQuantumEmbedding(nn.Module):
     """
     ニューロQ 埋め込み層
     
     Token → テキストエンベディング + 位置エンコーディング
+    
+    OpenAI Embedding APIを使用するオプションあり
     """
     
-    def __init__(self, config: NeuroQuantumConfig):
+    def __init__(
+        self, 
+        config: NeuroQuantumConfig,
+        use_openai_embedding: bool = False,
+        openai_api_key: Optional[str] = None,
+        openai_model: str = "text-embedding-3-large",
+        tokenizer = None  # トークン化済みテキストを復元するためのトークナイザー
+    ):
         super().__init__()
         
-        # テキストエンベディング
-        self.text_embedding = nn.Embedding(config.vocab_size, config.embed_dim)
+        self.use_openai_embedding = use_openai_embedding
+        self.config = config
+        self.tokenizer = tokenizer
         
-        # 位置埋め込み（学習可能）
+        if use_openai_embedding:
+            if not OPENAI_AVAILABLE:
+                warnings.warn("OpenAI APIが利用できません。従来の埋め込みを使用します。")
+                self.use_openai_embedding = False
+            
+            if self.use_openai_embedding:
+                self.openai_wrapper = OpenAIEmbeddingWrapper(
+                    api_key=openai_api_key,
+                    model=openai_model
+                )
+                # OpenAIのエンベディング次元に合わせる
+                actual_embed_dim = self.openai_wrapper.embed_dim
+                if actual_embed_dim != config.embed_dim:
+                    warnings.warn(
+                        f"OpenAI Embedding次元({actual_embed_dim})が設定次元({config.embed_dim})と異なります。"
+                        f"射影層を追加します。"
+                    )
+                    self.projection = nn.Linear(actual_embed_dim, config.embed_dim)
+                else:
+                    self.projection = nn.Identity()
+        else:
+            self.openai_wrapper = None
+            self.projection = None
+        
+        if not self.use_openai_embedding:
+            # 従来のテキストエンベディング
+            self.text_embedding = nn.Embedding(config.vocab_size, config.embed_dim)
+        
+        # 位置埋め込み（学習可能）- OpenAI使用時も必要
         self.position_embedding = nn.Embedding(config.max_seq_len, config.embed_dim)
         
         # ドロップアウト
@@ -455,11 +614,52 @@ class NeuroQuantumEmbedding(nn.Module):
         # 埋め込み次元
         self.embed_dim = config.embed_dim
     
-    def forward(self, token_ids: torch.Tensor) -> torch.Tensor:
+    def forward(self, token_ids: torch.Tensor, texts: Optional[List[str]] = None) -> torch.Tensor:
+        """
+        Args:
+            token_ids: (batch, seq) トークンID
+            texts: OpenAI Embedding使用時に必要。トークンIDに対応するテキストのリスト
+        """
         batch_size, seq_len = token_ids.shape
         
-        # テキストエンベディング
-        text_embeds = self.text_embedding(token_ids)
+        if self.use_openai_embedding and self.openai_wrapper is not None:
+            if texts is None:
+                if self.tokenizer is not None:
+                    # トークンIDからテキストを復元
+                    texts = []
+                    for batch_idx in range(batch_size):
+                        token_seq = token_ids[batch_idx].cpu().tolist()
+                        text = self.tokenizer.decode(token_seq)
+                        texts.append(text)
+                else:
+                    raise ValueError(
+                        "OpenAI Embedding使用時は、texts引数またはtokenizerが必要です。"
+                    )
+            
+            # OpenAI APIからエンベディングを取得
+            # 注意: OpenAI APIは文全体のエンベディングを返すため、
+            # トークン単位ではなく文単位で処理
+            embeddings_list = []
+            for text in texts:
+                embedding = self.openai_wrapper.get_embeddings([text])[0]
+                embeddings_list.append(embedding)
+            
+            # テンソルに変換
+            text_embeds = torch.tensor(
+                np.array(embeddings_list), 
+                device=token_ids.device, 
+                dtype=torch.float32
+            )
+            
+            # 次元が異なる場合は射影
+            text_embeds = self.projection(text_embeds)
+            
+            # シーケンス長に合わせて拡張（文全体のエンベディングを各トークンに適用）
+            if text_embeds.dim() == 2:
+                text_embeds = text_embeds.unsqueeze(1).expand(-1, seq_len, -1)
+        else:
+            # 従来のテキストエンベディング
+            text_embeds = self.text_embedding(token_ids)
         
         # 位置埋め込み
         positions = torch.arange(seq_len, device=token_ids.device).unsqueeze(0).expand(batch_size, -1)
@@ -526,13 +726,35 @@ class NeuroQuantum(nn.Module):
     - 学習可能な λ（もつれ強度）
     """
     
-    def __init__(self, config: NeuroQuantumConfig):
+    def __init__(
+        self, 
+        config: NeuroQuantumConfig,
+        use_openai_embedding: bool = False,
+        openai_api_key: Optional[str] = None,
+        openai_model: str = "text-embedding-3-large",
+        tokenizer = None
+    ):
         super().__init__()
         self.config = config
+        self.use_openai_embedding = use_openai_embedding
         
         # GPT標準: Text Embedding + Position Embedding
-        self.text_embedding = nn.Embedding(config.vocab_size, config.embed_dim)  # テキストエンベディング
-        self.position_embedding = nn.Embedding(config.max_seq_len, config.embed_dim)
+        # OpenAI Embeddingを使用する場合はNeuroQuantumEmbeddingクラスを使用
+        if use_openai_embedding:
+            self.embedding = NeuroQuantumEmbedding(
+                config=config,
+                use_openai_embedding=True,
+                openai_api_key=openai_api_key,
+                openai_model=openai_model,
+                tokenizer=tokenizer
+            )
+            # 互換性のため、position_embeddingは保持
+            self.text_embedding = None  # OpenAI Embedding使用時は不要
+            self.position_embedding = self.embedding.position_embedding
+        else:
+            self.text_embedding = nn.Embedding(config.vocab_size, config.embed_dim)  # テキストエンベディング
+            self.position_embedding = nn.Embedding(config.max_seq_len, config.embed_dim)
+            self.embedding = None
         
         # GPT Decoder Blocks
         self.transformer_blocks = nn.ModuleList([
@@ -583,13 +805,17 @@ class NeuroQuantum(nn.Module):
         batch, seq = token_ids.shape
         
         # ステップ1: トークンID → テキストエンベディング
-        # Text Embedding: トークンIDをベクトルに変換（テキストエンベディング）
-        text_embeds = self.text_embedding(token_ids)  # (batch, seq, embed_dim)
-        # Position Embedding: 位置情報を追加
-        positions = torch.arange(seq, device=token_ids.device).unsqueeze(0).expand(batch, -1)
-        pos_embeds = self.position_embedding(positions)  # (batch, seq, embed_dim)
-        # 埋め込みの合成 + Dropout
-        hidden_states = self.dropout(text_embeds + pos_embeds)
+        if self.use_openai_embedding and self.embedding is not None:
+            # OpenAI Embeddingを使用
+            hidden_states = self.embedding(token_ids, texts=None)
+        else:
+            # Text Embedding: トークンIDをベクトルに変換（テキストエンベディング）
+            text_embeds = self.text_embedding(token_ids)  # (batch, seq, embed_dim)
+            # Position Embedding: 位置情報を追加
+            positions = torch.arange(seq, device=token_ids.device).unsqueeze(0).expand(batch, -1)
+            pos_embeds = self.position_embedding(positions)  # (batch, seq, embed_dim)
+            # 埋め込みの合成 + Dropout
+            hidden_states = self.dropout(text_embeds + pos_embeds)
         
         # Causal Mask生成（maskがNoneの場合）
         if mask is None:
@@ -622,41 +848,36 @@ class NeuroQuantum(nn.Module):
 
 
 # ========================================
-# Part 7: トークナイザー
+# Part 7: トークナイザー（SentencePiece使用）
 # ========================================
 
 class NeuroQuantumTokenizer:
     """
-    ニューロQ トークナイザー（図2-4のトークン化ステップに準拠）
-
-    SentencePieceトークナイザーを使用:
+    SentencePieceトークナイザーを使用
+    
     - 語彙サイズを指定して学習可能（8000-32000推奨）
     - BPEアルゴリズムを使用（日本語に適している）
     - モデルの保存・読み込みが可能
     - フォールバック: 簡易トークナイザー（SentencePiece未インストール時）
-
-    処理フロー:
-    1. 入力テキスト → トークン化（テキストを個々のトークンに分割）
-    2. トークン → トークンID（各トークンを数値IDに変換）
     """
-
-    def __init__(self, vocab_size: int = 8000, model_file: str = None):
+    
+    def __init__(self, vocab_size: int = 16000, model_file: str = None):
         """
         Args:
-            vocab_size: 語彙サイズ（デフォルト: 8000）
+            vocab_size: 語彙サイズ（デフォルト: 16000）
             model_file: 既存のSentencePieceモデルファイルパス（Noneの場合は新規学習）
         """
         self.vocab_size = vocab_size
         self.actual_vocab_size = None
         self.model_file = model_file
         self.sp_model = None
-
+        
         # 特殊トークン
         self.pad_token = '<pad>'
         self.unk_token = '<unk>'
         self.bos_token = '<s>'
         self.eos_token = '</s>'
-
+        
         # SentencePieceを使用
         if SENTENCEPIECE_AVAILABLE:
             if model_file and os.path.exists(model_file):
@@ -666,11 +887,6 @@ class NeuroQuantumTokenizer:
                     self.sp_model.load(model_file)
                     self.actual_vocab_size = self.sp_model.get_piece_size()
                     self.vocab_size = self.actual_vocab_size
-                    # 特殊トークンIDを取得
-                    self.pad_id = self.sp_model.pad_id()
-                    self.unk_id = self.sp_model.unk_id()
-                    self.bos_id = self.sp_model.bos_id()
-                    self.eos_id = self.sp_model.eos_id()
                     print(f"   ✅ SentencePieceモデル読み込み: {model_file} (語彙サイズ: {self.actual_vocab_size})")
                 except Exception as e:
                     warnings.warn(f"SentencePieceモデルの読み込みに失敗: {e}。新規学習します。")
@@ -678,91 +894,51 @@ class NeuroQuantumTokenizer:
         else:
             # SentencePiece未インストール
             self.sp_model = None
-
+        
         # SentencePieceが使えない場合はフォールバック
         if self.sp_model is None:
             self._init_fallback()
-
+    
     def _init_fallback(self):
         """フォールバック用の簡易トークナイザー初期化"""
-        # 基本的な特殊トークン
-        self.char_to_idx = {'<PAD>': 0, '<UNK>': 1, '<BOS>': 2, '<EOS>': 3}
-        self.idx_to_char = {0: '<PAD>', 1: '<UNK>', 2: '<BOS>', 3: '<EOS>'}
-        
-        # よく使う文字を事前に追加（日本語対応強化）
-        common_chars = (
-            # ひらがな
-            'あいうえおかきくけこさしすせそたちつてとなにぬねのはひふへほまみむめもやゆよらりるれろわをん'
-            # カタカナ
-            'アイウエオカキクケコサシスセソタチツテトナニヌネノハヒフヘホマミムメモヤユヨラリルレロワヲン'
-            # 英数字
-            'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789'
-            # 記号
-            ' 　。、！？「」『』（）・ー〜…'
-            # 特殊タグ文字
-            '<>/'
-        )
-        
-        for char in common_chars:
-            if char not in self.char_to_idx:
-                idx = len(self.char_to_idx)
-                self.char_to_idx[char] = idx
-                self.idx_to_char[idx] = char
-        
-        # 特殊タグも追加
-        special_tags = ['<USER>', '<ASSISTANT>']
-        for tag in special_tags:
-            if tag not in self.char_to_idx:
-                idx = len(self.char_to_idx)
-                self.char_to_idx[tag] = idx
-                self.idx_to_char[idx] = tag
-        
-        # vocab_sizeは設定されている値を保持（上書きしない）
-        if not hasattr(self, 'vocab_size') or self.vocab_size is None:
-            self.vocab_size = len(self.char_to_idx)
-        # actual_vocab_sizeを現在の語彙サイズで初期化（build_vocab()で更新される）
-        self.actual_vocab_size = len(self.char_to_idx)
-
-        # 特殊トークンID
+        self.token_to_idx: Dict[str, int] = {}
+        self.idx_to_token: Dict[int, str] = {}
         self.pad_id = 0
         self.unk_id = 1
         self.bos_id = 2
         self.eos_id = 3
-        
-        print(f"   🔤 フォールバックトークナイザー初期化: 語彙サイズ={self.actual_vocab_size}")
-
-    def build_vocab(self, texts: List[str], character_coverage: float = 0.9995, model_prefix: str = "spm_model_layered", min_freq: int = 1):
+    
+    def build_vocab(self, texts: List[str], min_freq: int = 2, 
+                    character_coverage: float = 0.9995, model_prefix: str = "spm_model"):
         """
         SentencePieceで語彙を学習
-
+        
         Args:
             texts: 学習テキストのリスト
+            min_freq: 最小頻度（SentencePieceでは内部的に処理）
             character_coverage: 文字カバレッジ（0.9995が推奨、日本語の場合は0.9995-0.99995）
             model_prefix: モデルファイルのプレフィックス
-            min_freq: 最小頻度（フォールバック用）
         """
         if not SENTENCEPIECE_AVAILABLE:
             warnings.warn("SentencePieceが利用できません。フォールバックトークナイザーを使用します。")
             self._build_vocab_fallback(texts, min_freq)
             return self
-
-        # vocab_sizeが4以下（特殊トークンのみ）の場合は、デフォルト値を使用
-        actual_vocab_size = max(self.vocab_size, 8000) if self.vocab_size <= 4 else self.vocab_size
-        print(f"   🔤 SentencePieceで語彙学習中... (目標語彙サイズ: {actual_vocab_size})")
-
+        
+        print(f"   🔤 SentencePieceで語彙学習中... (目標語彙サイズ: {self.vocab_size})")
+        
         # 一時ファイルにテキストを保存
         import tempfile
         with tempfile.NamedTemporaryFile(mode='w', suffix='.txt', delete=False, encoding='utf-8') as f:
             temp_file = f.name
             for text in texts:
                 f.write(text + '\n')
-
+        
         try:
             # SentencePiece学習
             spm.SentencePieceTrainer.train(
                 input=temp_file,
                 model_prefix=model_prefix,
-                vocab_size=actual_vocab_size,
+                vocab_size=self.vocab_size,
                 character_coverage=character_coverage,
                 model_type='bpe',  # BPEアルゴリズム
                 pad_id=0,
@@ -773,8 +949,9 @@ class NeuroQuantumTokenizer:
                 unk_piece=self.unk_token,
                 bos_piece=self.bos_token,
                 eos_piece=self.eos_token,
+                user_defined_symbols=[],  # 追加の特殊トークン
             )
-
+            
             # モデルを読み込み
             model_file_path = model_prefix + '.model'
             self.sp_model = spm.SentencePieceProcessor()
@@ -782,18 +959,15 @@ class NeuroQuantumTokenizer:
             self.actual_vocab_size = self.sp_model.get_piece_size()
             self.vocab_size = self.actual_vocab_size
             self.model_file = model_file_path
-            # vocab_sizeを更新
-            if hasattr(self, 'vocab_size') and self.vocab_size <= 4:
-                self.vocab_size = self.actual_vocab_size
-
+            
             # 特殊トークンIDを取得
             self.pad_id = self.sp_model.pad_id()
             self.unk_id = self.sp_model.unk_id()
             self.bos_id = self.sp_model.bos_id()
             self.eos_id = self.sp_model.eos_id()
-
+            
             print(f"   ✅ SentencePiece語彙学習完了 (語彙サイズ: {self.actual_vocab_size})")
-
+            
         except Exception as e:
             warnings.warn(f"SentencePiece学習に失敗: {e}。フォールバックを使用します。")
             self._build_vocab_fallback(texts, min_freq)
@@ -806,44 +980,32 @@ class NeuroQuantumTokenizer:
                 temp_file_ext = model_prefix + ext
                 if os.path.exists(temp_file_ext):
                     os.unlink(temp_file_ext)
-
+        
         return self
-
-    def _build_vocab_fallback(self, texts: List[str], min_freq: int = 1):
+    
+    def _build_vocab_fallback(self, texts: List[str], min_freq: int = 2):
         """フォールバック：簡易語彙構築"""
         print(f"   🔤 フォールバック語彙構築中...")
-        char_counts = Counter()
+        char_freq = Counter()
         for text in texts:
-            char_counts.update(list(text))
-
-        # vocab_sizeが4以下（特殊トークンのみ）の場合は、デフォルト値を使用
-        target_vocab_size = max(self.vocab_size, 8000) if self.vocab_size <= 4 else self.vocab_size
-
-        for char, count in char_counts.most_common(target_vocab_size - 4):
-            if char not in self.char_to_idx and count >= min_freq:
-                idx = len(self.char_to_idx)
-                self.char_to_idx[char] = idx
-                self.idx_to_char[idx] = char
-
-        self.vocab_size = len(self.char_to_idx)
-        self.actual_vocab_size = self.vocab_size
-        print(f"   ✅ 語彙サイズ: {self.vocab_size}")
-
-    def encode(self, text: str, add_special: bool = False) -> List[int]:
-        """
-        エンコード（図2-4のトークン化ステップ）
-
-        処理:
-        1. 入力テキスト → トークン化（テキストを個々のトークンに分割）
-        2. トークン → トークンID（各トークンを数値IDに変換）
-
-        Args:
-            text: 入力テキスト（例: "This is an example."）
-            add_special: 特殊トークン（BOS/EOS）を追加するか
-
-        Returns:
-            トークンIDのリスト（例: [40134, 2052, 133, 389, 12]）
-        """
+            char_freq.update(text)
+        
+        special_tokens = [self.pad_token, self.unk_token, self.bos_token, self.eos_token]
+        self.token_to_idx = {token: i for i, token in enumerate(special_tokens)}
+        
+        chars_to_add = [char for char, freq in char_freq.most_common() if freq >= min_freq]
+        for char in chars_to_add[:self.vocab_size - 4]:
+            if char not in self.token_to_idx:
+                idx = len(self.token_to_idx)
+                self.token_to_idx[char] = idx
+                self.idx_to_token[idx] = char
+        
+        self.actual_vocab_size = len(self.token_to_idx)
+        self.vocab_size = self.actual_vocab_size
+        print(f"   ✅ 語彙サイズ: {self.actual_vocab_size}")
+    
+    def encode(self, text: str, add_special: bool = True) -> List[int]:
+        """エンコード"""
         if self.sp_model is not None:
             # SentencePiece使用
             if add_special:
@@ -851,108 +1013,98 @@ class NeuroQuantumTokenizer:
             else:
                 return self.sp_model.encode(text, out_type=int, add_bos=False, add_eos=False)
         else:
-            # フォールバック：最長マッチ方式
+            # フォールバック
             tokens = []
             if add_special:
                 tokens.append(self.bos_id)
-
-            i = 0
-            text_len = len(text)
-            while i < text_len:
-                matched = False
-                for length in range(min(8, text_len - i), 0, -1):
-                    substr = text[i:i+length]
-                    if substr in self.char_to_idx:
-                        tokens.append(self.char_to_idx[substr])
-                        i += length
-                        matched = True
-                        break
-
-                if not matched:
-                    tokens.append(self.char_to_idx.get(text[i], self.unk_id))
-                    i += 1
-
+            for char in text:
+                tokens.append(self.token_to_idx.get(char, self.unk_id))
             if add_special:
                 tokens.append(self.eos_id)
-
             return tokens
-
+    
     def decode(self, token_ids: List[int], skip_special: bool = True) -> str:
         """デコード"""
         if self.sp_model is not None:
             # SentencePiece使用
-            # Ensure token_ids are integers (not numpy types or tensors)
-            token_ids_list = [int(tid) for tid in token_ids]
-
-            # Decode and ensure proper UTF-8 encoding
-            result = self.sp_model.decode(token_ids_list)
-
-            # Handle both string and bytes returns from SentencePiece
-            if isinstance(result, bytes):
-                return result.decode('utf-8', errors='replace')
-            elif isinstance(result, str):
-                # Ensure the string is properly encoded by encoding and decoding
-                # This handles any encoding inconsistencies
-                return result.encode('utf-8', errors='replace').decode('utf-8', errors='replace')
-            else:
-                return str(result)
+            if skip_special:
+                # 特殊トークンをスキップ
+                special_ids = {self.pad_id, self.eos_id, self.bos_id, self.unk_id}
+                token_ids = [t for t in token_ids if t not in special_ids]
+            return self.sp_model.decode(token_ids)
         else:
             # フォールバック
-            chars = []
+            tokens = []
             special_ids = {self.pad_id, self.unk_id, self.bos_id, self.eos_id}
-
             for t in token_ids:
                 if skip_special and t in special_ids:
                     continue
-                char = self.idx_to_char.get(t, self.unk_token)
-                if char not in ['<PAD>', '<UNK>', '<BOS>', '<EOS>']:
-                    chars.append(char)
-
-            return ''.join(chars)
-
+                token = self.idx_to_token.get(t, self.unk_token)
+                if token not in [self.pad_token, self.unk_token, self.bos_token, self.eos_token]:
+                    tokens.append(token)
+            return ''.join(tokens)
+    
     def save(self, path: str):
         """保存"""
-        if self.sp_model is not None:
-            # SentencePieceモデルは既に保存されている
-            print(f"   ✅ SentencePieceモデル保存済み: {self.model_file}")
-        else:
-            # フォールバック用の保存
-            data = {
-                'char_to_idx': self.char_to_idx,
+        if self.sp_model is not None and self.model_file:
+            # SentencePieceモデルファイルをコピー
+            import shutil
+            target_file = path + '.model'
+            shutil.copy(self.model_file, target_file)
+            
+            # メタデータを保存
+            meta = {
                 'vocab_size': self.vocab_size,
+                'actual_vocab_size': self.actual_vocab_size,
+                'model_file': target_file,
             }
-            with open(path, 'w', encoding='utf-8') as f:
+            with open(path + '.json', 'w', encoding='utf-8') as f:
+                json.dump(meta, f, ensure_ascii=False, indent=2)
+        else:
+            # フォールバック
+            data = {
+                'token_to_idx': self.token_to_idx,
+                'vocab_size': self.vocab_size,
+                'actual_vocab_size': self.actual_vocab_size,
+            }
+            with open(path + '.json', 'w', encoding='utf-8') as f:
                 json.dump(data, f, ensure_ascii=False, indent=2)
-
+    
     def load(self, path: str):
         """読み込み"""
-        if path.endswith('.model'):
-            # SentencePieceモデルを読み込み
-            if SENTENCEPIECE_AVAILABLE:
-                try:
-                    self.sp_model = spm.SentencePieceProcessor()
-                    self.sp_model.load(path)
-                    self.actual_vocab_size = self.sp_model.get_piece_size()
-                    self.vocab_size = self.actual_vocab_size
-                    self.model_file = path
-                    # 特殊トークンIDを取得
-                    self.pad_id = self.sp_model.pad_id()
-                    self.unk_id = self.sp_model.unk_id()
-                    self.bos_id = self.sp_model.bos_id()
-                    self.eos_id = self.sp_model.eos_id()
-                    print(f"   ✅ SentencePieceモデル読み込み: {path} (語彙サイズ: {self.actual_vocab_size})")
-                except Exception as e:
-                    warnings.warn(f"SentencePieceモデルの読み込みに失敗: {e}")
-            else:
-                warnings.warn("SentencePieceが利用できません。")
-        else:
-            # フォールバック用のJSONファイルを読み込み
-            with open(path, 'r', encoding='utf-8') as f:
+        model_file_path = path + '.model'
+        json_file_path = path + '.json'
+        
+        if SENTENCEPIECE_AVAILABLE and os.path.exists(model_file_path):
+            try:
+                self.sp_model = spm.SentencePieceProcessor()
+                self.sp_model.load(model_file_path)
+                self.actual_vocab_size = self.sp_model.get_piece_size()
+                self.vocab_size = self.actual_vocab_size
+                self.model_file = model_file_path
+                
+                # 特殊トークンIDを取得
+                self.pad_id = self.sp_model.pad_id()
+                self.unk_id = self.sp_model.unk_id()
+                self.bos_id = self.sp_model.bos_id()
+                self.eos_id = self.sp_model.eos_id()
+                
+                return self
+            except Exception as e:
+                warnings.warn(f"SentencePieceモデルの読み込みに失敗: {e}")
+        
+        # フォールバック：JSONから読み込み
+        if os.path.exists(json_file_path):
+            with open(json_file_path, 'r', encoding='utf-8') as f:
                 data = json.load(f)
-            self.char_to_idx = data['char_to_idx']
-            self.idx_to_char = {int(i): c for c, i in self.char_to_idx.items()}
-            self.vocab_size = data['vocab_size']
-        return self
+            if 'token_to_idx' in data:
+                self.token_to_idx = data['token_to_idx']
+                self.idx_to_token = {int(i): token for token, i in self.token_to_idx.items()}
+                self.vocab_size = data.get('vocab_size', len(self.token_to_idx))
+                self.actual_vocab_size = data.get('actual_vocab_size', len(self.token_to_idx))
+                return self
+        
+        raise FileNotFoundError(f"トークナイザーモデルが見つかりません: {path}")
 
 
 # ========================================
@@ -966,6 +1118,18 @@ class NeuroQuantumAI:
     QBNN-LLM による生成AI
     
     ニューロン数（hidden_dim）を指定可能
+    
+    OpenAI Embedding使用例:
+        # OpenAI Embeddingを使用する場合
+        ai = NeuroQuantumAI(
+            embed_dim=3072,  # text-embedding-3-largeの次元
+            use_openai_embedding=True,
+            openai_api_key="sk-...",  # または環境変数OPENAI_API_KEY
+            openai_model="text-embedding-3-large"
+        )
+        
+        # 従来の埋め込みを使用する場合（デフォルト）
+        ai = NeuroQuantumAI(embed_dim=48)
     """
     
     def __init__(
@@ -1013,15 +1177,15 @@ class NeuroQuantumAI:
         if self.use_quantum_simulation:
             self.quantum_computer = QuantumComputer("NeuroQuantum-QC")
             print("⚛️  量子回路シミュレーターを初期化しました")
-
-    def train(self, texts: List[str], epochs: int = 50, batch_size: int = 16,
-              lr: float = 0.001, seq_len: int = 64):
+    
+    def train(self, texts: List[str], epochs: int = 50, batch_size: int = 16, 
+              lr: float = 0.001, seq_len: int = 64, vocab_size: int = 16000):
         """学習"""
         print("\n" + "=" * 70)
         print("📚 ニューロQ 学習開始")
         print("=" * 70)
-
-        # トークナイザー構築
+        
+        # トークナイザー構築（SentencePiece使用）
         print("\n🔤 トークナイザー構築...")
 
         # 既存のSentencePieceモデルを探す
@@ -1045,25 +1209,36 @@ class NeuroQuantumAI:
         if existing_model:
             # 既存のSentencePieceモデルを使用
             print(f"   既存のSentencePieceモデルを使用: {existing_model}")
-            self.tokenizer = NeuroQuantumTokenizer(vocab_size=8000, model_file=existing_model)
+            self.tokenizer = NeuroQuantumTokenizer(vocab_size=vocab_size, model_file=existing_model)
         else:
             # 新規に語彙を構築
             print("   新規に語彙を構築します...")
-            self.tokenizer = NeuroQuantumTokenizer(vocab_size=8000)
-            self.tokenizer.build_vocab(texts, model_prefix="neuroq_tokenizer")
+            self.tokenizer = NeuroQuantumTokenizer(vocab_size=vocab_size)
+            self.tokenizer.build_vocab(texts, model_prefix="neuroq_tokenizer", min_freq=2)
 
-        # 語彙サイズを取得（actual_vocab_sizeがNoneの場合はvocab_sizeを使用）
-        effective_vocab_size = self.tokenizer.actual_vocab_size
-        if effective_vocab_size is None or effective_vocab_size <= 4:
-            effective_vocab_size = self.tokenizer.vocab_size
-        if effective_vocab_size is None or effective_vocab_size <= 4:
-            effective_vocab_size = 8000  # デフォルト値
-        print(f"   語彙サイズ: {effective_vocab_size}")
+        print(f"   語彙サイズ: {self.tokenizer.actual_vocab_size}")
         
         # モデル構築
         print("\n🧠 ニューロQモデル構築...")
+        
+        # OpenAI Embedding使用時は埋め込み次元を調整
+        if self.use_openai_embedding:
+            # OpenAI Embeddingの次元を使用
+            # モデルごとのデフォルト次元
+            if "ada-002" in self.openai_model:
+                actual_embed_dim = 1536
+            elif "embedding-3-large" in self.openai_model:
+                actual_embed_dim = 3072
+            elif "embedding-3-small" in self.openai_model:
+                actual_embed_dim = 1536
+            else:
+                actual_embed_dim = 3072  # デフォルト
+            if self.embed_dim != actual_embed_dim:
+                print(f"   OpenAI Embedding次元({actual_embed_dim})に合わせて調整")
+                self.embed_dim = actual_embed_dim
+        
         self.config = NeuroQuantumConfig(
-            vocab_size=effective_vocab_size,
+            vocab_size=self.tokenizer.actual_vocab_size,
             embed_dim=self.embed_dim,
             hidden_dim=self.hidden_dim,
             num_heads=self.num_heads,
@@ -1073,9 +1248,19 @@ class NeuroQuantumAI:
             lambda_entangle=self.lambda_entangle,
         )
         
-        self.model = NeuroQuantum(self.config).to(self.device)
+        self.model = NeuroQuantum(
+            config=self.config,
+            use_openai_embedding=self.use_openai_embedding,
+            openai_api_key=self.openai_api_key,
+            openai_model=self.openai_model,
+            tokenizer=self.tokenizer
+        ).to(self.device)
         
         print(f"\n📊 モデル構成:")
+        if self.use_openai_embedding:
+            print(f"   埋め込み: OpenAI Embedding ({self.openai_model})")
+        else:
+            print(f"   埋め込み: 従来のEmbedding層")
         print(f"   埋め込み次元: {self.embed_dim}")
         print(f"   隠れ層次元: {self.hidden_dim}")
         print(f"   アテンションヘッド: {self.num_heads}")
@@ -1087,29 +1272,15 @@ class NeuroQuantumAI:
         print("\n📊 データ準備...")
         all_tokens = []
         for text in texts:
-            # IMPORTANT: Use add_special=False to match generation behavior
-            # Generation uses add_special=True for the prompt, but the model
-            # should learn to predict tokens without BOS/EOS in the middle of sequences
-            tokens = self.tokenizer.encode(text, add_special=False)
+            tokens = self.tokenizer.encode(text)
             all_tokens.extend(tokens)
         
-        print(f"   総トークン数: {len(all_tokens):,}")
-        print(f"   seq_len: {seq_len}")
-        
-        # トークン数が不足している場合は繰り返す
-        min_tokens_needed = seq_len * 4  # 最低でも数シーケンス作れる量
-        if len(all_tokens) < min_tokens_needed:
-            print(f"   ⚠️ トークン数が不足 ({len(all_tokens)} < {min_tokens_needed})。繰り返します...")
-            repeat_count = (min_tokens_needed // len(all_tokens)) + 1
-            all_tokens = all_tokens * repeat_count
-            print(f"   繰り返し後のトークン数: {len(all_tokens):,}")
-        
         all_tokens = torch.tensor(all_tokens, dtype=torch.long)
+        print(f"   総トークン数: {len(all_tokens):,}")
         
         # シーケンス作成
         sequences = []
-        step_size = max(1, seq_len // 2)  # ステップサイズが0にならないように
-        for i in range(0, len(all_tokens) - seq_len - 1, step_size):
+        for i in range(0, len(all_tokens) - seq_len - 1, seq_len // 2):
             x = all_tokens[i:i+seq_len]
             y = all_tokens[i+1:i+seq_len+1]
             if len(x) == seq_len and len(y) == seq_len:
@@ -1117,86 +1288,47 @@ class NeuroQuantumAI:
         
         print(f"   シーケンス数: {len(sequences):,}")
         
-        # シーケンスが作成できない場合のエラー処理
-        if len(sequences) == 0:
-            print("   ⚠️ シーケンスが作成できませんでした。より短いseq_lenで再試行します...")
-            seq_len = min(8, len(all_tokens) - 2)
-            if seq_len < 2:
-                raise ValueError(f"トークン数が少なすぎます: {len(all_tokens)}")
-            for i in range(0, len(all_tokens) - seq_len - 1, max(1, seq_len // 2)):
-                x = all_tokens[i:i+seq_len]
-                y = all_tokens[i+1:i+seq_len+1]
-                if len(x) == seq_len and len(y) == seq_len:
-                    sequences.append((x, y))
-            print(f"   再試行後のシーケンス数: {len(sequences):,}")
-        
         # 学習
         optimizer = torch.optim.AdamW(self.model.parameters(), lr=lr, weight_decay=0.01)
         scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=epochs)
         criterion = nn.CrossEntropyLoss()
-
-        print("\n🚀 学習ループ...", flush=True)
-
-        import random
-        import sys
-
-        try:
-            self.model.train()
-            print(f"   モデルを学習モードに設定しました", flush=True)
-            sys.stdout.flush()
-        except Exception as e:
-            print(f"   ❌ モデル設定エラー: {e}", flush=True)
-            import traceback
-            traceback.print_exc()
-            raise
-
+        
+        print("\n🚀 学習ループ...")
+        self.model.train()
+        
         for epoch in range(epochs):
             total_loss = 0
-            # Use Python's random.shuffle instead of numpy for better compatibility
-            print(f"   Epoch {epoch+1}/{epochs} - シャッフル開始...", flush=True)
-            sys.stdout.flush()
-
-            try:
-                # Shuffle sequences - use in-place shuffle for memory efficiency
-                random.shuffle(sequences)
-                print(f"   Epoch {epoch+1}/{epochs} - シャッフル完了, バッチ処理開始...", flush=True)
-                sys.stdout.flush()
-            except Exception as e:
-                print(f"   ⚠️ シャッフルエラー: {e}", flush=True)
-                print(f"   シャッフルをスキップして学習を続行します...", flush=True)
-                sys.stdout.flush()
-
-            num_batches = len(sequences) // batch_size
-            for batch_idx, i in enumerate(range(0, len(sequences), batch_size)):
+            np.random.shuffle(sequences)
+            
+            for i in range(0, len(sequences), batch_size):
                 batch = sequences[i:i+batch_size]
                 if len(batch) == 0:
                     continue
-
+                
                 x_batch = torch.stack([s[0] for s in batch]).to(self.device)
                 y_batch = torch.stack([s[1] for s in batch]).to(self.device)
-
+                
                 optimizer.zero_grad()
                 logits = self.model(x_batch)
-
+                
+                # vocab_sizeを取得
+                vocab_size = self.tokenizer.actual_vocab_size if self.tokenizer.actual_vocab_size else self.tokenizer.vocab_size
                 loss = criterion(
-                    logits.view(-1, self.config.vocab_size),
+                    logits.view(-1, vocab_size),
                     y_batch.view(-1)
                 )
-
+                
                 loss.backward()
                 torch.nn.utils.clip_grad_norm_(self.model.parameters(), 1.0)
                 optimizer.step()
-
+                
                 total_loss += loss.item()
-
-                # Progress indicator every 500 batches
-                if (batch_idx + 1) % 500 == 0:
-                    print(f"      バッチ {batch_idx+1}/{num_batches} - Loss: {loss.item():.4f}", flush=True)
-
+            
             scheduler.step()
             avg_loss = total_loss / max(1, len(sequences) // batch_size)
-
-            print(f"   Epoch {epoch+1:3d}/{epochs}: Loss = {avg_loss:.4f}", flush=True)
+            
+            if (epoch + 1) % 5 == 0 or epoch == 0:
+                print(f"   Epoch {epoch+1:3d}/{epochs}: Loss = {avg_loss:.4f}")
         
         print("\n✅ 学習完了！")
         
@@ -1287,17 +1419,17 @@ class NeuroQuantumAI:
         temp_max: float = 0.8,       # 温度の上限
         top_k: int = 40,
         top_p: float = 0.9,
-        repetition_penalty: float = 2.0,
+        repetition_penalty: float = 2.0,  # 強化（1.15 → 2.0、より強力に）
         no_repeat_ngram_size: int = 3,  # N-gram重複防止
         temperature: float = None,   # 後方互換性のため（指定された場合temp_min/temp_maxを自動計算）
-        skip_format: bool = False,   # Trueの場合、対話形式のフォーマットをスキップ（既にフォーマット済みの場合）
     ) -> str:
         """
-        テキスト生成（対話形式）
+        テキスト生成（改善版）
         
-        温度を範囲で指定することで、θ（シータ）が動的に変化できるようにする。
-        APQB理論: r = cos(2θ), T = |sin(2θ)|, r² + T² = 1
-        温度Tが固定だとθが固定され、量子的ゆらぎがなくなる。
+        改善点:
+        - 強化された繰り返しペナルティ
+        - N-gram重複防止
+        - より安定したサンプリング
         
         Args:
             temperature: 後方互換性のための単一温度パラメータ。
@@ -1312,11 +1444,7 @@ class NeuroQuantumAI:
         if self.model is None:
             # 自動的にサンプルデータで学習を実行
             print("⚠️ モデルが未学習です。サンプルデータで自動学習を開始...")
-            print(f"   カレントディレクトリ: {os.getcwd()}")
-            
-            # 対話形式を含む拡張サンプルデータ
             sample_data = [
-                # 基本的な説明文
                 "人工知能は、人間の知能を模倣するコンピュータシステムです。機械学習やディープラーニングなどの技術を使用して、データからパターンを学習し、予測や判断を行います。",
                 "量子コンピュータは、量子力学の原理を利用した次世代のコンピュータです。従来のコンピュータでは解けない複雑な問題を高速に解くことができます。",
                 "自然言語処理は、コンピュータが人間の言語を理解し、生成するための技術です。翻訳、要約、質問応答などのタスクに使用されます。",
@@ -1325,97 +1453,20 @@ class NeuroQuantumAI:
                 "データサイエンスは、大量のデータから有用な情報を抽出し、ビジネスや研究に活用する学問分野です。統計学、機械学習、可視化などの手法を組み合わせます。",
                 "クラウドコンピューティングは、インターネット経由でコンピュータリソースを提供するサービスです。AWS、Azure、GCPなどのプラットフォームが代表的です。",
                 "ブロックチェーンは、分散型台帳技術の一種で、データの改ざんを防ぐ仕組みを持っています。暗号通貨や契約管理などに応用されています。",
-                # 対話形式のデータ
-                "<USER>こんにちは<ASSISTANT>こんにちは！私はニューロQです。何かお手伝いできることはありますか？",
-                "<USER>あなたは誰ですか<ASSISTANT>私はニューロQという名前の生成AIです。よろしくお願いします。",
-                "<USER>量子とは何ですか<ASSISTANT>量子とは、物質やエネルギーの最小単位のことです。量子力学では、粒子は波の性質も持ちます。",
-                "<USER>AIとは何ですか<ASSISTANT>AIは人工知能（Artificial Intelligence）の略で、機械に知的な振る舞いをさせる技術です。",
-                "<USER>Hello<ASSISTANT>Hello! I'm NeuroQ. How can I help you today?",
-                "<USER>What is quantum computing<ASSISTANT>Quantum computing uses quantum mechanics principles to perform calculations much faster than classical computers.",
-                "<USER>ありがとう<ASSISTANT>どういたしまして！お役に立てて嬉しいです。",
-                "<USER>教えてください<ASSISTANT>はい、何について知りたいですか？具体的に教えてください。",
             ]
-            
-            # データを結合して十分な長さを確保
-            long_text = " ".join(sample_data) * 10
-            combined_data = [long_text]
-            print(f"   結合後のテキスト長: {len(long_text)}")
-            
-            # 複数回の試行で学習を実行
-            max_retries = 3
-            training_success = False
-            
-            for attempt in range(max_retries):
-                try:
-                    print(f"🔄 自動学習試行 {attempt + 1}/{max_retries}...")
-                    self.train(combined_data, epochs=5, seq_len=16)  # 軽量な学習
-                    print("✅ 自動学習完了")
-                    
-                    # 学習後の確認
-                    if self.model is None:
-                        if attempt < max_retries - 1:
-                            print(f"   学習試行 {attempt + 1} 後もmodel.modelがNoneです。再試行します...")
-                            continue
-                        else:
-                            raise Exception("すべての学習試行後もmodel.modelがNoneです")
-                    
-                    training_success = True
-                    break
-                    
-                except Exception as e:
-                    print(f"⚠️ 自動学習試行 {attempt + 1} に失敗しました: {e}")
-                    import traceback
-                    traceback.print_exc()
-                    
-                    if attempt < max_retries - 1:
-                        print("   再試行します...")
-                        continue
-                    else:
-                        print("   すべての学習試行が失敗しました")
-            
-            if not training_success or self.model is None:
-                raise ValueError("モデルが学習されていません。すべての自動学習試行が失敗しました。")
-        
-        # 学習後もモデルがNoneの場合はエラー
-        if self.model is None:
-            raise ValueError("モデルが学習されていません")
+            self.train(sample_data, epochs=3)  # 軽量な学習
+            print("✅ 自動学習完了")
         
         self.model.eval()
-
-        # デバッグ情報: vocab_size の整合性確認
-        model_vocab_size = self.config.vocab_size
-        tokenizer_vocab_size = self.tokenizer.actual_vocab_size or self.tokenizer.vocab_size
-        embedding_vocab_size = self.model.text_embedding.num_embeddings
-        print(f"🔍 Vocab size check:")
-        print(f"   Config vocab_size: {model_vocab_size}")
-        print(f"   Tokenizer vocab_size: {tokenizer_vocab_size}")
-        print(f"   Embedding vocab_size: {embedding_vocab_size}")
-
-        if model_vocab_size != tokenizer_vocab_size:
-            print(f"⚠️ WARNING: vocab_size mismatch! config={model_vocab_size}, tokenizer={tokenizer_vocab_size}")
-        if model_vocab_size != embedding_vocab_size:
-            print(f"⚠️ WARNING: vocab_size mismatch! config={model_vocab_size}, embedding={embedding_vocab_size}")
-
-        # 対話形式のプロンプトを作成
-        # skip_format=Trueの場合はすでにフォーマット済みなのでそのまま使用
-        if skip_format:
-            dialogue_prompt = prompt
-        else:
-            dialogue_prompt = f"<USER>{prompt}<ASSISTANT>"
-
-        # プロンプトエンコード
-        # IMPORTANT: Use add_special=False to match training data format
-        # Training data does not include BOS/EOS tokens
-        tokens = self.tokenizer.encode(dialogue_prompt, add_special=False)
-
-        # デバッグ情報: トークンID範囲の確認
-        if tokens:
-            print(f"🔍 Token ID range: min={min(tokens)}, max={max(tokens)}, count={len(tokens)}")
-            if max(tokens) >= model_vocab_size:
-                print(f"❌ ERROR: Token ID {max(tokens)} exceeds vocab_size {model_vocab_size}!")
-
+        
+        # プロンプトエンコード（特殊タグなし、シンプルに）
+        tokens = self.tokenizer.encode(prompt, add_special=True)
+        
         tokens = torch.tensor(tokens, dtype=torch.long).unsqueeze(0).to(self.device)
-        generated = tokens[0].tolist()
+        generated = tokens[0].tolist()[1:]  # BOSを除く
+        
+        # 重複防止用のN-gram履歴
+        ngram_history = []
         
         with torch.no_grad():
             for step in range(max_length):
@@ -1423,25 +1474,46 @@ class NeuroQuantumAI:
                 input_tokens = tokens[:, -self.max_seq_len:] if tokens.size(1) > self.max_seq_len else tokens
                 
                 logits = self.model(input_tokens)
-                next_logits = logits[0, -1, :]
+                next_logits = logits[0, -1, :].clone()
 
                 # ⚛️ 量子回路シミュレーションの影響を適用
                 next_logits = self._quantum_circuit_influence(next_logits, step)
 
-                # 繰り返しペナルティ（温度調整の前に適用）
-                # より長い範囲（100トークン）を見て、より強いペナルティを適用
-                recent_tokens = set(generated[-100:])
-                for token_id in recent_tokens:
-                    next_logits[token_id] /= repetition_penalty
+                # 強化された繰り返しペナルティ（温度調整の前に適用）
+                # 最近のトークンに対する強力なペナルティ（recency-weighted）
+                if len(generated) > 0:
+                    # 最近100トークンに重複ペナルティ（50 → 100に拡大）
+                    window_size = min(100, len(generated))
+                    recent_tokens = generated[-window_size:]
+
+                    # トークンごとの出現位置を記録（recency tracking）
+                    token_positions = {}
+                    for pos, token_id in enumerate(recent_tokens):
+                        if token_id not in token_positions:
+                            token_positions[token_id] = []
+                        token_positions[token_id].append(pos)
+
+                    for token_id, positions in token_positions.items():
+                        count = len(positions)
+                        # 最も新しい出現位置（0が最古、window_size-1が最新）
+                        most_recent_pos = max(positions)
+
+                        # Recency weight: 最近のトークンほど強くペナルティ
+                        # 0.5（最古） 〜 1.0（最新）
+                        recency_weight = 0.5 + 0.5 * (most_recent_pos / max(window_size - 1, 1))
+
+                        # 頻出度とrecencyを組み合わせたペナルティ
+                        penalty = repetition_penalty ** (1 + count * 0.3 * recency_weight)
+                        next_logits[token_id] /= penalty
 
                 # 動的温度: θが動けるように範囲内で変化させる
-                # sin波で滑らかに変動（量子的な振動をシミュレート）
-                theta_phase = step * 0.3  # 位相
+                theta_phase = step * 0.2  # 位相（滑らかに）
                 temperature = temp_min + (temp_max - temp_min) * (0.5 + 0.5 * math.sin(theta_phase))
+                temperature = max(temp_min, min(temp_max, temperature))  # 範囲内に制限
 
                 # 温度調整
-                next_logits = next_logits / temperature
-
+                next_logits = next_logits / max(temperature, 0.1)  # ゼロ除算防止
+                
                 # N-gram重複防止
                 if no_repeat_ngram_size > 0 and len(generated) >= no_repeat_ngram_size - 1:
                     # 現在のN-gram prefix（次のトークンを除く）
@@ -1462,17 +1534,21 @@ class NeuroQuantumAI:
                     if banned_tokens:
                         for token_id in banned_tokens:
                             next_logits[token_id] = float('-inf')
-
-                # Top-K
-                if top_k > 0:
-                    top_k_vals, _ = torch.topk(next_logits, min(top_k, next_logits.size(-1)))
-                    indices_to_remove = next_logits < top_k_vals[-1]
-                    next_logits[indices_to_remove] = float('-inf')
                 
-                # Top-P
+                # Top-K（より厳格に）
+                if top_k > 0:
+                    top_k_actual = min(top_k, (next_logits != float('-inf')).sum().item())
+                    if top_k_actual > 0:
+                        top_k_vals, _ = torch.topk(next_logits, top_k_actual)
+                        threshold = top_k_vals[-1]
+                        indices_to_remove = next_logits < threshold
+                        next_logits[indices_to_remove] = float('-inf')
+                
+                # Top-P（より厳格に）
                 if top_p < 1.0:
                     sorted_logits, sorted_indices = torch.sort(next_logits, descending=True)
-                    cumulative_probs = torch.cumsum(F.softmax(sorted_logits, dim=-1), dim=-1)
+                    sorted_probs = F.softmax(sorted_logits, dim=-1)
+                    cumulative_probs = torch.cumsum(sorted_probs, dim=-1)
                     
                     sorted_indices_to_remove = cumulative_probs > top_p
                     sorted_indices_to_remove[1:] = sorted_indices_to_remove[:-1].clone()
@@ -1482,41 +1558,39 @@ class NeuroQuantumAI:
                     next_logits[indices_to_remove] = float('-inf')
                 
                 # サンプリング
+                # 確率が0のトークンを除外
+                valid_logits = next_logits[next_logits != float('-inf')]
+                if len(valid_logits) == 0:
+                    break
+                
                 probs = F.softmax(next_logits, dim=-1)
+                # 数値安定性のため、NaNチェック
+                if torch.isnan(probs).any():
+                    probs = F.softmax(next_logits.fill_(0.0), dim=-1)
+                
                 next_token = torch.multinomial(probs, num_samples=1)
-
-                # トークンID範囲チェック
                 next_token_id = next_token.item()
-                if next_token_id >= model_vocab_size:
-                    print(f"⚠️ Generated token ID {next_token_id} >= vocab_size {model_vocab_size}! Clamping to {model_vocab_size - 1}")
-                    next_token_id = model_vocab_size - 1
-                    next_token = torch.tensor([next_token_id], device=next_token.device)
-
+                
                 # EOS検出
                 if next_token_id == self.tokenizer.eos_id:
                     break
                 
-                # <USER>トークンが出たら終了（次の質問に入らないように）
+                # PADトークンはスキップ
+                if next_token_id == self.tokenizer.pad_id:
+                    continue
+                
                 generated.append(next_token_id)
-                decoded_so_far = self.tokenizer.decode(generated)
-                if "<USER>" in decoded_so_far.split("<ASSISTANT>")[-1]:
+                ngram_history.append(tuple(generated[-no_repeat_ngram_size:]) if len(generated) >= no_repeat_ngram_size else tuple(generated))
+                
+                tokens = torch.cat([tokens, next_token.unsqueeze(0)], dim=1)
+                
+                # 長すぎる場合は終了
+                if len(generated) >= max_length:
                     break
-
-                # 次のトークンをシーケンスに追加
-                tokens = torch.cat([tokens, torch.tensor([[next_token_id]], device=tokens.device)], dim=1)
         
-        # 応答部分のみを抽出
-        full_text = self.tokenizer.decode(generated)
-        
-        # <ASSISTANT>以降のテキストを抽出
-        if "<ASSISTANT>" in full_text:
-            response = full_text.split("<ASSISTANT>")[-1]
-            # <USER>が含まれていたら除去
-            if "<USER>" in response:
-                response = response.split("<USER>")[0]
-            return response.strip()
-        
-        return full_text
+        # デコード（BOS/EOSを除く）
+        decoded = self.tokenizer.decode(generated, skip_special=True)
+        return decoded.strip()
     
     def chat(self):
         """対話モード"""
@@ -1574,8 +1648,7 @@ class NeuroQuantumAI:
                 
                 if user_input == '/info':
                     print(f"\n📊 ニューロQ モデル情報:")
-                    vocab_size = self.config.vocab_size if self.config else (self.tokenizer.actual_vocab_size or self.tokenizer.vocab_size)
-                    print(f"   語彙サイズ: {vocab_size}")
+                    print(f"   語彙サイズ: {self.tokenizer.actual_vocab_size}")
                     print(f"   埋め込み次元: {self.embed_dim}")
                     print(f"   隠れ層次元: {self.hidden_dim}")
                     print(f"   アテンションヘッド: {self.num_heads}")
@@ -1606,32 +1679,30 @@ class NeuroQuantumAI:
             except Exception as e:
                 print(f"   エラー: {e}")
     
-    def save(self, path: str):
-        """モデル保存"""
+    def save_tokenizer(self, path: str):
+        """
+        トークナイザーのみを保存
+
+        注意: モデルの重みは保存しません。
+        モデルは毎回初期化してトレーニングしてください。
+        """
         os.makedirs(os.path.dirname(path) if os.path.dirname(path) else '.', exist_ok=True)
-        
-        torch.save({
-            'model_state': self.model.state_dict(),
-            'config': self.config.__dict__,
-        }, path + '.pt')
-        
-        self.tokenizer.save(path + '_tokenizer.json')
-        print(f"✅ 保存: {path}")
-    
-    def load(self, path: str):
-        """モデル読み込み"""
-        # トークナイザー
-        self.tokenizer = NeuroQuantumTokenizer()
-        self.tokenizer.load(path + '_tokenizer.json')
-        
-        # モデル
-        checkpoint = torch.load(path + '.pt', map_location=self.device)
-        self.config = NeuroQuantumConfig(**checkpoint['config'])
-        self.model = NeuroQuantum(self.config).to(self.device)
-        self.model.load_state_dict(checkpoint['model_state'])
-        
-        print(f"✅ 読み込み: {path}")
-        return self
+
+        # トークナイザーを保存
+        self.tokenizer.save(path + '_tokenizer')
+        print(f"✅ トークナイザーを保存: {path}_tokenizer.model")
+
+    # 注意: モデルの重み保存/読み込み機能は削除されました
+    # 理由: 学習済みSentencePieceトークナイザーのみを使用し、
+    #      モデル重みは毎回初期化するため
+    #
+    # 使い方:
+    #   1. トークナイザーをロード:
+    #      tokenizer = NeuroQuantumTokenizer(model_file='neuroq_tokenizer.model')
+    #   2. モデルを初期化:
+    #      model = NeuroQuantumAI(vocab_size=tokenizer.vocab_size, ...)
+    #   3. 学習:
+    #      model.train(data, epochs=10)
 
 
 # ========================================
