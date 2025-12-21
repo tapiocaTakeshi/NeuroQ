@@ -9,7 +9,7 @@ NeuroQ ローカル事前学習スクリプト
     python pretrain_local.py
 
 生成されるファイル:
-    - neuroq_pretrained.pt (学習済みモデル)
+    - neuroq_pretrained.pth (学習済みモデル)
 """
 
 import torch
@@ -194,7 +194,7 @@ def main():
     )
     
     # モデル保存
-    save_path = "neuroq_pretrained.pt"
+    save_path = "neuroq_pretrained.pth"
     print(f"\n💾 モデル保存中: {save_path}")
     
     # 保存データを準備
@@ -236,7 +236,7 @@ def main():
     print("✅ 事前学習完了！")
     print("=" * 60)
     print("\n次のステップ:")
-    print("1. neuroq_pretrained.pt をRunPodにアップロード")
+    print("1. neuroq_pretrained.pth をRunPodにアップロード")
     print("2. handler.py を修正して学習済みモデルをロード")
     print("3. Rebuild & Deploy")
 

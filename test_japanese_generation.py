@@ -45,7 +45,7 @@ def test_japanese_generation():
         )
 
         # 事前学習済みモデルがあるか確認
-        pretrained_path = "neuroq_pretrained.pt"
+        pretrained_path = "neuroq_pretrained.pth"
         if os.path.exists(pretrained_path):
             print(f"📦 事前学習済みモデルを読み込み: {pretrained_path}")
             try:

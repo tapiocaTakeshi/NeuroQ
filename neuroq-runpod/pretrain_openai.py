@@ -13,7 +13,7 @@ OpenAIの公開データセットを使用して学習を行います。
     python pretrain_openai.py
 
 生成されるファイル:
-    - neuroq_pretrained.pt (学習済みモデル)
+    - neuroq_pretrained.pth (学習済みモデル)
 """
 
 import torch
@@ -338,7 +338,7 @@ def main():
     )
     
     # モデル保存
-    save_path = "neuroq_pretrained.pt"
+    save_path = "neuroq_pretrained.pth"
     print(f"\n💾 モデル保存中: {save_path}")
     
     save_data = {
@@ -385,7 +385,7 @@ def main():
     print("✅ OpenAssistant/oasst1 + OpenAIデータセット事前学習完了！")
     print("=" * 60)
     print("\n次のステップ:")
-    print("1. git add neuroq_pretrained.pt")
+    print("1. git add neuroq_pretrained.pth")
     print("2. git commit -m 'Train model with OpenAssistant/oasst1 dataset'")
     print("3. git push origin claude/train-oasst1-model-c3NHA")
     print("4. RunPodでRebuild")

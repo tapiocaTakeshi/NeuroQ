@@ -41,8 +41,8 @@ def get_model_path():
 
     # 候補パスをチェック
     candidate_paths = [
-        current_dir / 'NeuroQ' / 'neuroq_pretrained.pt',
-        current_dir / 'neuroq_pretrained.pt',
+        current_dir / 'NeuroQ' / 'neuroq_pretrained.pth',
+        current_dir / 'neuroq_pretrained.pth',
     ]
 
     for path in candidate_paths:
@@ -50,7 +50,7 @@ def get_model_path():
             return str(path)
 
     # 見つからない場合はデフォルトパスを返す
-    return str(current_dir / 'NeuroQ' / 'neuroq_pretrained.pt')
+    return str(current_dir / 'NeuroQ' / 'neuroq_pretrained.pth')
 
 
 def is_lfs_pointer_file(file_path):
