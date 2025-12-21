@@ -46,7 +46,7 @@ def load_conversation_data(file_path: str = "conversation_training_data.txt"):
 
 def train_conversation_model(
     conversation_data,
-    model_save_path: str = "neuroq_pretrained.pt",
+    model_save_path: str = "neuroq_pretrained.pth",
     epochs: int = 10,
     batch_size: int = 16,
     seq_len: int = 128
