@@ -193,30 +193,15 @@ def main():
         lr=0.001
     )
     
-    # モデル保存
-    save_path = "neuroq_pretrained.pth"
-    print(f"\n💾 モデル保存中: {save_path}")
-    
-    # 保存データを準備
-    save_data = {
-        'model_state_dict': model.model.state_dict(),
-        'config': {
-            'vocab_size': model.config.vocab_size,
-            'embed_dim': model.config.embed_dim,
-            'hidden_dim': model.config.hidden_dim,
-            'num_heads': model.config.num_heads,
-            'num_layers': model.config.num_layers,
-            'max_seq_len': model.config.max_seq_len,
-            'dropout': model.config.dropout,
-            'lambda_entangle': model.config.lambda_entangle,
-        },
-        'tokenizer_vocab_size': model.tokenizer.actual_vocab_size or model.tokenizer.vocab_size,
-    }
-    
-    torch.save(save_data, save_path)
-    
-    file_size = os.path.getsize(save_path) / (1024 * 1024)
-    print(f"✅ 保存完了: {save_path} ({file_size:.1f} MB)")
+    # トークナイザーを保存
+    print(f"\n💾 トークナイザー保存中...")
+    model.save_tokenizer("neuroq")
+    print(f"✅ トークナイザー保存完了")
+    print(f"   ファイル: neuroq_tokenizer.model")
+
+    print(f"\n注意: モデルの重みは保存していません。")
+    print(f"      トークナイザーのみを保存しています。")
+    print(f"      モデルは毎回初期化してトレーニングしてください。")
     
     # テスト生成
     print("\n🧪 生成テスト:")
@@ -233,12 +218,16 @@ def main():
         print()
     
     print("=" * 60)
-    print("✅ 事前学習完了！")
+    print("✅ トレーニング完了！")
     print("=" * 60)
     print("\n次のステップ:")
-    print("1. neuroq_pretrained.pth をRunPodにアップロード")
-    print("2. handler.py を修正して学習済みモデルをロード")
-    print("3. Rebuild & Deploy")
+    print("1. neuroq_tokenizer.model を使用してモデルを初期化")
+    print("2. 必要に応じて再トレーニング")
+    print("")
+    print("使い方:")
+    print("  from neuroquantum_layered import NeuroQuantumTokenizer, NeuroQuantumAI")
+    print("  tokenizer = NeuroQuantumTokenizer(model_file='neuroq_tokenizer.model')")
+    print("  model = NeuroQuantumAI(vocab_size=tokenizer.vocab_size)")
 
 
 if __name__ == "__main__":

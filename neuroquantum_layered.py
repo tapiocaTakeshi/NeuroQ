@@ -1679,45 +1679,30 @@ class NeuroQuantumAI:
             except Exception as e:
                 print(f"   エラー: {e}")
     
-    def save(self, path: str):
-        """モデル保存"""
+    def save_tokenizer(self, path: str):
+        """
+        トークナイザーのみを保存
+
+        注意: モデルの重みは保存しません。
+        モデルは毎回初期化してトレーニングしてください。
+        """
         os.makedirs(os.path.dirname(path) if os.path.dirname(path) else '.', exist_ok=True)
-        
-        torch.save({
-            'model_state': self.model.state_dict(),
-            'config': self.config.__dict__,
-        }, path + '.pt')
-        
-        self.tokenizer.save(path + '_tokenizer.json')
-        print(f"✅ 保存: {path}")
-    
-    def load(self, path: str):
-        """モデル読み込み"""
-        # トークナイザー
-        # トークナイザーを読み込み（保存形式に応じて）
-        # transformers使用時はディレクトリ、フォールバック時はJSON
-        try:
-            self.tokenizer = NeuroQuantumTokenizer(model_name="gpt2")
-            self.tokenizer.load(path + '_tokenizer')  # transformers形式
-        except:
-            # フォールバック：JSON形式
-            self.tokenizer = NeuroQuantumTokenizer(model_name="gpt2")
-            self.tokenizer.load(path + '_tokenizer.json')
-        
-        # モデル
-        checkpoint = torch.load(path + '.pt', map_location=self.device)
-        self.config = NeuroQuantumConfig(**checkpoint['config'])
-        self.model = NeuroQuantum(
-            config=self.config,
-            use_openai_embedding=self.use_openai_embedding,
-            openai_api_key=self.openai_api_key,
-            openai_model=self.openai_model,
-            tokenizer=self.tokenizer
-        ).to(self.device)
-        self.model.load_state_dict(checkpoint['model_state'])
-        
-        print(f"✅ 読み込み: {path}")
-        return self
+
+        # トークナイザーを保存
+        self.tokenizer.save(path + '_tokenizer')
+        print(f"✅ トークナイザーを保存: {path}_tokenizer.model")
+
+    # 注意: モデルの重み保存/読み込み機能は削除されました
+    # 理由: 学習済みSentencePieceトークナイザーのみを使用し、
+    #      モデル重みは毎回初期化するため
+    #
+    # 使い方:
+    #   1. トークナイザーをロード:
+    #      tokenizer = NeuroQuantumTokenizer(model_file='neuroq_tokenizer.model')
+    #   2. モデルを初期化:
+    #      model = NeuroQuantumAI(vocab_size=tokenizer.vocab_size, ...)
+    #   3. 学習:
+    #      model.train(data, epochs=10)
 
 
 # ========================================

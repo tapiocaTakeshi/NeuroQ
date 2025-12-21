@@ -44,48 +44,16 @@ def test_japanese_generation():
             lambda_entangle=0.5,
         )
 
-        # 事前学習済みモデルがあるか確認
-        pretrained_path = "neuroq_pretrained.pth"
-        if os.path.exists(pretrained_path):
-            print(f"📦 事前学習済みモデルを読み込み: {pretrained_path}")
-            try:
-                import torch
-                checkpoint = torch.load(pretrained_path, map_location='cpu')
-                if model.model is not None:
-                    model.model.load_state_dict(checkpoint['model_state_dict'])
-                    print("✅ モデルのロードに成功")
-                else:
-                    print("⚠️ モデルが初期化されていません。簡易学習を実行します。")
-                    # 簡易学習データ
-                    sample_data = [
-                        "量子コンピュータは、量子力学の原理を利用した次世代のコンピュータです。",
-                        "人工知能は人間の知能を模倣するコンピュータシステムです。",
-                        "ニューラルネットワークは、人間の脳の神経細胞の働きを模倣した計算モデルです。",
-                        "機械学習はデータからパターンを学習するAIの手法です。",
-                    ] * 5
-                    model.train(sample_data, epochs=3)
-            except Exception as e:
-                print(f"⚠️ モデルのロードに失敗: {e}")
-                print("   簡易学習を実行します。")
-                # 簡易学習データ
-                sample_data = [
-                    "量子コンピュータは、量子力学の原理を利用した次世代のコンピュータです。",
-                    "人工知能は人間の知能を模倣するコンピュータシステムです。",
-                    "ニューラルネットワークは、人間の脳の神経細胞の働きを模倣した計算モデルです。",
-                    "機械学習はデータからパターンを学習するAIの手法です。",
-                ] * 5
-                model.train(sample_data, epochs=3)
-        else:
-            print(f"⚠️ 事前学習済みモデルが見つかりません: {pretrained_path}")
-            print("   簡易学習を実行します。")
-            # 簡易学習データ
-            sample_data = [
-                "量子コンピュータは、量子力学の原理を利用した次世代のコンピュータです。",
-                "人工知能は人間の知能を模倣するコンピュータシステムです。",
-                "ニューラルネットワークは、人間の脳の神経細胞の働きを模倣した計算モデルです。",
-                "機械学習はデータからパターンを学習するAIの手法です。",
-            ] * 5
-            model.train(sample_data, epochs=3)
+        # 簡易学習を実行（モデルは毎回初期化）
+        print("⚠️ 簡易学習を実行します。")
+        # 簡易学習データ
+        sample_data = [
+            "量子コンピュータは、量子力学の原理を利用した次世代のコンピュータです。",
+            "人工知能は人間の知能を模倣するコンピュータシステムです。",
+            "ニューラルネットワークは、人間の脳の神経細胞の働きを模倣した計算モデルです。",
+            "機械学習はデータからパターンを学習するAIの手法です。",
+        ] * 5
+        model.train(sample_data, epochs=3)
 
         print("✅ モデル初期化完了\n")
 

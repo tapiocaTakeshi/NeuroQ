@@ -337,34 +337,15 @@ def main():
         lr=0.0005
     )
     
-    # モデル保存
-    save_path = "neuroq_pretrained.pth"
-    print(f"\n💾 モデル保存中: {save_path}")
-    
-    save_data = {
-        'model_state_dict': model.model.state_dict(),
-        'config': {
-            'vocab_size': model.config.vocab_size,
-            'embed_dim': model.config.embed_dim,
-            'hidden_dim': model.config.hidden_dim,
-            'num_heads': model.config.num_heads,
-            'num_layers': model.config.num_layers,
-            'max_seq_len': model.config.max_seq_len,
-            'dropout': model.config.dropout,
-            'lambda_entangle': model.config.lambda_entangle,
-        },
-        'tokenizer_vocab_size': model.tokenizer.actual_vocab_size or model.tokenizer.vocab_size,
-        'training_info': {
-            'datasets': ['OpenAssistant/oasst1', 'openai/openai_humaneval', 'japanese_instructions', 'knowledge'],
-            'total_texts': len(all_texts),
-            'epochs': 25,
-        }
-    }
-    
-    torch.save(save_data, save_path)
-    
-    file_size = os.path.getsize(save_path) / (1024 * 1024)
-    print(f"✅ 保存完了: {save_path} ({file_size:.1f} MB)")
+    # トークナイザーを保存
+    print(f"\n💾 トークナイザー保存中...")
+    model.save_tokenizer("neuroq")
+    print(f"✅ トークナイザー保存完了")
+    print(f"   ファイル: neuroq_tokenizer.model")
+
+    print(f"\n注意: モデルの重みは保存していません。")
+    print(f"      トークナイザーのみを保存しています。")
+    print(f"      モデルは毎回初期化してトレーニングしてください。")
     
     # テスト生成
     print("\n🧪 生成テスト:")
@@ -382,13 +363,17 @@ def main():
         print(f"   出力: {result[:200]}...")
     
     print("\n" + "=" * 60)
-    print("✅ OpenAssistant/oasst1 + OpenAIデータセット事前学習完了！")
+    print("✅ OpenAssistant/oasst1 + OpenAIデータセット トレーニング完了！")
     print("=" * 60)
     print("\n次のステップ:")
-    print("1. git add neuroq_pretrained.pth")
-    print("2. git commit -m 'Train model with OpenAssistant/oasst1 dataset'")
-    print("3. git push origin claude/train-oasst1-model-c3NHA")
-    print("4. RunPodでRebuild")
+    print("1. git add neuroq_tokenizer.model")
+    print("2. git commit -m 'Train tokenizer with OpenAssistant/oasst1 dataset'")
+    print("3. git push")
+    print("")
+    print("使い方:")
+    print("  from neuroquantum_layered import NeuroQuantumTokenizer, NeuroQuantumAI")
+    print("  tokenizer = NeuroQuantumTokenizer(model_file='neuroq_tokenizer.model')")
+    print("  model = NeuroQuantumAI(vocab_size=tokenizer.vocab_size)")
 
 
 if __name__ == "__main__":
