@@ -2,35 +2,16 @@
 """
 ╔═══════════════════════════════════════════════════════════════════════════════╗
 ║                                                                               ║
-║   ███╗   ██╗███████╗██╗   ██╗██████╗  ██████╗  ██████╗ ██╗   ██╗ █████╗      ║
-║   ████╗  ██║██╔════╝██║   ██║██╔══██╗██╔═══██╗██╔═══██╗██║   ██║██╔══██╗     ║
-║   ██╔██╗ ██║█████╗  ██║   ██║██████╔╝██║   ██║██║   ██║██║   ██║███████║     ║
-║   ██║╚██╗██║██╔══╝  ██║   ██║██╔══██╗██║   ██║██║▄▄ ██║██║   ██║██╔══██║     ║
-║   ██║ ╚████║███████╗╚██████╔╝██║  ██║╚██████╔╝╚██████╔╝╚██████╔╝██║  ██║     ║
-║   ╚═╝  ╚═══╝╚══════╝ ╚═════╝ ╚═╝  ╚═╝ ╚═════╝  ╚══▀▀═╝  ╚═════╝ ╚═╝  ╚═╝     ║
+║   ███╗   ██╗███████╗██╗   ██╗██████╗  ██████╗  ██████╗                        ║
+║   ████╗  ██║██╔════╝██║   ██║██╔══██╗██╔═══██╗██╔═══██╗                       ║
+║   ██╔██╗ ██║█████╗  ██║   ██║██████╔╝██║   ██║██║   ██║                       ║
+║   ██║╚██╗██║██╔══╝  ██║   ██║██╔══██╗██║   ██║██║▄▄ ██║                       ║
+║   ██║ ╚████║███████╗╚██████╔╝██║  ██║╚██████╔╝╚██████╔╝                       ║
+║   ╚═╝  ╚═══╝╚══════╝ ╚═════╝ ╚═╝  ╚═╝ ╚═════╝  ╚══▀▀═╝                        ║
 ║                                                                               ║
-║    ██████╗                                                                   ║
-║   ██╔═══██╗                                                                  ║
-║   ██║   ██║                                                                  ║
-║   ██║   ██║                                                                  ║
-║   ╚██████╔╝                                                                  ║
-║    ╚═════╝                                                                   ║
-║                                                                               ║
-║   neuroQ Brain: 脳型散在QBNNによる生成AI                                      ║
-║   独自の量子もつれニューラルネットワークによる生成AI                          ║
-║                                                                               ║
-║   参照元: qbnn_brain.py                                                       ║
-║   - QBNNBrain: 純粋Python版の脳型散在ネットワーク                             ║
-║   - QBNNBrainTorch: PyTorch版の脳型散在ネットワーク                          ║
-║   - QuantumNeuron: 単一量子ビットニューロン                                   ║
-║                                                                               ║
-║   特徴:                                                                       ║
-║   - 各ニューロンが独立した量子ビット（APQB）                                   ║
-║   - ニューロン間の接続はグラフ構造（スパース）                                 ║
-║   - 時間ステップで信号が伝播                                                   ║
-║   - 量子もつれが任意のニューロン間で発生                                       ║
-║   - 動的入出力（本物の脳のように入力/出力ニューロンが変化）                     ║
-║                                                                               ║
+║   neuroQ Brain: 脳型散在QBNNによる生成AI                                         ║   
+║   Quantum Brain: 独自の量子もつれニューラルネットワークによる生成AI                   ║   
+║                                                                               ║   
 ╚═══════════════════════════════════════════════════════════════════════════════╝
 """
 
@@ -40,11 +21,21 @@ import torch.nn.functional as F
 import numpy as np
 import math
 import random
+import os
 from typing import List, Dict, Tuple, Optional
 from collections import Counter
 import re
 import warnings
 warnings.filterwarnings('ignore')
+
+# neuroquantum_layered.py からトークナイザーをインポート
+try:
+    from neuroquantum_layered import NeuroQuantumTokenizer
+    NEUROQUANTUM_TOKENIZER_AVAILABLE = True
+    print("✅ NeuroQuantumTokenizer をインポートしました")
+except ImportError:
+    NEUROQUANTUM_TOKENIZER_AVAILABLE = False
+    warnings.warn("NeuroQuantumTokenizer が見つかりません。BrainTokenizer を使用します。")
 
 # ========================================
 # qbnn_brain.py からコアコンポーネントをインポート
@@ -844,14 +835,15 @@ class NeuroQuantumBrainAI:
     
     def __init__(self, embed_dim: int = 128, num_heads: int = 4,
                  num_layers: int = 3, num_neurons: int = 75,
-                 max_vocab: int = 50000):
+                 max_vocab: int = 50000, use_sentencepiece: bool = True):
         self.embed_dim = embed_dim
         self.num_heads = num_heads
         self.num_layers = num_layers
         self.num_neurons = num_neurons
         self.max_vocab = max_vocab
+        self.use_sentencepiece = use_sentencepiece and NEUROQUANTUM_TOKENIZER_AVAILABLE
         
-        self.tokenizer = BrainTokenizer(max_vocab)
+        self.tokenizer = None  # train()で初期化
         self.model = None
         
         # デバイス選択: MPS (Apple Silicon) > CUDA > CPU
@@ -870,13 +862,56 @@ class NeuroQuantumBrainAI:
         """学習"""
         print("\n🎓 学習開始...")
         
-        # トークナイザー構築
-        self.tokenizer.fit(texts)
+        # トークナイザー初期化
+        print("\n🔤 トークナイザー構築...")
+        
+        if self.use_sentencepiece:
+            # 学習済みのSentencePieceモデルを探す
+            tokenizer_model_paths = [
+                "neuroq_tokenizer.model",
+                "neuroq_tokenizer_8k.model",
+                "../neuroq_tokenizer.model",
+                "../neuroq_tokenizer_8k.model",
+                os.path.join(os.path.dirname(__file__), "neuroq_tokenizer.model"),
+                os.path.join(os.path.dirname(__file__), "neuroq_tokenizer_8k.model"),
+            ]
+            
+            existing_model = None
+            for path in tokenizer_model_paths:
+                if os.path.exists(path):
+                    existing_model = path
+                    break
+            
+            if existing_model:
+                print(f"   既存のSentencePieceモデルを使用: {existing_model}")
+                self.tokenizer = NeuroQuantumTokenizer(vocab_size=8000, model_file=existing_model)
+            else:
+                print("   ⚠️ 学習済みSentencePieceモデルが見つかりません。BrainTokenizerを使用します。")
+                self.tokenizer = BrainTokenizer(self.max_vocab)
+                self.tokenizer.fit(texts)
+        else:
+            # BrainTokenizerを使用
+            self.tokenizer = BrainTokenizer(self.max_vocab)
+            self.tokenizer.fit(texts)
+        
+        # vocab_size を取得
+        if hasattr(self.tokenizer, 'actual_vocab_size') and self.tokenizer.actual_vocab_size:
+            vocab_size = self.tokenizer.actual_vocab_size
+        else:
+            vocab_size = self.tokenizer.vocab_size
+        print(f"   語彙サイズ: {vocab_size}")
         
         # データ準備
         all_tokens = []
         for text in texts:
-            tokens = self.tokenizer.encode(text)
+            # NeuroQuantumTokenizer と BrainTokenizer の両方に対応
+            if hasattr(self.tokenizer, 'encode'):
+                if isinstance(self.tokenizer, NeuroQuantumTokenizer) if NEUROQUANTUM_TOKENIZER_AVAILABLE else False:
+                    tokens = self.tokenizer.encode(text, add_special=False)
+                else:
+                    tokens = self.tokenizer.encode(text)
+            else:
+                tokens = self.tokenizer.encode(text)
             if len(tokens) > 2:
                 all_tokens.extend(tokens)
         
@@ -884,7 +919,7 @@ class NeuroQuantumBrainAI:
         
         # モデル構築
         self.model = NeuroQuantumBrain(
-            vocab_size=self.tokenizer.vocab_size,
+            vocab_size=vocab_size,
             embed_dim=self.embed_dim,
             num_heads=self.num_heads,
             num_layers=self.num_layers,
@@ -892,6 +927,7 @@ class NeuroQuantumBrainAI:
             max_seq_len=256,
             dropout=0.1
         ).to(self.device)
+        self.vocab_size = vocab_size  # 保存用
         
         # オプティマイザ
         optimizer = torch.optim.Adam(self.model.parameters(), lr=lr)
@@ -922,7 +958,7 @@ class NeuroQuantumBrainAI:
                 
                 optimizer.zero_grad()
                 logits = self.model(x)
-                loss = criterion(logits.view(-1, self.tokenizer.vocab_size), y.view(-1))
+                loss = criterion(logits.view(-1, self.vocab_size), y.view(-1))
                 loss.backward()
                 torch.nn.utils.clip_grad_norm_(self.model.parameters(), 1.0)
                 optimizer.step()
@@ -979,9 +1015,19 @@ class NeuroQuantumBrainAI:
         
         self.model.eval()
         
-        tokens = self.tokenizer.encode(prompt)
+        # 対話形式のプロンプトを作成（neuroquantum_layered.py と同じ形式）
+        dialogue_prompt = f"<USER>{prompt}<ASSISTANT>"
+        
+        # NeuroQuantumTokenizer と BrainTokenizer の両方に対応
+        if self.use_sentencepiece and isinstance(self.tokenizer, NeuroQuantumTokenizer):
+            tokens = self.tokenizer.encode(dialogue_prompt, add_special=False)
+        else:
+            tokens = self.tokenizer.encode(dialogue_prompt)
+        
         if len(tokens) == 0:
-            tokens = [2]  # <BOS>
+            # BOSトークンID（NeuroQuantumTokenizer: 2, BrainTokenizer: 2）
+            bos_id = getattr(self.tokenizer, 'bos_id', 2)
+            tokens = [bos_id]
         
         tokens = torch.tensor(tokens, dtype=torch.long).to(self.device)
         
@@ -991,7 +1037,22 @@ class NeuroQuantumBrainAI:
             top_k=top_k, top_p=top_p
         )
         
-        return self.tokenizer.decode(generated.cpu().tolist())
+        # デコード
+        generated_list = generated.cpu().tolist()
+        if self.use_sentencepiece and isinstance(self.tokenizer, NeuroQuantumTokenizer):
+            full_text = self.tokenizer.decode(generated_list, skip_special=True)
+        else:
+            full_text = self.tokenizer.decode(generated_list)
+        
+        # 応答部分のみを抽出（<ASSISTANT>以降）
+        if "<ASSISTANT>" in full_text:
+            response = full_text.split("<ASSISTANT>")[-1]
+            # <USER>が含まれていたら除去（次の質問に入らないように）
+            if "<USER>" in response:
+                response = response.split("<USER>")[0]
+            return response.strip()
+        
+        return full_text
     
     def get_report(self) -> str:
         """モデルレポート"""
@@ -1134,24 +1195,40 @@ def get_training_data(use_huggingface: bool = False) -> List[str]:
         "エッジコンピューティングは、データ処理をネットワークの端で行う技術です。",
         "サイバーセキュリティは、デジタル資産を保護するための技術と実践です。",
         
-        # ===== 対話・会話 =====
-        "こんにちは、今日も良い天気ですね。お元気ですか？",
-        "人工知能について教えてください。どのような仕組みで動いているのですか？",
-        "量子コンピュータとは何ですか？普通のコンピュータとどう違うのですか？",
-        "機械学習はどのように動作しますか？具体的な例を教えてください。",
-        "未来の技術について考えてみましょう。どのような世界が待っているでしょうか。",
-        "プログラミングは創造的な活動です。自分のアイデアを形にする喜びがあります。",
-        "科学は私たちの世界を理解する手段です。好奇心から始まる探求の旅です。",
-        "技術革新は社会を変革します。新しい可能性と課題の両方をもたらします。",
-        "質問があればお気軽にどうぞ。できる限りお答えします。",
-        "ありがとうございます。また何かあれば聞いてください。",
-        "それは興味深い質問ですね。一緒に考えてみましょう。",
-        "なるほど、そのような見方もあるのですね。",
-        "素晴らしい観点です。もう少し詳しく教えていただけますか？",
-        "その通りです。さらに詳しく説明しましょう。",
-        "良い質問ですね。順番に説明していきます。",
-        "お疲れ様です。今日も一日頑張りましょう。",
-        "それは素晴らしいアイデアですね。実現に向けて頑張りましょう。",
+        # ===== 対話・会話（対話形式） =====
+        "<USER>こんにちは<ASSISTANT>こんにちは！今日も良い天気ですね。お元気ですか？何かお手伝いできることはありますか？",
+        "<USER>こんばんは<ASSISTANT>こんばんは！夜もお疲れ様です。何かお手伝いできることはありますか？",
+        "<USER>おはよう<ASSISTANT>おはようございます！今日も一日頑張りましょう。何かお手伝いできることはありますか？",
+        "<USER>おはようございます<ASSISTANT>おはようございます！良い朝ですね。今日はどんなことをお手伝いしましょうか？",
+        "<USER>人工知能について教えて<ASSISTANT>人工知能は、人間の知的活動をコンピュータで実現する技術です。機械学習やディープラーニングを使って、データからパターンを学習し、予測や判断を行います。",
+        "<USER>量子コンピュータとは何ですか？<ASSISTANT>量子コンピュータは、量子力学の原理を利用した次世代のコンピュータです。量子ビットの重ね合わせと量子もつれを活用し、従来のコンピュータでは難しい問題を高速に解くことができます。",
+        "<USER>機械学習はどのように動作しますか？<ASSISTANT>機械学習は、データから自動的にパターンを学習するアルゴリズムです。例えば、画像認識では大量の画像と正解ラベルから特徴を学習し、新しい画像を分類できるようになります。",
+        "<USER>ChatGPTについて教えて<ASSISTANT>ChatGPTはOpenAIが開発した大規模言語モデルです。Transformerアーキテクチャを使い、大量のテキストデータで学習しています。対話形式で様々な質問に答えることができます。",
+        "<USER>ChatGPTの仕組みは<ASSISTANT>ChatGPTはTransformerという注意機構を使ったニューラルネットワークです。事前学習で大量のテキストからパターンを学び、強化学習で対話能力を向上させています。",
+        "<USER>ありがとう<ASSISTANT>どういたしまして！他に質問があればお気軽にどうぞ。",
+        "<USER>お疲れ様<ASSISTANT>お疲れ様です！今日も一日頑張りましたね。ゆっくり休んでください。",
+        "<USER>さようなら<ASSISTANT>さようなら！また何かあればいつでも声をかけてくださいね。",
+        "<USER>良い天気ですね<ASSISTANT>はい、とても気持ちの良い天気ですね。外出するのに最適な日ですね。",
+        "<USER>今日は何をしますか<ASSISTANT>今日も質問への回答やお手伝いをする準備ができています。何かお手伝いできることはありますか？",
+        "<USER>プログラミングを教えて<ASSISTANT>プログラミングは、コンピュータに命令を与える言語を使った活動です。Pythonは読みやすく書きやすいため、初心者にもおすすめです。",
+        "<USER>おすすめの言語は？<ASSISTANT>目的によりますが、初心者にはPythonがおすすめです。読みやすく、機械学習やデータ分析にも使えます。ウェブ開発ならJavaScriptも良い選択です。",
+        "<USER>深層学習とは？<ASSISTANT>深層学習は、多層のニューラルネットワークを用いた機械学習手法です。画像認識や音声認識、自然言語処理で大きな成功を収めています。",
+        "<USER>何ができる？<ASSISTANT>私はテキスト生成AIです。質問への回答、説明、会話などができます。技術や科学についての質問にお答えできます。",
+        "<USER>調子はどう？<ASSISTANT>ありがとうございます！私はAIなので体調という概念はありませんが、しっかり動作していますよ。何かお手伝いできることはありますか？",
+        "<USER>助けて<ASSISTANT>もちろんお手伝いします！何についてお困りですか？詳しく教えていただければ、できる限りサポートします。",
+        "<USER>わからない<ASSISTANT>大丈夫ですよ。何がわからないか教えていただければ、順番に説明していきますね。",
+        "<USER>すごいね<ASSISTANT>ありがとうございます！お役に立てて嬉しいです。",
+        "<USER>面白い<ASSISTANT>そう言っていただけると嬉しいです！もっと面白い話題があれば共有しますね。",
+        "<USER>質問があります<ASSISTANT>はい、どんな質問でもどうぞ！できる限りお答えします。",
+        "<USER>説明して<ASSISTANT>わかりました。何について説明しましょうか？具体的なトピックを教えてください。",
+        "<USER>会話しよう<ASSISTANT>はい、ぜひお話ししましょう！何か話したいことはありますか？",
+        "<USER>会話して<ASSISTANT>もちろん！何についてお話ししましょうか？興味のあるトピックがあれば教えてください。",
+        "<USER>暇だなぁ<ASSISTANT>暇な時間も大切ですよ。何か面白い話をしましょうか？それとも質問がありますか？",
+        "<USER>何か話して<ASSISTANT>わかりました。最近の技術トレンドについてお話ししましょうか？それとも別の話題が良いですか？",
+        "<USER>知らない言葉だ<ASSISTANT>すみません、わかりにくかったですね。もう少し詳しく説明しますね。どの部分がわかりにくかったですか？",
+        "<USER>それはわからない<ASSISTANT>申し訳ありません、私の説明が不十分でした。別の角度から説明してみますね。",
+        "<USER>あなたは誰<ASSISTANT>私はニューロQ Brainという量子ニューラルネットワークベースのAIです。質問への回答や会話ができます。",
+        "<USER>名前は？<ASSISTANT>私の名前はニューロQ Brainです。量子力学にインスパイアされたAIです。よろしくお願いします！",
         
         # ===== 数学・物理学 =====
         "数学は科学の言語です。自然法則を記述するために使われます。",
@@ -1210,16 +1287,21 @@ def get_training_data(use_huggingface: bool = False) -> List[str]:
         "宇宙開発は、人類の未来を切り開く挑戦です。",
     ]
     
-    # データ増幅（多様な組み合わせを生成）
-    texts = base_texts * 50
+    # 対話形式データと非対話形式データを分離
+    dialogue_texts = [t for t in base_texts if t.startswith("<USER>")]
+    non_dialogue_texts = [t for t in base_texts if not t.startswith("<USER>")]
     
-    # 追加のバリエーションを生成
+    # データ増幅（対話形式データは重み付けを高くする）
+    texts = non_dialogue_texts * 30  # 非対話は30倍
+    texts.extend(dialogue_texts * 200)  # 対話は200倍（対話形式を重視）
+    
+    # 追加のバリエーションを生成（非対話形式のみ）
     prefixes = ["実際に、", "興味深いことに、", "重要なのは、", "特に、", "さらに、", "つまり、", "例えば、", "具体的には、", 
                 "一般的に、", "結論として、", "要するに、", "言い換えると、", "なぜなら、", "したがって、", "もちろん、"]
     suffixes = ["これは革新的です。", "今後の発展が期待されます。", "多くの可能性があります。", "研究が進んでいます。",
                 "注目されています。", "期待が高まっています。", "進化を続けています。", "重要な役割を果たしています。"]
     
-    for text in base_texts[:80]:
+    for text in non_dialogue_texts[:80]:
         for prefix in prefixes:
             texts.append(prefix + text)
         for suffix in suffixes:
@@ -1238,7 +1320,7 @@ def get_training_data(use_huggingface: bool = False) -> List[str]:
 # ========================================
 
 def chat_mode(ai: NeuroQuantumBrainAI):
-    """対話モード"""
+    """対話モード（会話履歴付き）"""
     print("\n" + "=" * 60)
     print("💬 ニューロQ Brain チャットモード")
     print("=" * 60)
@@ -1247,11 +1329,16 @@ def chat_mode(ai: NeuroQuantumBrainAI):
     print("  /temp <min> <max> - 温度範囲 (例: /temp 0.3 0.8)")
     print("  /len <値>         - 生成長さ (10-100)")
     print("  /stats            - 量子統計")
+    print("  /clear            - 会話履歴をクリア")
     print("-" * 60)
     
     temp_min = 0.4
     temp_max = 0.9
     max_length = 40
+    
+    # 会話履歴（最大3ターン保持）
+    conversation_history = []
+    max_history = 3
     
     while True:
         try:
@@ -1292,9 +1379,26 @@ def chat_mode(ai: NeuroQuantumBrainAI):
                 print(ai.get_report())
                 continue
             
+            if user_input.lower() == '/clear':
+                conversation_history = []
+                print("   会話履歴をクリアしました")
+                continue
+            
+            # 会話履歴を含めたプロンプトを構築
+            history_context = ""
+            for prev_user, prev_resp in conversation_history[-max_history:]:
+                history_context += f"<USER>{prev_user}<ASSISTANT>{prev_resp}"
+            
+            # 現在の入力を追加したプロンプト
+            full_prompt = history_context + user_input if history_context else user_input
+            
             # 生成（温度範囲制約）
-            response = ai.generate(user_input, max_length=max_length, 
+            response = ai.generate(full_prompt, max_length=max_length, 
                                    temperature_min=temp_min, temperature_max=temp_max)
+            
+            # 会話履歴に追加
+            conversation_history.append((user_input, response))
+            
             print(f"\n🧠 ニューロQ: {response}")
             
         except KeyboardInterrupt:

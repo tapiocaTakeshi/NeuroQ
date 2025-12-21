@@ -5,9 +5,8 @@ NeuroQ OpenAIデータセット事前学習スクリプト
 OpenAIの公開データセットを使用して学習を行います。
 
 使用データセット:
-- openai/mrcr (Multi-turn Reasoning Chain Retrieval)
+- OpenAssistant/oasst1 (高品質な会話データセット)
 - openai/openai_humaneval (HumanEval - コード生成評価)
-- openai/MMMLU (Multilingual MMLU - 多言語知識評価)
 
 使い方:
     pip install datasets
@@ -37,50 +36,6 @@ except ImportError:
 
 # neuroquantum_layered.py をインポート
 from neuroquantum_layered import NeuroQuantumAI
-
-
-def load_mrcr_data() -> List[str]:
-    """
-    openai/mrcr データセットをロード
-    Multi-turn Reasoning Chain Retrieval - 推論チェーンデータ
-    """
-    print("\n📥 openai/mrcr データセットをロード中...")
-    texts = []
-    
-    try:
-        dataset = load_dataset("openai/mrcr", split="test")
-        print(f"   ✅ {len(dataset)} サンプルをロードしました")
-        
-        for idx, item in enumerate(dataset):
-            if idx >= 100:  # 最大100サンプルに制限（日本語データ優先のため）
-                break
-            # 様々なフィールドからテキストを抽出
-            if "haystack" in item and item["haystack"]:
-                for doc in item["haystack"][:3]:  # 最初の3つに制限
-                    if isinstance(doc, str) and len(doc) > 20:
-                        texts.append(doc[:300])
-            
-            if "needle" in item and item["needle"]:
-                needle = item["needle"]
-                if isinstance(needle, str) and len(needle) > 10:
-                    texts.append(needle)
-            
-            if "question" in item and item["question"]:
-                q = item["question"]
-                if isinstance(q, str):
-                    texts.append(f"質問: {q}")
-            
-            if "answer" in item and item["answer"]:
-                a = item["answer"]
-                if isinstance(a, str):
-                    texts.append(f"回答: {a}")
-        
-        print(f"   ✅ mrcr から {len(texts)} テキストを抽出")
-        
-    except Exception as e:
-        print(f"   ⚠️ mrcr ロードエラー: {e}")
-    
-    return texts
 
 
 def load_humaneval_data() -> List[str]:
@@ -115,80 +70,6 @@ def load_humaneval_data() -> List[str]:
         
     except Exception as e:
         print(f"   ⚠️ humaneval ロードエラー: {e}")
-    
-    return texts
-
-
-def load_mmmlu_data() -> List[str]:
-    """
-    openai/MMMLU データセットをロード
-    Multilingual MMLU - 多言語知識評価データセット
-    """
-    print("\n📥 openai/MMMLU データセットをロード中...")
-    texts = []
-
-    try:
-        # 日本語サブセットをロード
-        dataset = load_dataset("openai/MMMLU", "JA_JP", split="test")
-        print(f"   ✅ MMMLU日本語: {len(dataset)} サンプルをロードしました")
-
-        for item in dataset:
-            # 質問
-            if "Question" in item and item["Question"]:
-                q = item["Question"]
-
-                # 選択肢を取得
-                choices = []
-                for key in ["A", "B", "C", "D"]:
-                    if key in item and item[key]:
-                        choices.append(f"{key}. {item[key]}")
-
-                # 正解
-                answer = item.get("Answer", "")
-
-                # Q&A形式でテキスト作成
-                if choices:
-                    choices_text = "\n".join(choices)
-                    qa_text = f"問題: {q}\n選択肢:\n{choices_text}\n正解: {answer}"
-                    texts.append(qa_text)
-
-                # 質問と回答のペア
-                if answer and answer in ["A", "B", "C", "D"]:
-                    answer_text = item.get(answer, "")
-                    if answer_text:
-                        texts.append(f"<USER>{q}<ASSISTANT>{answer_text}")
-
-            # Subject（科目）も追加
-            if "Subject" in item and item["Subject"]:
-                subject = item["Subject"]
-                if "Question" in item:
-                    texts.append(f"科目「{subject}」の問題: {item['Question']}")
-
-        print(f"   ✅ MMMLU から {len(texts)} テキストを抽出")
-
-    except Exception as e:
-        print(f"   ⚠️ MMMLU ロードエラー: {e}")
-
-        # フォールバック: 英語版を試す
-        try:
-            print("   📥 英語版MMMMLUを試行中...")
-            dataset = load_dataset("openai/MMMLU", "EN_US", split="test")
-            print(f"   ✅ MMMLU英語: {len(dataset)} サンプルをロードしました")
-
-            for item in dataset:
-                if "Question" in item and item["Question"]:
-                    q = item["Question"]
-                    answer = item.get("Answer", "")
-                    if answer and answer in ["A", "B", "C", "D"]:
-                        answer_text = item.get(answer, "")
-                        if answer_text:
-                            # 英語Q&Aも追加
-                            texts.append(f"Question: {q}\nAnswer: {answer_text}")
-
-            print(f"   ✅ MMMLU英語から {len(texts)} テキストを抽出")
-
-        except Exception as e2:
-            print(f"   ⚠️ MMMLU英語ロードエラー: {e2}")
 
     return texts
 
@@ -391,7 +272,7 @@ def generate_knowledge_data() -> List[str]:
         "超電導量子ビットはジョセフソン接合を使った量子ビットです。IBMやGoogleが採用しています。",
     ]
     
-    return knowledge * 20  # 20倍に増やす
+    return knowledge  # 呼び出し側で倍率を制御
 
 
 def main():
@@ -414,25 +295,16 @@ def main():
     all_texts.extend(oasst1_texts * 3)  # 3倍に増やす（高品質データなので重視）
     print(f"✅ OpenAssistant/oasst1: {len(oasst1_texts)} テキスト × 3 = {len(oasst1_texts) * 3} テキスト追加")
 
-    # 2. openai/mrcr - 推論チェーンデータ
-    mrcr_texts = load_mrcr_data()
-    all_texts.extend(mrcr_texts)
-    print(f"✅ openai/mrcr: {len(mrcr_texts)} テキスト追加")
-
-    # 3. openai/openai_humaneval
+    # 2. openai/openai_humaneval
     humaneval_texts = load_humaneval_data()
     all_texts.extend(humaneval_texts)
 
-    # 4. openai/MMMLU (Multilingual MMLU)
-    mmmlu_texts = load_mmmlu_data()
-    all_texts.extend(mmmlu_texts)
-
-    # 5. 日本語指示データ（最優先・大量に追加）
+    # 3. 日本語指示データ（最優先・大量に追加）
     print("\n📚 日本語指示データを追加中...")
     instruction_texts = generate_japanese_instruction_data()
     all_texts.extend(instruction_texts * 500)  # 500倍に増やす（最重要）
 
-    # 6. 一般知識データ（増量）
+    # 4. 一般知識データ（増量）
     print("📚 一般知識データを追加中...")
     knowledge_texts = generate_knowledge_data()
     all_texts.extend(knowledge_texts * 10)  # 10倍に増やす
@@ -483,7 +355,7 @@ def main():
         },
         'tokenizer_vocab_size': model.tokenizer.actual_vocab_size or model.tokenizer.vocab_size,
         'training_info': {
-            'datasets': ['OpenAssistant/oasst1', 'openai/mrcr', 'openai/openai_humaneval', 'openai/MMMLU', 'japanese_instructions', 'knowledge'],
+            'datasets': ['OpenAssistant/oasst1', 'openai/openai_humaneval', 'japanese_instructions', 'knowledge'],
             'total_texts': len(all_texts),
             'epochs': 25,
         }
