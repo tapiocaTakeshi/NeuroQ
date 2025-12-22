@@ -68,7 +68,6 @@ RUN if [ -d "/tmp/neuroq-repo" ]; then rm -rf /tmp/neuroq-repo; fi
 # 環境変数（デフォルト設定）
 ENV NEUROQ_MODE="layered"
 ENV NEUROQ_VOCAB_SIZE="8000"
-ENV MODEL_FILE="neuroq_pretrained.pth"
 ENV GIT_REPO_URL="https://github.com/tapiocaTakeshi/NeuroQ.git"
 ENV GIT_BRANCH="main"
 
