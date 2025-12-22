@@ -57,8 +57,6 @@ COPY neuroq_pretrained.py /app/
 # トークナイザー
 COPY neuroq_tokenizer.model /app/
 COPY neuroq_tokenizer.vocab /app/
-COPY neuroq_tokenizer_8k.model /app/
-COPY neuroq_tokenizer_8k.vocab /app/
 
 # Entrypointスクリプト（起動時にモデルをダウンロード）
 COPY entrypoint.sh /app/
