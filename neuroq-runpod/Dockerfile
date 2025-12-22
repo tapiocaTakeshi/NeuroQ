@@ -57,6 +57,11 @@ COPY neuroq_pretrained.py /app/
 # トークナイザー
 COPY neuroq_tokenizer.model /app/
 COPY neuroq_tokenizer.vocab /app/
+COPY neuroq_tokenizer_8k.model /app/
+COPY neuroq_tokenizer_8k.vocab /app/
+
+# 事前学習済みモデルファイル (.pth)
+COPY neuroq_pretrained.pth /app/
 
 # Entrypointスクリプト（起動時にモデルをダウンロード）
 COPY entrypoint.sh /app/
@@ -68,7 +73,7 @@ RUN if [ -d "/tmp/neuroq-repo" ]; then rm -rf /tmp/neuroq-repo; fi
 # 環境変数（デフォルト設定）
 ENV NEUROQ_MODE="layered"
 ENV NEUROQ_VOCAB_SIZE="8000"
-ENV MODEL_FILE="neuroq_pretrained.pt"
+ENV MODEL_FILE="neuroq_pretrained.pth"
 ENV GIT_REPO_URL="https://github.com/tapiocaTakeshi/NeuroQ.git"
 ENV GIT_BRANCH="main"
 
