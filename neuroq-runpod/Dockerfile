@@ -60,9 +60,6 @@ COPY neuroq_tokenizer.vocab /app/
 COPY neuroq_tokenizer_8k.model /app/
 COPY neuroq_tokenizer_8k.vocab /app/
 
-# 事前学習済みモデルファイル (.pth)
-COPY neuroq_pretrained.pth /app/
-
 # Entrypointスクリプト（起動時にモデルをダウンロード）
 COPY entrypoint.sh /app/
 RUN chmod +x /app/entrypoint.sh
