@@ -579,97 +579,103 @@ class NeuroQuantumBrain(nn.Module):
         
         return report
     
-    @torch.no_grad()
     def generate(self, start_tokens: torch.Tensor, max_length: int = 50,
                  temperature_min: float = 0.4, temperature_max: float = 0.9,
                  top_k: int = 40, top_p: float = 0.9,
                  repetition_penalty: float = 1.2) -> torch.Tensor:
         """
         テキスト生成（温度範囲制約版）
-        
+
         Args:
             temperature_min: 最小温度（θ=π/4のとき、2θ=90°）
             temperature_max: 最大温度
             ※ 2θが45°〜135°の範囲で動くように制約
         """
+        # 推論モードに設定
         self.eval()
-        
-        tokens = start_tokens.clone()
-        generated = []
-        
-        for step in range(max_length):
-            # 入力準備
-            x = tokens.unsqueeze(0) if tokens.dim() == 1 else tokens
-            if x.size(1) > self.max_seq_len:
-                x = x[:, -self.max_seq_len:]
-            
-            # 予測
-            logits = self(x)
-            
-            # 量子状態から温度を動的に計算
-            # 2θが45°〜135°の範囲（π/4〜3π/4）になるように制約
-            if len(self.blocks) > 0:
-                # ブロックのθから相関係数rを取得（新しい構造ではffn_quantumを使用）
-                r_vals = []
-                for block in self.blocks:
-                    r_vals.append(block.ffn_quantum.get_r().mean().item())
-                r_mean = np.mean(r_vals)
-                
-                # r ∈ [-1, 1] を温度範囲にマッピング
-                # r = cos(2θ) なので、2θ ∈ [π/4, 3π/4] のとき r ∈ [-0.707, 0.707]
-                # これを [temperature_min, temperature_max] にマッピング
-                r_clamped = np.clip(r_mean, -0.707, 0.707)
-                # 正規化: [-0.707, 0.707] → [0, 1]
-                t_normalized = (r_clamped + 0.707) / 1.414
-                # 温度にマッピング
-                temperature = temperature_min + t_normalized * (temperature_max - temperature_min)
-            else:
-                temperature = (temperature_min + temperature_max) / 2
-            
-            next_logits = logits[0, -1] / temperature
-            
-            # 繰り返しペナルティ
-            if len(generated) > 0:
-                for prev_token in set(generated[-20:]):
-                    next_logits[prev_token] /= repetition_penalty
-            
-            # 量子ゆらぎを追加（制約された範囲で）
-            if len(self.blocks) > 0:
-                T_mean = self.blocks[-1].ffn_quantum.get_T().mean()
-                # T = |sin(2θ)|, 2θ ∈ [45°, 135°] なら T ∈ [0.707, 1.0]
-                T_clamped = max(0.707, min(1.0, T_mean.item()))
-                quantum_noise = torch.randn_like(next_logits) * T_clamped * 0.15
-                next_logits = next_logits + quantum_noise
-            
-            # Top-K フィルタリング
-            if top_k > 0:
-                indices_to_remove = next_logits < torch.topk(next_logits, top_k)[0][-1]
-                next_logits[indices_to_remove] = float('-inf')
-            
-            # Top-P フィルタリング
-            if top_p < 1.0:
-                sorted_logits, sorted_indices = torch.sort(next_logits, descending=True)
-                cumulative_probs = torch.cumsum(F.softmax(sorted_logits, dim=-1), dim=-1)
-                
-                sorted_indices_to_remove = cumulative_probs > top_p
-                sorted_indices_to_remove[1:] = sorted_indices_to_remove[:-1].clone()
-                sorted_indices_to_remove[0] = 0
-                
-                indices_to_remove = sorted_indices[sorted_indices_to_remove]
-                next_logits[indices_to_remove] = float('-inf')
-            
-            # サンプリング
-            probs = F.softmax(next_logits, dim=-1)
-            next_token = torch.multinomial(probs, 1)
-            
-            # トークン連結
-            if tokens.dim() == 0:
-                tokens = next_token.view(1)
-            else:
-                tokens = torch.cat([tokens, next_token.view(-1)], dim=0)
-            generated.append(next_token.item())
-        
-        return tokens
+
+        # 推論コンテキストを使用（勾配計算を完全に無効化）
+        with torch.inference_mode():
+            tokens = start_tokens.clone()
+            generated = []
+
+            for step in range(max_length):
+                # 入力準備
+                x = tokens.unsqueeze(0) if tokens.dim() == 1 else tokens
+                if x.size(1) > self.max_seq_len:
+                    x = x[:, -self.max_seq_len:]
+
+                # 予測
+                logits = self(x)
+
+                # 量子状態から温度を動的に計算
+                # 2θが45°〜135°の範囲（π/4〜3π/4）になるように制約
+                if len(self.blocks) > 0:
+                    # ブロックのθから相関係数rを取得（新しい構造ではffn_quantumを使用）
+                    # .detach()を使用して勾配計算から完全に切り離す
+                    r_vals = []
+                    for block in self.blocks:
+                        r_val = block.ffn_quantum.get_r().detach().mean().item()
+                        r_vals.append(r_val)
+                    r_mean = np.mean(r_vals)
+
+                    # r ∈ [-1, 1] を温度範囲にマッピング
+                    # r = cos(2θ) なので、2θ ∈ [π/4, 3π/4] のとき r ∈ [-0.707, 0.707]
+                    # これを [temperature_min, temperature_max] にマッピング
+                    r_clamped = np.clip(r_mean, -0.707, 0.707)
+                    # 正規化: [-0.707, 0.707] → [0, 1]
+                    t_normalized = (r_clamped + 0.707) / 1.414
+                    # 温度にマッピング
+                    temperature = temperature_min + t_normalized * (temperature_max - temperature_min)
+                else:
+                    temperature = (temperature_min + temperature_max) / 2
+
+                # ロジットを温度でスケーリング（.detach()で安全に処理）
+                next_logits = (logits[0, -1] / temperature).detach()
+
+                # 繰り返しペナルティ
+                if len(generated) > 0:
+                    for prev_token in set(generated[-20:]):
+                        next_logits[prev_token] /= repetition_penalty
+
+                # 量子ゆらぎを追加（制約された範囲で）
+                if len(self.blocks) > 0:
+                    # .detach()を使用して勾配計算から完全に切り離す
+                    T_mean = self.blocks[-1].ffn_quantum.get_T().detach().mean()
+                    # T = |sin(2θ)|, 2θ ∈ [45°, 135°] なら T ∈ [0.707, 1.0]
+                    T_clamped = max(0.707, min(1.0, T_mean.item()))
+                    quantum_noise = torch.randn_like(next_logits) * T_clamped * 0.15
+                    next_logits = next_logits + quantum_noise
+
+                # Top-K フィルタリング
+                if top_k > 0:
+                    indices_to_remove = next_logits < torch.topk(next_logits, top_k)[0][-1]
+                    next_logits[indices_to_remove] = float('-inf')
+
+                # Top-P フィルタリング
+                if top_p < 1.0:
+                    sorted_logits, sorted_indices = torch.sort(next_logits, descending=True)
+                    cumulative_probs = torch.cumsum(F.softmax(sorted_logits, dim=-1), dim=-1)
+
+                    sorted_indices_to_remove = cumulative_probs > top_p
+                    sorted_indices_to_remove[1:] = sorted_indices_to_remove[:-1].clone()
+                    sorted_indices_to_remove[0] = 0
+
+                    indices_to_remove = sorted_indices[sorted_indices_to_remove]
+                    next_logits[indices_to_remove] = float('-inf')
+
+                # サンプリング
+                probs = F.softmax(next_logits, dim=-1)
+                next_token = torch.multinomial(probs, 1)
+
+                # トークン連結
+                if tokens.dim() == 0:
+                    tokens = next_token.view(1)
+                else:
+                    tokens = torch.cat([tokens, next_token.view(-1)], dim=0)
+                generated.append(next_token.item())
+
+            return tokens
 
 
 # ========================================
