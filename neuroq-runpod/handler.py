@@ -31,13 +31,14 @@ print("=" * 60)
 
 # NeuroQuantumBrainAI をインポート
 try:
-    from neuroquantum_brain import NeuroQuantumBrainAI, get_training_data
+    from neuroquantum_brain import NeuroQuantumBrainAI, NeuroQuantumBrain, get_training_data
     from neuroquantum_layered import NeuroQuantumTokenizer
     print("✅ neuroquantum_brain.py をインポートしました")
     print("✅ neuroquantum_layered.py をインポートしました")
 except ImportError as e:
     print(f"❌ インポートに失敗: {e}")
     NeuroQuantumBrainAI = None
+    NeuroQuantumBrain = None
     NeuroQuantumTokenizer = None
 
 # トークナイザーモデルのパス
@@ -97,7 +98,7 @@ def save_checkpoint(model_instance, checkpoint_path: str = MODEL_CHECKPOINT_PATH
 
         # 保存するデータ
         checkpoint = {
-            'model_state_dict': model_instance.qbnn.state_dict(),
+            'model_state_dict': model_instance.model.state_dict(),
             'config': {
                 'embed_dim': model_instance.embed_dim,
                 'num_heads': model_instance.num_heads,
@@ -158,11 +159,23 @@ def load_checkpoint(checkpoint_path: str = MODEL_CHECKPOINT_PATH):
                 model_file=TOKENIZER_MODEL_PATH
             )
 
+        # NeuroQuantumBrainモデルを作成
+        print(f"📦 NeuroQuantumBrainモデルを構築中...")
+        model_instance.model = NeuroQuantumBrain(
+            vocab_size=config['max_vocab'],
+            embed_dim=config['embed_dim'],
+            num_heads=config['num_heads'],
+            num_layers=config['num_layers'],
+            num_neurons=config['num_neurons'],
+            max_seq_len=256,
+            dropout=0.1
+        ).to(model_instance.device)
+
         # 重みをロード
-        model_instance.qbnn.load_state_dict(checkpoint['model_state_dict'])
+        model_instance.model.load_state_dict(checkpoint['model_state_dict'])
 
         # 推論モードに設定
-        model_instance.qbnn.eval()
+        model_instance.model.eval()
 
         print(f"✅ チェックポイントロード完了")
         return model_instance
@@ -219,8 +232,9 @@ def initialize_model():
                     model_file=TOKENIZER_MODEL_PATH
                 )
 
-            # 推論モードに設定
-            model.qbnn.eval()
+            # Note: model.model is None for untrained models
+            # It will be created during training
+            # For now, we don't call eval() since there's no neural network yet
 
         is_initialized = True
         print("✅ モデル初期化完了（推論モード）!")
@@ -294,7 +308,8 @@ def generate_text(prompt: str, max_length: int = 50,
 
     try:
         # 推論モードに設定（重要：学習を防ぐ）
-        model.qbnn.eval()
+        if model.model is not None:
+            model.model.eval()
 
         # temperatureが指定された場合、temp_min/temp_maxに変換
         if temperature is not None and temp_min is None:
