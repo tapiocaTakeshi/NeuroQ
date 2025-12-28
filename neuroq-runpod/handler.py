@@ -549,6 +549,8 @@ def handler(job):
         - 学習後にチェックポイントを保存
         - 推論は一切行わない
         """
+        global model, is_initialized
+        
         # モデルが未初期化の場合、新規作成
         if not is_initialized:
             print("🔄 学習用モデルを新規作成...")
