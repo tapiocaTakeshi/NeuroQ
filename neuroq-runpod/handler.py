@@ -370,7 +370,7 @@ def handler(job):
     
     重要: health checkは即座に返す！
     """
-    global is_initialized
+    global model, is_initialized
     
     job_input = job.get("input", {})
     action = job_input.get("action", "generate")
@@ -549,7 +549,6 @@ def handler(job):
         - 学習後にチェックポイントを保存
         - 推論は一切行わない
         """
-        global model, is_initialized
         
         # モデルが未初期化の場合、新規作成
         if not is_initialized:
