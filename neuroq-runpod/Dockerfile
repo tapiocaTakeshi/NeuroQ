@@ -33,13 +33,13 @@ ARG GIT_BRANCH="main"
 
 # リポジトリが指定されている場合はクローン＆LFS pull
 RUN if [ -n "$GIT_REPO_URL" ]; then \
-        echo "📦 Cloning repository with Git LFS..." && \
-        git clone --depth 1 --branch "$GIT_BRANCH" "$GIT_REPO_URL" /tmp/neuroq-repo && \
-        cd /tmp/neuroq-repo && \
-        git lfs pull && \
-        echo "✅ Git LFS files pulled successfully"; \
+    echo "📦 Cloning repository with Git LFS..." && \
+    git clone --depth 1 --branch "$GIT_BRANCH" "$GIT_REPO_URL" /tmp/neuroq-repo && \
+    cd /tmp/neuroq-repo && \
+    git lfs pull && \
+    echo "✅ Git LFS files pulled successfully"; \
     else \
-        echo "⚠️ No GIT_REPO_URL provided, skipping git clone"; \
+    echo "⚠️ No GIT_REPO_URL provided, skipping git clone"; \
     fi
 
 # コアファイルのみコピー（軽量化）
