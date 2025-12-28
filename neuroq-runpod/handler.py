@@ -306,10 +306,13 @@ def generate_text(prompt: str, max_length: int = 50,
     if model is None:
         return "Error: Model not initialized"
 
+    # モデルが未学習の場合（model.model が None または学習済みの NeuroQuantumBrain がない場合）
+    if model.model is None:
+        return "Error: Model not trained. Please run action='train' or action='pretrain_openai' first to train the model before generating text."
+
     try:
         # 推論モードに設定（重要：学習を防ぐ）
-        if model.model is not None:
-            model.model.eval()
+        model.model.eval()
 
         # temperatureが指定された場合、temp_min/temp_maxに変換
         if temperature is not None and temp_min is None:

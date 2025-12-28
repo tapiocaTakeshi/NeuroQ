@@ -58,6 +58,10 @@ COPY neuroq_pretrained.py /app/
 COPY neuroq_tokenizer.model /app/
 COPY neuroq_tokenizer.vocab /app/
 
+# 学習済みチェックポイント（存在する場合）
+# 先に train_and_save_checkpoint.py を実行して作成してください
+COPY checkpoints/ /app/checkpoints/
+
 # Entrypointスクリプト（起動時にモデルをダウンロード）
 COPY entrypoint.sh /app/
 RUN chmod +x /app/entrypoint.sh
