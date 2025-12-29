@@ -54,9 +54,11 @@ COPY pretrain_openai.py /app/
 # 事前学習済みモデルモジュール（同じディレクトリに配置）
 COPY neuroq_pretrained.py /app/
 
-# トークナイザー
+# トークナイザー（4kと8kの両方）
 COPY neuroq_tokenizer.model /app/
 COPY neuroq_tokenizer.vocab /app/
+COPY neuroq_tokenizer_8k.model /app/
+COPY neuroq_tokenizer_8k.vocab /app/
 
 # 学習済みチェックポイント（存在する場合）
 # 先に train_and_save_checkpoint.py を実行して作成してください
