@@ -25,6 +25,10 @@ MANIFEST
 *.pth
 *.pt
 
+# Training logs
+*.log
+*_quick.py
+
 
 # Jupyter Notebook
 .ipynb_checkpoints
