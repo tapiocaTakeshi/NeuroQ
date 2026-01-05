@@ -706,19 +706,46 @@ class NeuroQuantum(nn.Module):
     """
     ニューロQ: GPT型デコーダーのみのTransformer（QBNN拡張版）
     
-    処理フロー（図2-4に準拠）:
-    1. 入力テキスト → トークン化 → トークンID
-    2. トークンID → テキストエンベディング（Text Embedding + Position Embedding）
-    3. テキストエンベディング → GPT型デコーダーのみのTransformer（N個のDecoder Blocks）
-    4. Transformer出力 → 後処理ステップ（Final LayerNorm + Output Head）
-    5. 後処理ステップ → 出力テキスト（ロジット）
+    ===== 図4-15: GPTモデルのアーキテクチャ =====
     
-    GPT標準構造:
-    - Text Embedding + Position Embedding（テキストエンベディング）
-    - Dropout
-    - N個のGPT Decoder Blocks（Pre-norm + Attention + FFN）
-    - Final LayerNorm
-    - Output Head (Linear to vocab_size)
+    (下から上へ)
+    
+    [入力] トークン化されたテキスト
+           ↓
+    [1] トークン埋め込み層 (Token Embedding)
+           ↓
+    [2] 位置埋め込み層 (Position Embedding)
+           ↓
+    [3] ドロップアウト
+           ↓
+    ┌─────────────────────────────────────┐
+    │   Transformerブロック × N回          │
+    │  ┌───────────────────────────────┐  │
+    │  │ [4] LayerNorm 1               │  │
+    │  │        ↓                      │  │
+    │  │ [5] Masked Multi-head Attention│  │
+    │  │        ↓                      │  │
+    │  │ [6] ドロップアウト             │  │
+    │  │        ↓                      │  │
+    │  │ (+) 残差接続                   │  │
+    │  │        ↓                      │  │
+    │  │ [7] LayerNorm 2               │  │
+    │  │        ↓                      │  │
+    │  │ [8] フィードフォワード + QBNN   │  │
+    │  │        ↓                      │  │
+    │  │ [9] ドロップアウト             │  │
+    │  │        ↓                      │  │
+    │  │ (+) 残差接続                   │  │
+    │  └───────────────────────────────┘  │
+    └─────────────────────────────────────┘
+           ↓
+    [10] 最後のLayerNorm (Final LayerNorm)
+           ↓
+    [11] 線形出力層 (Output Head)
+           ↓
+    [出力] ロジット (vocab_size次元)
+    
+    ============================================
     
     独自要素:
     - QBNNLayer: 量子もつれテンソル J による補正
@@ -738,8 +765,10 @@ class NeuroQuantum(nn.Module):
         self.config = config
         self.use_openai_embedding = use_openai_embedding
         
-        # GPT標準: Text Embedding + Position Embedding
-        # OpenAI Embeddingを使用する場合はNeuroQuantumEmbeddingクラスを使用
+        # ========================================
+        # [1] トークン埋め込み層 (Token Embedding)
+        # [2] 位置埋め込み層 (Position Embedding)
+        # ========================================
         if use_openai_embedding:
             self.embedding = NeuroQuantumEmbedding(
                 config=config,
@@ -748,27 +777,38 @@ class NeuroQuantum(nn.Module):
                 openai_model=openai_model,
                 tokenizer=tokenizer
             )
-            # 互換性のため、position_embeddingは保持
-            self.text_embedding = None  # OpenAI Embedding使用時は不要
+            self.token_embedding = None  # OpenAI Embedding使用時は不要
             self.position_embedding = self.embedding.position_embedding
         else:
-            self.text_embedding = nn.Embedding(config.vocab_size, config.embed_dim)  # テキストエンベディング
+            self.token_embedding = nn.Embedding(config.vocab_size, config.embed_dim)
             self.position_embedding = nn.Embedding(config.max_seq_len, config.embed_dim)
             self.embedding = None
         
-        # GPT Decoder Blocks
+        # 後方互換性のためのエイリアス
+        self.text_embedding = self.token_embedding
+        
+        # ========================================
+        # [3] ドロップアウト (Embedding Dropout)
+        # ========================================
+        self.embedding_dropout = nn.Dropout(config.dropout)
+        self.dropout = self.embedding_dropout  # 後方互換性
+        
+        # ========================================
+        # [4-9] Transformerブロック × N回
+        # ========================================
         self.transformer_blocks = nn.ModuleList([
             QBNNTransformerBlock(config) for _ in range(config.num_layers)
         ])
         
-        # GPT標準: Final LayerNorm
+        # ========================================
+        # [10] 最後のLayerNorm (Final LayerNorm)
+        # ========================================
         self.final_norm = nn.LayerNorm(config.embed_dim)
         
-        # GPT標準: Output Head (weight tying可能だが、ここでは独立)
+        # ========================================
+        # [11] 線形出力層 (Output Head)
+        # ========================================
         self.output_head = nn.Linear(config.embed_dim, config.vocab_size, bias=False)
-        
-        # GPT標準: Embedding Dropout
-        self.dropout = nn.Dropout(config.dropout)
         
         # パラメータ初期化（GPT標準）
         self.apply(self._init_weights)
@@ -785,55 +825,328 @@ class NeuroQuantum(nn.Module):
         elif isinstance(module, nn.Embedding):
             torch.nn.init.normal_(module.weight, mean=0.0, std=0.02)
     
-    def forward(self, token_ids: torch.Tensor, mask: Optional[torch.Tensor] = None) -> torch.Tensor:
+    def forward(self, token_ids: torch.Tensor, mask: Optional[torch.Tensor] = None,
+                verbose: bool = False) -> torch.Tensor:
         """
-        GPT型デコーダーのみのTransformer フォワード（図2-4のフローに準拠）
-        
-        処理ステップ:
-        1. トークンID → テキストエンベディング（Text Embedding + Position Embedding）
-        2. テキストエンベディング → GPT型デコーダーのみのTransformer
-        3. Transformer出力 → 後処理ステップ（Final LayerNorm + Output Head）
-        4. 後処理ステップ → ロジット（出力テキスト生成用）
+        GPT型デコーダーのみのTransformer フォワード（図4-15のフローに準拠）
         
         Args:
             token_ids: (batch, seq) トークンID（トークン化済みのテキスト）
             mask: Optional attention mask (Noneの場合はCausal Maskを自動生成)
+            verbose: 各層の入出力を詳細にログ出力するか
         
         Returns:
-            (batch, seq, vocab_size) ロジット（後処理ステップ後の出力）
+            (batch, seq, vocab_size) ロジット
         """
+        import logging
+        logger = logging.getLogger(__name__)
+        
         batch, seq = token_ids.shape
         
-        # ステップ1: トークンID → テキストエンベディング
+        if verbose:
+            logger.info("=" * 70)
+            logger.info("🧠 NeuroQuantum フォワードパス開始")
+            logger.info("=" * 70)
+            logger.info(f"[入力] トークン化されたテキスト")
+            logger.info(f"  - 形状: (batch={batch}, seq={seq})")
+            logger.info(f"  - トークンID例 (先頭5): {token_ids[0, :min(5, seq)].tolist()}")
+            logger.info(f"  - dtype: {token_ids.dtype}, device: {token_ids.device}")
+        
+        # ========================================
+        # [1] トークン埋め込み層 + [2] 位置埋め込み層
+        # ========================================
         if self.use_openai_embedding and self.embedding is not None:
-            # OpenAI Embeddingを使用
             hidden_states = self.embedding(token_ids, texts=None)
+            if verbose:
+                logger.info("-" * 50)
+                logger.info(f"[1-2] OpenAI Embedding")
+                logger.info(f"  - 出力: {hidden_states.shape}")
+                logger.info(f"  - 統計: mean={hidden_states.mean().item():.4f}, std={hidden_states.std().item():.4f}")
         else:
-            # Text Embedding: トークンIDをベクトルに変換（テキストエンベディング）
-            text_embeds = self.text_embedding(token_ids)  # (batch, seq, embed_dim)
-            # Position Embedding: 位置情報を追加
+            # [1] トークン埋め込み層
+            token_embeds = self.token_embedding(token_ids)
+            
+            if verbose:
+                logger.info("-" * 50)
+                logger.info(f"[1] トークン埋め込み層 (Token Embedding)")
+                logger.info(f"  - 入力: (batch={batch}, seq={seq}) トークンID")
+                logger.info(f"  - 出力: {token_embeds.shape}")
+                logger.info(f"  - 出力例 [0,0,:5]: {token_embeds[0, 0, :5].tolist()}")
+                logger.info(f"  - 統計: mean={token_embeds.mean().item():.4f}, std={token_embeds.std().item():.4f}")
+            
+            # [2] 位置埋め込み層
             positions = torch.arange(seq, device=token_ids.device).unsqueeze(0).expand(batch, -1)
-            pos_embeds = self.position_embedding(positions)  # (batch, seq, embed_dim)
-            # 埋め込みの合成 + Dropout
-            hidden_states = self.dropout(text_embeds + pos_embeds)
+            pos_embeds = self.position_embedding(positions)
+            
+            if verbose:
+                logger.info("-" * 50)
+                logger.info(f"[2] 位置埋め込み層 (Position Embedding)")
+                logger.info(f"  - 位置インデックス: 0 ~ {seq-1}")
+                logger.info(f"  - 出力: {pos_embeds.shape}")
+                logger.info(f"  - 出力例 [0,0,:5]: {pos_embeds[0, 0, :5].tolist()}")
+                logger.info(f"  - 統計: mean={pos_embeds.mean().item():.4f}, std={pos_embeds.std().item():.4f}")
+            
+            # 埋め込みの合成
+            hidden_states = token_embeds + pos_embeds
+            
+            if verbose:
+                logger.info("-" * 50)
+                logger.info(f"[合成] Token + Position Embedding")
+                logger.info(f"  - 出力: {hidden_states.shape}")
+                logger.info(f"  - 統計: mean={hidden_states.mean().item():.4f}, std={hidden_states.std().item():.4f}")
+        
+        # ========================================
+        # [3] ドロップアウト (Embedding Dropout)
+        # ========================================
+        hidden_states = self.embedding_dropout(hidden_states)
+        
+        if verbose:
+            logger.info("-" * 50)
+            logger.info(f"[3] ドロップアウト (rate={self.config.dropout})")
+            logger.info(f"  - 出力: {hidden_states.shape}")
+            logger.info(f"  - 統計: mean={hidden_states.mean().item():.4f}, std={hidden_states.std().item():.4f}")
         
         # Causal Mask生成（maskがNoneの場合）
         if mask is None:
             mask = torch.tril(torch.ones(seq, seq, device=token_ids.device)).unsqueeze(0).unsqueeze(0)
+            if verbose:
+                logger.info(f"[Mask] Causal Mask生成: {mask.shape}")
         
-        # ステップ2: テキストエンベディング → GPT型デコーダーのみのTransformer
-        # N個のGPT Decoder Blocks（Pre-norm + Multi-Head Causal Self-Attention + FFN）
-        for block in self.transformer_blocks:
+        # ========================================
+        # [4-9] Transformerブロック × N回
+        # ========================================
+        if verbose:
+            logger.info("=" * 70)
+            logger.info(f"🔄 Transformerブロック × {self.config.num_layers}回")
+            logger.info("=" * 70)
+        
+        for block_idx, block in enumerate(self.transformer_blocks):
+            h_input = hidden_states.clone() if verbose else None
             hidden_states = block(hidden_states, mask)
+            
+            if verbose:
+                logger.info(f"[Block {block_idx + 1}/{self.config.num_layers}]")
+                logger.info(f"  - 入力: mean={h_input.mean().item():.4f}, std={h_input.std().item():.4f}")
+                logger.info(f"  - 出力: mean={hidden_states.mean().item():.4f}, std={hidden_states.std().item():.4f}")
+                
+                # QBNN量子統計情報
+                try:
+                    lambda_attn = block.attention.lambda_attn.item()
+                    logger.info(f"  - QBNN Attention λ: {lambda_attn:.4f}")
+                except Exception as e:
+                    logger.debug(f"  - 量子統計取得エラー: {e}")
         
-        # ステップ3: Transformer出力 → 後処理ステップ
-        # Final LayerNorm
+        # ========================================
+        # [10] 最後のLayerNorm (Final LayerNorm)
+        # ========================================
+        h_before_norm = hidden_states.clone() if verbose else None
         hidden_states = self.final_norm(hidden_states)
-        # Output Head: ベクトル → 語彙確率への変換
-        logits = self.output_head(hidden_states)  # (batch, seq, vocab_size)
         
-        # ステップ4: ロジット（出力テキスト生成用）
+        if verbose:
+            logger.info("=" * 70)
+            logger.info(f"[10] 最後のLayerNorm (Final LayerNorm)")
+            logger.info(f"  - 入力: mean={h_before_norm.mean().item():.4f}, std={h_before_norm.std().item():.4f}")
+            logger.info(f"  - 出力: {hidden_states.shape}")
+            logger.info(f"  - 出力統計: mean={hidden_states.mean().item():.4f}, std={hidden_states.std().item():.4f}")
+        
+        # ========================================
+        # [11] 線形出力層 (Output Head)
+        # ========================================
+        logits = self.output_head(hidden_states)
+        
+        if verbose:
+            logger.info("-" * 50)
+            logger.info(f"[11] 線形出力層 (Output Head)")
+            logger.info(f"  - 入力: {hidden_states.shape}")
+            logger.info(f"  - 出力: {logits.shape}")
+            logger.info(f"  - ロジット統計: mean={logits.mean().item():.4f}, std={logits.std().item():.4f}")
+            logger.info(f"  - 最大ロジット位置 [0,-1]: {logits[0, -1].argmax().item()}")
+            
+            # 上位5つのトークン予測
+            top_k_values, top_k_indices = torch.topk(logits[0, -1], 5)
+            logger.info(f"  - Top-5予測: {top_k_indices.tolist()} (logits: {[f'{v:.2f}' for v in top_k_values.tolist()]})")
+            
+            logger.info("=" * 70)
+            logger.info("🧠 NeuroQuantum フォワードパス完了")
+            logger.info("=" * 70)
+        
         return logits
+    
+    def forward_with_details(self, token_ids: torch.Tensor, mask: Optional[torch.Tensor] = None) -> Dict:
+        """
+        各層の出力を詳細に返すフォワードパス
+        
+        Args:
+            token_ids: (batch, seq) トークンID
+            mask: Optional attention mask
+        
+        Returns:
+            各層の出力を含む辞書
+        """
+        batch, seq = token_ids.shape
+        details = {
+            'input_tokens': token_ids,
+            'layers': []
+        }
+        
+        # [1-2] 埋め込み層
+        if self.use_openai_embedding and self.embedding is not None:
+            hidden_states = self.embedding(token_ids, texts=None)
+            details['embedding'] = {
+                'type': 'openai',
+                'output': hidden_states.detach().clone(),
+                'shape': hidden_states.shape,
+                'mean': hidden_states.mean().item(),
+                'std': hidden_states.std().item()
+            }
+        else:
+            token_embeds = self.token_embedding(token_ids)
+            details['token_embedding'] = {
+                'output': token_embeds.detach().clone(),
+                'shape': token_embeds.shape,
+                'mean': token_embeds.mean().item(),
+                'std': token_embeds.std().item()
+            }
+            
+            positions = torch.arange(seq, device=token_ids.device).unsqueeze(0).expand(batch, -1)
+            pos_embeds = self.position_embedding(positions)
+            details['position_embedding'] = {
+                'output': pos_embeds.detach().clone(),
+                'shape': pos_embeds.shape,
+                'mean': pos_embeds.mean().item(),
+                'std': pos_embeds.std().item()
+            }
+            
+            hidden_states = token_embeds + pos_embeds
+            details['combined_embedding'] = {
+                'output': hidden_states.detach().clone(),
+                'shape': hidden_states.shape,
+                'mean': hidden_states.mean().item(),
+                'std': hidden_states.std().item()
+            }
+        
+        # [3] ドロップアウト
+        hidden_states = self.embedding_dropout(hidden_states)
+        details['embedding_dropout'] = {
+            'output': hidden_states.detach().clone(),
+            'shape': hidden_states.shape,
+            'mean': hidden_states.mean().item(),
+            'std': hidden_states.std().item()
+        }
+        
+        # Causal Mask生成
+        if mask is None:
+            mask = torch.tril(torch.ones(seq, seq, device=token_ids.device)).unsqueeze(0).unsqueeze(0)
+        details['mask'] = mask
+        
+        # [4-9] Transformerブロック × N回
+        for block_idx, block in enumerate(self.transformer_blocks):
+            h_input = hidden_states.detach().clone()
+            hidden_states = block(hidden_states, mask)
+            
+            block_details = {
+                'block_idx': block_idx,
+                'input': h_input,
+                'output': hidden_states.detach().clone(),
+                'input_mean': h_input.mean().item(),
+                'output_mean': hidden_states.mean().item(),
+                'input_std': h_input.std().item(),
+                'output_std': hidden_states.std().item()
+            }
+            
+            # QBNN統計
+            try:
+                block_details['lambda_attn'] = block.attention.lambda_attn.item()
+            except:
+                pass
+            
+            details['layers'].append(block_details)
+        
+        # [10] 最後のLayerNorm
+        h_before_norm = hidden_states.detach().clone()
+        hidden_states = self.final_norm(hidden_states)
+        details['final_norm'] = {
+            'input': h_before_norm,
+            'output': hidden_states.detach().clone(),
+            'mean': hidden_states.mean().item(),
+            'std': hidden_states.std().item()
+        }
+        
+        # [11] 線形出力層
+        logits = self.output_head(hidden_states)
+        details['output_head'] = {
+            'output': logits.detach().clone(),
+            'shape': logits.shape,
+            'mean': logits.mean().item(),
+            'std': logits.std().item()
+        }
+        
+        details['logits'] = logits
+        
+        return details
+    
+    def print_architecture(self):
+        """モデルアーキテクチャを図として表示"""
+        print()
+        print("=" * 70)
+        print("🧠 NeuroQuantum アーキテクチャ (図4-15準拠)")
+        print("=" * 70)
+        print()
+        print("  [入力] トークン化されたテキスト")
+        print("         ↓")
+        if self.use_openai_embedding:
+            print(f"  [1-2] OpenAI Embedding ({self.config.embed_dim}次元)")
+        else:
+            print(f"  [1] トークン埋め込み層 (vocab_size={self.config.vocab_size} → embed_dim={self.config.embed_dim})")
+            print("         ↓")
+            print(f"  [2] 位置埋め込み層 (max_seq_len={self.config.max_seq_len} → embed_dim={self.config.embed_dim})")
+        print("         ↓")
+        print(f"  [3] ドロップアウト (rate={self.config.dropout})")
+        print("         ↓")
+        print("  ┌─────────────────────────────────────────────────────┐")
+        print(f"  │   Transformerブロック × {self.config.num_layers}回 (QBNN拡張)         │")
+        print("  │  ┌───────────────────────────────────────────────┐  │")
+        print("  │  │ [4] LayerNorm 1                               │  │")
+        print("  │  │        ↓                                      │  │")
+        print(f"  │  │ [5] QBNN Multi-head Attention (heads={self.config.num_heads})     │  │")
+        print("  │  │        ↓                                      │  │")
+        print("  │  │ [6] ドロップアウト                             │  │")
+        print("  │  │        ↓                                      │  │")
+        print("  │  │ (+) 残差接続                                   │  │")
+        print("  │  │        ↓                                      │  │")
+        print("  │  │ [7] LayerNorm 2                               │  │")
+        print("  │  │        ↓                                      │  │")
+        print(f"  │  │ [8] QBNN フィードフォワード (hidden={self.config.hidden_dim})     │  │")
+        print("  │  │        ↓                                      │  │")
+        print("  │  │ [9] ドロップアウト                             │  │")
+        print("  │  │        ↓                                      │  │")
+        print("  │  │ (+) 残差接続                                   │  │")
+        print("  │  └───────────────────────────────────────────────┘  │")
+        print("  └─────────────────────────────────────────────────────┘")
+        print("         ↓")
+        print(f"  [10] 最後のLayerNorm (embed_dim={self.config.embed_dim})")
+        print("         ↓")
+        print(f"  [11] 線形出力層 (embed_dim={self.config.embed_dim} → vocab_size={self.config.vocab_size})")
+        print("         ↓")
+        print("  [出力] ロジット")
+        print()
+        
+        # パラメータ情報
+        total_params = sum(p.numel() for p in self.parameters())
+        trainable_params = sum(p.numel() for p in self.parameters() if p.requires_grad)
+        print("-" * 70)
+        print("📊 パラメータ情報:")
+        print(f"  - 総パラメータ数: {total_params:,}")
+        print(f"  - 学習可能パラメータ数: {trainable_params:,}")
+        print(f"  - vocab_size: {self.config.vocab_size}")
+        print(f"  - embed_dim: {self.config.embed_dim}")
+        print(f"  - hidden_dim: {self.config.hidden_dim}")
+        print(f"  - num_heads: {self.config.num_heads}")
+        print(f"  - num_layers: {self.config.num_layers}")
+        print(f"  - max_seq_len: {self.config.max_seq_len}")
+        print(f"  - dropout: {self.config.dropout}")
+        print(f"  - lambda_entangle: {self.config.lambda_entangle}")
+        print("=" * 70)
     
     def get_quantum_info(self) -> List[Dict]:
         """全層の量子情報を取得"""
@@ -887,6 +1200,11 @@ class NeuroQuantumTokenizer:
                     self.sp_model.load(model_file)
                     self.actual_vocab_size = self.sp_model.get_piece_size()
                     self.vocab_size = self.actual_vocab_size
+                    # 特殊トークンIDを設定
+                    self.pad_id = self.sp_model.pad_id()
+                    self.unk_id = self.sp_model.unk_id()
+                    self.bos_id = self.sp_model.bos_id()
+                    self.eos_id = self.sp_model.eos_id()
                     print(f"   ✅ SentencePieceモデル読み込み: {model_file} (語彙サイズ: {self.actual_vocab_size})")
                 except Exception as e:
                     warnings.warn(f"SentencePieceモデルの読み込みに失敗: {e}。新規学習します。")
@@ -1004,14 +1322,38 @@ class NeuroQuantumTokenizer:
         self.vocab_size = self.actual_vocab_size
         print(f"   ✅ 語彙サイズ: {self.actual_vocab_size}")
     
-    def encode(self, text: str, add_special: bool = True) -> List[int]:
-        """エンコード"""
+    def encode(self, text: str, add_special: bool = True, verbose: bool = False) -> List[int]:
+        """
+        エンコード
+        
+        Args:
+            text: 入力テキスト
+            add_special: 特殊トークン（BOS/EOS）を追加するか
+            verbose: 詳細ログを出力するか
+        
+        Returns:
+            トークンIDのリスト
+        """
+        import logging
+        logger = logging.getLogger(__name__)
+        
         if self.sp_model is not None:
             # SentencePiece使用
             if add_special:
-                return self.sp_model.encode(text, out_type=int, add_bos=True, add_eos=True)
+                tokens = self.sp_model.encode(text, out_type=int, add_bos=True, add_eos=True)
             else:
-                return self.sp_model.encode(text, out_type=int, add_bos=False, add_eos=False)
+                tokens = self.sp_model.encode(text, out_type=int, add_bos=False, add_eos=False)
+            
+            if verbose:
+                # 詳細ログ
+                logger.debug(f"[Encode] 入力テキスト: '{text[:50]}...'" if len(text) > 50 else f"[Encode] 入力テキスト: '{text}'")
+                logger.debug(f"[Encode] トークン数: {len(tokens)}")
+                logger.debug(f"[Encode] トークンID: {tokens[:20]}{'...' if len(tokens) > 20 else ''}")
+                # トークン文字列表示
+                pieces = [self.sp_model.id_to_piece(t) for t in tokens[:20]]
+                logger.debug(f"[Encode] トークン分割: {pieces}{'...' if len(tokens) > 20 else ''}")
+            
+            return tokens
         else:
             # フォールバック
             tokens = []
@@ -1021,17 +1363,49 @@ class NeuroQuantumTokenizer:
                 tokens.append(self.token_to_idx.get(char, self.unk_id))
             if add_special:
                 tokens.append(self.eos_id)
+            
+            if verbose:
+                logger.debug(f"[Encode/Fallback] 入力テキスト: '{text[:50]}...'" if len(text) > 50 else f"[Encode/Fallback] 入力テキスト: '{text}'")
+                logger.debug(f"[Encode/Fallback] トークン数: {len(tokens)}")
+                logger.debug(f"[Encode/Fallback] トークンID: {tokens[:20]}{'...' if len(tokens) > 20 else ''}")
+            
             return tokens
     
-    def decode(self, token_ids: List[int], skip_special: bool = True) -> str:
-        """デコード"""
+    def decode(self, token_ids: List[int], skip_special: bool = True, verbose: bool = False) -> str:
+        """
+        デコード
+        
+        Args:
+            token_ids: トークンIDのリスト
+            skip_special: 特殊トークンをスキップするか
+            verbose: 詳細ログを出力するか
+        
+        Returns:
+            デコードされたテキスト
+        """
+        import logging
+        logger = logging.getLogger(__name__)
+        
         if self.sp_model is not None:
             # SentencePiece使用
             if skip_special:
                 # 特殊トークンをスキップ
                 special_ids = {self.pad_id, self.eos_id, self.bos_id, self.unk_id}
-                token_ids = [t for t in token_ids if t not in special_ids]
-            return self.sp_model.decode(token_ids)
+                filtered_ids = [t for t in token_ids if t not in special_ids]
+            else:
+                filtered_ids = token_ids
+            
+            result = self.sp_model.decode(filtered_ids)
+            
+            if verbose:
+                logger.debug(f"[Decode] 入力トークン数: {len(token_ids)}")
+                logger.debug(f"[Decode] フィルタ後: {len(filtered_ids)}")
+                logger.debug(f"[Decode] トークンID: {filtered_ids[:20]}{'...' if len(filtered_ids) > 20 else ''}")
+                pieces = [self.sp_model.id_to_piece(t) for t in filtered_ids[:20]]
+                logger.debug(f"[Decode] トークン分割: {pieces}{'...' if len(filtered_ids) > 20 else ''}")
+                logger.debug(f"[Decode] 出力テキスト: '{result[:100]}...'" if len(result) > 100 else f"[Decode] 出力テキスト: '{result}'")
+            
+            return result
         else:
             # フォールバック
             tokens = []
@@ -1042,7 +1416,70 @@ class NeuroQuantumTokenizer:
                 token = self.idx_to_token.get(t, self.unk_token)
                 if token not in [self.pad_token, self.unk_token, self.bos_token, self.eos_token]:
                     tokens.append(token)
-            return ''.join(tokens)
+            result = ''.join(tokens)
+            
+            if verbose:
+                logger.debug(f"[Decode/Fallback] 入力トークン数: {len(token_ids)}")
+                logger.debug(f"[Decode/Fallback] 出力テキスト: '{result[:100]}...'" if len(result) > 100 else f"[Decode/Fallback] 出力テキスト: '{result}'")
+            
+            return result
+    
+    def get_tokenization_info(self, text: str) -> Dict:
+        """
+        トークン化の詳細情報を取得
+        
+        Args:
+            text: 入力テキスト
+        
+        Returns:
+            トークン化の詳細情報を含む辞書
+        """
+        tokens = self.encode(text, add_special=False)
+        
+        info = {
+            'input_text': text,
+            'input_length': len(text),
+            'token_count': len(tokens),
+            'token_ids': tokens,
+            'compression_ratio': len(text) / len(tokens) if tokens else 0,
+        }
+        
+        if self.sp_model is not None:
+            # SentencePieceの場合、トークン文字列も取得
+            info['tokens'] = [self.sp_model.id_to_piece(t) for t in tokens]
+            
+            # UNKトークンのカウント
+            unk_id = self.sp_model.unk_id()
+            info['unk_count'] = sum(1 for t in tokens if t == unk_id)
+            info['unk_rate'] = info['unk_count'] / len(tokens) if tokens else 0
+        else:
+            info['tokens'] = [self.idx_to_token.get(t, self.unk_token) for t in tokens]
+            info['unk_count'] = sum(1 for t in tokens if t == self.unk_id)
+            info['unk_rate'] = info['unk_count'] / len(tokens) if tokens else 0
+        
+        return info
+    
+    def print_tokenization(self, text: str):
+        """
+        トークン化の詳細をプリント
+        
+        Args:
+            text: 入力テキスト
+        """
+        info = self.get_tokenization_info(text)
+        print("=" * 60)
+        print("🔤 トークン化詳細")
+        print("=" * 60)
+        print(f"入力テキスト: '{info['input_text']}'")
+        print(f"入力文字数: {info['input_length']}")
+        print(f"トークン数: {info['token_count']}")
+        print(f"圧縮率: {info['compression_ratio']:.2f}")
+        print(f"UNKトークン数: {info['unk_count']} ({info['unk_rate']*100:.1f}%)")
+        print("-" * 60)
+        print("トークン分割:")
+        for i, (tid, token) in enumerate(zip(info['token_ids'], info['tokens'])):
+            print(f"  [{i:3d}] ID={tid:5d} -> '{token}'")
+        print("=" * 60)
     
     def save(self, path: str):
         """保存"""
