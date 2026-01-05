@@ -63,27 +63,15 @@ COPY neuroq_tokenizer_8k.vocab /app/
 # TikToken関連ファイル（英語チェックポイント用）
 COPY tiktoken_tokenizer.py /app/
 COPY train_tiktoken_english.py /app/
+COPY generate_english_checkpoint.py /app/
 
 # 学習済みチェックポイント（存在する場合）
 # 先に train_and_save_checkpoint.py を実行して作成してください
 COPY checkpoints/ /app/checkpoints/
 
 # 英語版チェックポイントを生成（ビルド時に実行）
-# エポック数を減らした高速トレーニング
-RUN python -c "
-import sys
-import os
-
-# train_tiktoken_english.pyの内容を読み込み
-with open('train_tiktoken_english.py', 'r') as f:
-    content = f.read()
-
-# エポック数を100に変更（50,000だと時間がかかりすぎるため）
-content = content.replace(\"'epochs': 50000,\", \"'epochs': 100,\")
-
-# 実行
-exec(content)
-" || echo "⚠️ English checkpoint generation failed, continuing..."
+# エポック数を減らした高速トレーニング（100エポック）
+RUN python generate_english_checkpoint.py || echo "⚠️ English checkpoint generation failed, continuing..."
 
 # Entrypointスクリプト（起動時にモデルをダウンロード）
 COPY entrypoint.sh /app/
