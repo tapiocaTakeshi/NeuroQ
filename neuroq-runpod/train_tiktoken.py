@@ -6,13 +6,18 @@ TikToken トークナイザーを使用したNeuroQモデル学習スクリプ�
 モデルのチェックポイントを生成します。
 
 使い方:
-    python train_tiktoken.py
+    python train_tiktoken.py                    # Microモデル（デフォルト）
+    python train_tiktoken.py --model-size small # Smallモデル（embed_dim=1536）
+    python train_tiktoken.py -m large           # Largeモデル（embed_dim=3072）
+    python train_tiktoken.py -m small --epochs 20
 """
 
 import os
 import sys
 import torch
 import logging
+import argparse
+import random
 from pathlib import Path
 
 # ログ設定
@@ -34,36 +39,65 @@ print("=" * 70)
 
 # インポート
 try:
-    from neuroquantum_brain import NeuroQuantumBrain, get_training_data
+    from neuroquantum_layered import NeuroQuantum, NeuroQuantumConfig
+    from neuroquantum_brain import get_training_data
     from tiktoken_tokenizer import TikTokenTokenizer
+    from model_configs import AVAILABLE_MODELS, get_model_config, get_checkpoint_path
     print("✅ モジュールをインポートしました")
+    MODEL_CONFIGS_AVAILABLE = True
 except ImportError as e:
-    print(f"❌ インポートに失敗: {e}")
-    sys.exit(1)
+    print(f"⚠️ 一部のインポートに失敗: {e}")
+    MODEL_CONFIGS_AVAILABLE = False
+    try:
+        from neuroquantum_brain import NeuroQuantumBrain, get_training_data
+        from tiktoken_tokenizer import TikTokenTokenizer
+        print("✅ 基本モジュールをインポートしました（Microモード）")
+    except ImportError as e2:
+        print(f"❌ インポートに失敗: {e2}")
+        sys.exit(1)
 
 # 設定
-CHECKPOINT_PATH = "checkpoints/neuroq_tiktoken_checkpoint.pt"
-ENCODING_NAME = "cl100k_base"  # GPT-4と同じエンコーディング
+ENCODING_NAME = "o200k_base"  # GPT-4oと同じエンコーディング
 
-# モデル設定（tiktokenの語彙サイズに対応）
-MODEL_CONFIG = {
-    'vocab_size': 100277,  # cl100k_baseの語彙サイズ
-    'embed_dim': 128,
-    'num_heads': 4,
-    'num_layers': 3,
-    'num_neurons': 100,
-}
-
-# 学習設定
-TRAIN_CONFIG = {
-    'epochs': 10,      # tiktokenは語彙が大きいので少なめで開始
-    'batch_size': 16,
-    'lr': 0.001,
-    'seq_length': 48,
+# デフォルト学習設定
+DEFAULT_TRAIN_CONFIG = {
+    'epochs': 30,
+    'batch_size': 8,
+    'lr': 0.0005,
+    'seq_length': 64,
 }
 
 
-def train_with_tiktoken():
+def train_with_tiktoken(model_size='micro', epochs=None, batch_size=None, lr=None):
+    """
+    TikTokenトークナイザーでモデルを学習
+    
+    Args:
+        model_size: 'micro', 'small', 'large'
+        epochs: エポック数（Noneならデフォルト）
+        batch_size: バッチサイズ
+        lr: 学習率
+    """
+    
+    # 学習設定
+    train_config = DEFAULT_TRAIN_CONFIG.copy()
+    if epochs is not None:
+        train_config['epochs'] = epochs
+    if batch_size is not None:
+        train_config['batch_size'] = batch_size
+    if lr is not None:
+        train_config['lr'] = lr
+    
+    # モデルサイズに応じて調整
+    if model_size in ['small', 'large']:
+        # 大きいモデルは学習に時間がかかるのでバッチサイズを小さく
+        if batch_size is None:
+            train_config['batch_size'] = 4 if model_size == 'small' else 2
+        if lr is None:
+            train_config['lr'] = 0.0003  # 大きいモデルは学習率を下げる
+    
+    print(f"\n📦 モデルサイズ: {model_size.upper()}")
+    
     print("\n" + "=" * 50)
     print("📚 Step 1: トークナイザー初期化")
     print("=" * 50)
@@ -71,7 +105,7 @@ def train_with_tiktoken():
     tokenizer = TikTokenTokenizer(encoding_name=ENCODING_NAME)
     
     # テスト
-    test_texts = ["こんにちは", "量子コンピュータ", "人工知能"]
+    test_texts = ["Hello", "quantum computing", "AI"]
     print("\n🔤 トークン化テスト:")
     for text in test_texts:
         tokens = tokenizer.encode(text)
@@ -90,7 +124,8 @@ def train_with_tiktoken():
     for i, text in enumerate(texts):
         tokens = tokenizer.encode(text, add_special=False)
         all_tokens.extend(tokens)
-        if i < 3 or i == len(texts) - 1:
+        all_tokens.append(tokenizer.eos_id)
+        if i < 3:
             logger.debug(f"テキスト[{i}]: {len(tokens)} トークン")
     
     logger.info(f"総トークン数: {len(all_tokens):,}")
@@ -110,45 +145,87 @@ def train_with_tiktoken():
         device = torch.device("cpu")
         print("💻 CPU を使用")
     
-    print(f"\n📋 モデル設定:")
-    for key, value in MODEL_CONFIG.items():
-        print(f"   - {key}: {value:,}" if isinstance(value, int) else f"   - {key}: {value}")
-    
-    model = NeuroQuantumBrain(
-        vocab_size=MODEL_CONFIG['vocab_size'],
-        embed_dim=MODEL_CONFIG['embed_dim'],
-        num_heads=MODEL_CONFIG['num_heads'],
-        num_layers=MODEL_CONFIG['num_layers'],
-        num_neurons=MODEL_CONFIG['num_neurons'],
-    ).to(device)
+    # モデル設定を取得
+    if MODEL_CONFIGS_AVAILABLE and model_size in ['small', 'large']:
+        config = get_model_config(model_size)
+        checkpoint_path = get_checkpoint_path(model_size)
+        
+        print(f"\n📋 モデル設定 ({config['name']}):")
+        print(f"   - vocab_size: {config['vocab_size']:,}")
+        print(f"   - embed_dim: {config['embed_dim']:,}")
+        print(f"   - num_heads: {config['num_heads']}")
+        print(f"   - num_layers: {config['num_layers']}")
+        
+        # NeuroQuantumモデルを構築
+        nq_config = NeuroQuantumConfig()
+        nq_config.vocab_size = config['vocab_size']
+        nq_config.embed_dim = config['embed_dim']
+        nq_config.num_heads = config['num_heads']
+        nq_config.num_layers = config['num_layers']
+        nq_config.max_seq_len = config.get('max_seq_len', 512)
+        nq_config.dropout = config.get('dropout', 0.1)
+        
+        model = NeuroQuantum(nq_config).to(device)
+        model_config = config
+        
+    else:
+        # Microモデル（従来）
+        model_config = {
+            'vocab_size': 200019,  # o200k_base
+            'embed_dim': 128,
+            'num_heads': 4,
+            'num_layers': 3,
+        }
+        checkpoint_path = "checkpoints/neuroq_tiktoken_english_checkpoint.pt"
+        
+        print(f"\n📋 モデル設定 (Micro):")
+        for key, value in model_config.items():
+            print(f"   - {key}: {value:,}" if isinstance(value, int) else f"   - {key}: {value}")
+        
+        nq_config = NeuroQuantumConfig()
+        nq_config.vocab_size = model_config['vocab_size']
+        nq_config.embed_dim = model_config['embed_dim']
+        nq_config.num_heads = model_config['num_heads']
+        nq_config.num_layers = model_config['num_layers']
+        nq_config.max_seq_len = 256
+        nq_config.dropout = 0.1
+        
+        model = NeuroQuantum(nq_config).to(device)
     
     total_params = sum(p.numel() for p in model.parameters())
-    logger.info(f"総パラメータ数: {total_params:,}")
+    logger.info(f"総パラメータ数: {total_params:,} ({total_params/1e6:.1f}M)")
     
     print("\n" + "=" * 50)
     print("🎓 Step 4: 学習開始")
     print("=" * 50)
     
     print(f"\n📋 学習設定:")
-    for key, value in TRAIN_CONFIG.items():
+    for key, value in train_config.items():
         print(f"   - {key}: {value}")
     
     # シーケンスを作成
-    seq_length = TRAIN_CONFIG['seq_length']
+    seq_length = train_config['seq_length']
     sequences = []
-    for i in range(0, len(all_tokens) - seq_length, seq_length):
+    for i in range(0, len(all_tokens) - seq_length, seq_length // 2):
         sequences.append(all_tokens[i:i + seq_length])
     
     logger.info(f"シーケンス数: {len(sequences):,}")
     
     # 学習ループ
-    optimizer = torch.optim.AdamW(model.parameters(), lr=TRAIN_CONFIG['lr'])
+    optimizer = torch.optim.AdamW(model.parameters(), lr=train_config['lr'])
     criterion = torch.nn.CrossEntropyLoss()
     
-    batch_size = TRAIN_CONFIG['batch_size']
-    epochs = TRAIN_CONFIG['epochs']
+    batch_size = train_config['batch_size']
+    epochs = train_config['epochs']
     
     print("\n🚀 学習ループ開始...")
+    
+    # 総バッチ数を計算
+    total_batches = (len(sequences) - batch_size) // batch_size
+    print(f"   📊 エポックあたりのバッチ数: {total_batches:,}")
+    print(f"   ⚠️  大きなモデルでは1バッチに数秒かかることがあります\n")
+    
+    best_loss = float('inf')
     
     for epoch in range(epochs):
         model.train()
@@ -156,8 +233,10 @@ def train_with_tiktoken():
         batch_count = 0
         
         # シーケンスをシャッフル
-        import random
         random.shuffle(sequences)
+        
+        # 進捗表示間隔（10%ごと、最低10バッチごと）
+        progress_interval = max(10, total_batches // 10)
         
         for i in range(0, len(sequences) - batch_size, batch_size):
             batch = sequences[i:i + batch_size]
@@ -173,7 +252,7 @@ def train_with_tiktoken():
             
             # ロス計算
             loss = criterion(
-                logits.reshape(-1, MODEL_CONFIG['vocab_size']),
+                logits.reshape(-1, model_config['vocab_size']),
                 target_ids.reshape(-1)
             )
             
@@ -184,40 +263,51 @@ def train_with_tiktoken():
             
             total_loss += loss.item()
             batch_count += 1
+            
+            # バッチ単位の進捗表示
+            if batch_count % progress_interval == 0 or batch_count == 1:
+                progress = batch_count / total_batches * 100
+                current_avg_loss = total_loss / batch_count
+                print(f"   Epoch {epoch + 1}/{epochs} - Batch {batch_count:,}/{total_batches:,} ({progress:.0f}%) - Loss: {current_avg_loss:.4f}")
         
         avg_loss = total_loss / max(batch_count, 1)
-        print(f"   Epoch {epoch + 1}/{epochs}: Loss={avg_loss:.4f}")
+        
+        if avg_loss < best_loss:
+            best_loss = avg_loss
+        
+        print(f"   ✅ Epoch {epoch + 1}/{epochs} 完了: Loss={avg_loss:.4f}")
         logger.info(f"Epoch {epoch + 1}: Loss={avg_loss:.4f}")
     
-    print("\n   学習完了！")
+    print(f"\n   ✅ 学習完了！ベストLoss: {best_loss:.4f}")
     
     print("\n" + "=" * 50)
     print("💾 Step 5: チェックポイント保存")
     print("=" * 50)
     
     # ディレクトリを作成
-    os.makedirs(os.path.dirname(CHECKPOINT_PATH), exist_ok=True)
+    os.makedirs(os.path.dirname(checkpoint_path), exist_ok=True)
     
     # チェックポイントを保存
     checkpoint = {
         'model_state_dict': model.state_dict(),
-        'config': MODEL_CONFIG,
+        'config': model_config,
         'tokenizer': {
             'type': 'tiktoken',
             'encoding': ENCODING_NAME,
             'vocab_size': tokenizer.vocab_size,
         },
+        'model_size': model_size,
     }
     
-    torch.save(checkpoint, CHECKPOINT_PATH)
-    print(f"✅ チェックポイント保存完了: {CHECKPOINT_PATH}")
+    torch.save(checkpoint, checkpoint_path)
+    print(f"✅ チェックポイント保存完了: {checkpoint_path}")
     
     print("\n" + "=" * 50)
     print("🧪 Step 6: テスト生成")
     print("=" * 50)
     
     model.eval()
-    test_prompts = ["こんにちは", "量子コンピュータ", "AIとは"]
+    test_prompts = ["<USER> Hello! <ASSISTANT>", "<USER> What is AI? <ASSISTANT>"]
     
     for prompt in test_prompts:
         try:
@@ -225,20 +315,33 @@ def train_with_tiktoken():
             generated = input_ids.copy()
             
             with torch.no_grad():
-                for _ in range(30):
+                for _ in range(50):
                     seq_tensor = torch.tensor([generated[-256:]], device=device)
                     logits = model(seq_tensor)
                     
                     probs = torch.softmax(logits[0, -1, :] / 0.8, dim=-1)
-                    next_token = torch.multinomial(probs, num_samples=1).item()
+                    
+                    # Top-k sampling
+                    top_k = 50
+                    top_probs, top_indices = torch.topk(probs, min(top_k, probs.size(-1)))
+                    top_probs = top_probs / top_probs.sum()
+                    idx = torch.multinomial(top_probs, num_samples=1)
+                    next_token = top_indices[idx].item()
                     
                     if next_token == tokenizer.eos_id:
                         break
                     generated.append(next_token)
             
             output = tokenizer.decode(generated, skip_special=True)
-            print(f"\n   入力: '{prompt}'")
-            print(f"   出力: '{output}'")
+            # <ASSISTANT>以降を抽出
+            if '<ASSISTANT>' in output:
+                response = output.split('<ASSISTANT>')[-1].strip()
+            else:
+                response = output
+            
+            q = prompt.replace("<USER> ", "").replace(" <ASSISTANT>", "")
+            print(f"\n   Q: '{q}'")
+            print(f"   A: '{response[:100]}'")
         except Exception as e:
             print(f"   エラー: {e}")
     
@@ -247,10 +350,49 @@ def train_with_tiktoken():
     print("=" * 70)
     print(f"""
 次のステップ:
-1. チェックポイントを確認: {CHECKPOINT_PATH}
-2. チャットで使用: python chat.py --tokenizer tiktoken
+1. チェックポイントを確認: {checkpoint_path}
+2. チャットで使用: python chat.py --model-size {model_size}
 """)
 
 
+def main():
+    parser = argparse.ArgumentParser(
+        description='TikToken ベースの NeuroQ モデル学習'
+    )
+    parser.add_argument(
+        '--model-size', '-m',
+        choices=['micro', 'small', 'large'],
+        default='micro',
+        help='モデルサイズ: micro(128), small(1536), large(3072)'
+    )
+    parser.add_argument(
+        '--epochs', '-e',
+        type=int,
+        default=None,
+        help='学習エポック数'
+    )
+    parser.add_argument(
+        '--batch-size', '-b',
+        type=int,
+        default=None,
+        help='バッチサイズ'
+    )
+    parser.add_argument(
+        '--lr',
+        type=float,
+        default=None,
+        help='学習率'
+    )
+    
+    args = parser.parse_args()
+    
+    train_with_tiktoken(
+        model_size=args.model_size,
+        epochs=args.epochs,
+        batch_size=args.batch_size,
+        lr=args.lr
+    )
+
+
 if __name__ == "__main__":
-    train_with_tiktoken()
+    main()

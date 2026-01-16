@@ -191,7 +191,7 @@ if __name__ == "__main__":
     print("TikToken トークナイザーテスト\n")
     
     # 初期化
-    tokenizer = TikTokenTokenizer(encoding_name='cl100k_base')
+    tokenizer = TikTokenTokenizer(encoding_name='o200k_base')
     
     # テストテキスト
     test_texts = [

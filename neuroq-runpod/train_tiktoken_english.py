@@ -1,18 +1,23 @@
 #!/usr/bin/env python3
 """
-TikToken + 英語データによるNeuroQモデル学習スクリプト
+TikToken + OASST1英語データによるNeuroQモデル学習スクリプト
 
+OASST1 (Open Assistant) データセットで対話モデルを学習します。
 英語データでモデルを学習し、英語で思考するAIを作成します。
 チャット時に翻訳(NLLB-200)を使って日本語と英語を変換します。
 
 使い方:
-    python train_tiktoken_english.py
+    python train_tiktoken_english.py                    # Microモデル（デフォルト）
+    python train_tiktoken_english.py --model-size small # Smallモデル
+    python train_tiktoken_english.py -m large --epochs 20
 """
 
 import os
 import sys
 import torch
 import logging
+import random
+import argparse
 from pathlib import Path
 
 # ログ設定
@@ -29,10 +34,18 @@ if current_dir not in sys.path:
     sys.path.insert(0, current_dir)
 
 print("=" * 70)
-print("🚀 TikToken + 英語データによる NeuroQ モデル学習")
+print("🚀 TikToken + OASST1英語データによる NeuroQ モデル学習")
 print("=" * 70)
 
 # インポート
+try:
+    from neuroquantum_layered import NeuroQuantum, NeuroQuantumConfig
+    NEUROQUANTUM_AVAILABLE = True
+    print("✅ NeuroQuantum (neuroquantum_layered.py) をインポートしました")
+except ImportError as e:
+    print(f"⚠️ neuroquantum_layered.py インポート失敗: {e}")
+    NEUROQUANTUM_AVAILABLE = False
+
 try:
     from neuroquantum_brain import NeuroQuantumBrain
     from tiktoken_tokenizer import TikTokenTokenizer
@@ -41,13 +54,28 @@ except ImportError as e:
     print(f"❌ インポートに失敗: {e}")
     sys.exit(1)
 
+try:
+    from datasets import load_dataset
+    print("✅ Hugging Face datasets をインポートしました")
+except ImportError:
+    print("❌ datasets ライブラリが必要です: pip install datasets")
+    sys.exit(1)
+
+# モデル設定をインポート
+try:
+    from model_configs import AVAILABLE_MODELS, get_model_config, get_checkpoint_path
+    MODEL_CONFIGS_AVAILABLE = True
+    print("✅ model_configs.py をインポートしました")
+except ImportError:
+    MODEL_CONFIGS_AVAILABLE = False
+
 # 設定
 CHECKPOINT_PATH = "checkpoints/neuroq_tiktoken_english_checkpoint.pt"
-ENCODING_NAME = "cl100k_base"  # GPT-4と同じエンコーディング
+ENCODING_NAME = "o200k_base"  # GPT-4oと同じエンコーディング
 
 # モデル設定（tiktokenの語彙サイズに対応）
 MODEL_CONFIG = {
-    'vocab_size': 100277,  # cl100k_baseの語彙サイズ
+    'vocab_size': 200019,  # o200k_baseの語彙サイズ
     'embed_dim': 128,
     'num_heads': 4,
     'num_layers': 3,
@@ -56,109 +84,136 @@ MODEL_CONFIG = {
 
 # 学習設定
 TRAIN_CONFIG = {
-    'epochs': 50000,    # 50,000エポックで学習
-    'batch_size': 16,
-    'lr': 0.001,
-    'seq_length': 64,
+    'epochs': 30,         # QBNNの量子もつれパラメータ収束のため60エポック
+    'batch_size': 8,      # メモリ節約
+    'lr': 0.0005,         # 安定した学習率
+    'seq_length': 128,    # より長いシーケンス
+    'max_samples': 3000,  # 最大サンプル数
 }
 
 
-def get_english_training_data():
-    """英語の学習データを取得"""
+def load_oasst1_english_data(max_samples=5000):
+    """
+    OASST1データセットから英語の対話データを読み込み
     
-    # 対話形式の英語データ
+    Returns:
+        list: <USER>...<ASSISTANT>形式の対話リスト
+    """
+    print("\n📥 OASST1データセットをダウンロード中...")
+    
+    try:
+        # OASST1データセットを読み込み
+        dataset = load_dataset("OpenAssistant/oasst1", split="train")
+        print(f"   総メッセージ数: {len(dataset):,}")
+    except Exception as e:
+        print(f"❌ データセットの読み込みに失敗: {e}")
+        return []
+    
+    # メッセージをIDでインデックス化
+    print("🔄 データ構造を解析中...")
+    messages_by_id = {}
+    for msg in dataset:
+        messages_by_id[msg['message_id']] = msg
+    
+    # 英語のみフィルタ
+    english_messages = [msg for msg in dataset if msg.get('lang') == 'en']
+    print(f"   英語メッセージ数: {len(english_messages):,}")
+    
+    # 対話を構築（parent_idを使って会話ツリーを辿る）
+    conversations = []
+    
+    # ルートメッセージ（prompter）を見つける
+    root_messages = [msg for msg in english_messages 
+                     if msg.get('parent_id') is None and msg.get('role') == 'prompter']
+    
+    print(f"   ルートメッセージ数: {len(root_messages):,}")
+    
+    for root in root_messages:
+        if len(conversations) >= max_samples:
+            break
+            
+        # 子メッセージを探す（assistant の返答）
+        children = [msg for msg in english_messages 
+                    if msg.get('parent_id') == root['message_id'] 
+                    and msg.get('role') == 'assistant']
+        
+        if children:
+            # 最初の返答を使用（もしくはランクが高いもの）
+            children.sort(key=lambda x: x.get('rank', 999) or 999)
+            response = children[0]
+            
+            user_text = root.get('text', '').strip()
+            assistant_text = response.get('text', '').strip()
+            
+            if user_text and assistant_text and len(user_text) > 5 and len(assistant_text) > 10:
+                # 長すぎるテキストはトリミング
+                user_text = user_text[:500]
+                assistant_text = assistant_text[:1000]
+                
+                conversation = f"<USER> {user_text} <ASSISTANT> {assistant_text}"
+                conversations.append(conversation)
+    
+    print(f"✅ 対話数: {len(conversations):,}")
+    
+    # サンプルを表示
+    if conversations:
+        print("\n📋 サンプル対話:")
+        for i, conv in enumerate(conversations[:2]):
+            print(f"   {i+1}. {conv[:150]}...")
+    
+    return conversations
+
+
+def get_fallback_training_data():
+    """フォールバック用の英語学習データ"""
+    
     conversations = [
-        # 挨拶
         "<USER> Hello! <ASSISTANT> Hello! How can I help you today?",
-        "<USER> Hi there! <ASSISTANT> Hi! Nice to meet you. What would you like to know?",
-        "<USER> Good morning! <ASSISTANT> Good morning! I hope you're having a great day.",
-        "<USER> How are you? <ASSISTANT> I'm doing well, thank you for asking! How about you?",
-        "<USER> Nice to meet you! <ASSISTANT> Nice to meet you too! How can I assist you?",
-        
-        # AI関連
-        "<USER> What is AI? <ASSISTANT> AI, or Artificial Intelligence, is technology that enables machines to simulate human intelligence. It includes learning, reasoning, and self-correction capabilities.",
-        "<USER> Tell me about machine learning. <ASSISTANT> Machine learning is a subset of AI where computers learn from data without being explicitly programmed. It uses algorithms to find patterns and make predictions.",
-        "<USER> What is deep learning? <ASSISTANT> Deep learning is a type of machine learning using neural networks with many layers. It excels at processing images, speech, and natural language.",
-        "<USER> How does neural network work? <ASSISTANT> Neural networks are inspired by the human brain. They consist of layers of interconnected nodes that process and transform data to make predictions.",
-        "<USER> What is natural language processing? <ASSISTANT> Natural Language Processing, or NLP, enables computers to understand, interpret, and generate human language. It powers chatbots, translation, and text analysis.",
-        
-        # 量子コンピューティング
-        "<USER> What is quantum computing? <ASSISTANT> Quantum computing uses quantum mechanics principles to process information. Unlike classical computers using bits, quantum computers use qubits that can be in multiple states simultaneously.",
-        "<USER> What are qubits? <ASSISTANT> Qubits are quantum bits, the basic unit of quantum information. Unlike classical bits that are either 0 or 1, qubits can exist in a superposition of both states.",
-        "<USER> Explain quantum entanglement. <ASSISTANT> Quantum entanglement is a phenomenon where particles become correlated so that the state of one instantly influences the other, regardless of distance.",
-        "<USER> What is superposition? <ASSISTANT> Superposition allows quantum particles to exist in multiple states at once. This enables quantum computers to process many possibilities simultaneously.",
-        
-        # プログラミング
-        "<USER> What is Python? <ASSISTANT> Python is a popular programming language known for its simplicity and readability. It's widely used for web development, data science, AI, and automation.",
-        "<USER> How do I learn programming? <ASSISTANT> Start with a beginner-friendly language like Python. Practice regularly, work on projects, and use online resources like tutorials and coding exercises.",
-        "<USER> What is an algorithm? <ASSISTANT> An algorithm is a step-by-step set of instructions to solve a problem or complete a task. It's the foundation of computer programming.",
-        "<USER> Explain object-oriented programming. <ASSISTANT> Object-oriented programming organizes code into objects that contain data and methods. It promotes reusability, modularity, and easier maintenance.",
-        
-        # 科学
-        "<USER> What is physics? <ASSISTANT> Physics is the natural science that studies matter, energy, and their interactions. It explores everything from subatomic particles to the entire universe.",
-        "<USER> Explain the theory of relativity. <ASSISTANT> Einstein's theory of relativity describes how space and time are interconnected. Special relativity deals with constant velocities, while general relativity explains gravity as curved spacetime.",
-        "<USER> What is mathematics? <ASSISTANT> Mathematics is the study of numbers, quantities, shapes, and patterns. It's fundamental to science, engineering, finance, and many other fields.",
-        "<USER> What is chemistry? <ASSISTANT> Chemistry is the science of matter and its transformations. It studies atoms, molecules, and how substances interact and change.",
-        
-        # 一般的な質問
+        "<USER> What is AI? <ASSISTANT> AI, or Artificial Intelligence, is technology that enables machines to simulate human intelligence.",
+        "<USER> Tell me about machine learning. <ASSISTANT> Machine learning is a subset of AI where computers learn from data without being explicitly programmed.",
+        "<USER> What is deep learning? <ASSISTANT> Deep learning is a type of machine learning using neural networks with many layers.",
+        "<USER> What is quantum computing? <ASSISTANT> Quantum computing uses quantum mechanics principles to process information using qubits.",
+        "<USER> What are qubits? <ASSISTANT> Qubits are quantum bits that can exist in a superposition of both 0 and 1 states.",
+        "<USER> What is Python? <ASSISTANT> Python is a popular programming language known for its simplicity and readability.",
+        "<USER> How do I learn programming? <ASSISTANT> Start with a beginner-friendly language like Python. Practice regularly and work on projects.",
         "<USER> Thank you! <ASSISTANT> You're welcome! Feel free to ask if you have more questions.",
         "<USER> Can you help me? <ASSISTANT> Of course! I'd be happy to help. What do you need assistance with?",
-        "<USER> I don't understand. <ASSISTANT> No problem! Let me explain it in a different way. What part is confusing?",
-        "<USER> That's interesting! <ASSISTANT> I'm glad you find it interesting! Would you like to learn more about it?",
-        "<USER> Tell me more. <ASSISTANT> Sure! Let me provide more details on this topic.",
-        
-        # 追加の会話
-        "<USER> What is the internet? <ASSISTANT> The internet is a global network of interconnected computers that communicate using standardized protocols. It enables information sharing, communication, and online services.",
-        "<USER> How does a computer work? <ASSISTANT> Computers process information using a central processing unit (CPU) that executes instructions, memory that stores data, and input/output devices for interaction.",
-        "<USER> What is data science? <ASSISTANT> Data science combines statistics, programming, and domain knowledge to extract insights from data. It involves data collection, analysis, and visualization.",
-        "<USER> Explain cloud computing. <ASSISTANT> Cloud computing delivers computing services over the internet, including storage, processing, and software. It offers flexibility, scalability, and cost efficiency.",
-        "<USER> What is cybersecurity? <ASSISTANT> Cybersecurity protects computer systems, networks, and data from digital attacks. It involves encryption, firewalls, and secure practices to prevent unauthorized access.",
     ]
     
-    # 知識ベースの文章
-    knowledge = [
-        "Artificial intelligence is transforming how we live and work. It enables machines to perform tasks that previously required human intelligence.",
-        "Machine learning algorithms can identify patterns in data and make predictions. They improve their performance over time through experience.",
-        "Deep learning uses neural networks with multiple layers to process complex data. It has revolutionized image recognition and natural language processing.",
-        "Quantum computers leverage quantum mechanical phenomena like superposition and entanglement. They can solve certain problems exponentially faster than classical computers.",
-        "Python is one of the most popular programming languages in the world. Its simple syntax makes it ideal for beginners and experts alike.",
-        "The internet has connected billions of people worldwide. It enables instant communication, information sharing, and global collaboration.",
-        "Data science involves extracting knowledge from large datasets. It combines statistics, programming, and domain expertise to solve complex problems.",
-        "Neural networks are inspired by the biological neural networks in the human brain. They consist of interconnected nodes that process information.",
-        "Cybersecurity is essential in our digital world. It protects sensitive information from unauthorized access and cyber attacks.",
-        "Cloud computing has transformed how businesses operate. It provides scalable, on-demand access to computing resources.",
-        "Natural language processing enables computers to understand human language. It powers virtual assistants, translation services, and text analysis tools.",
-        "Algorithms are the building blocks of computer programs. They provide step-by-step instructions for solving problems.",
-        "Software engineering is the systematic approach to designing, developing, and maintaining software. It ensures quality and reliability.",
-        "The theory of relativity changed our understanding of space, time, and gravity. Einstein's revolutionary ideas continue to influence physics today.",
-        "Quantum mechanics describes the behavior of matter at the atomic and subatomic level. It reveals a world that defies classical intuition.",
-    ]
-    
-    # すべてのデータを結合
-    all_data = conversations + knowledge
-    
-    return all_data
+    return conversations
 
 
-def train_with_english():
+def train_with_oasst1(epochs=None, model_size='micro'):
+    # コマンドライン引数がない場合はデフォルト値を使用
+    if epochs is not None:
+        TRAIN_CONFIG['epochs'] = epochs
+    
+    # モデルサイズに応じて調整
+    if model_size in ['small', 'large']:
+        if TRAIN_CONFIG.get('batch_size', 8) > 4:
+            TRAIN_CONFIG['batch_size'] = 4 if model_size == 'small' else 2
+        TRAIN_CONFIG['lr'] = 0.0003  # 大きいモデルは学習率を下げる
+    
+    print(f"\n📦 モデルサイズ: {model_size.upper()}")
+    
     print("\n" + "=" * 50)
     print("📚 Step 1: トークナイザー初期化")
     print("=" * 50)
     
     tokenizer = TikTokenTokenizer(encoding_name=ENCODING_NAME)
     
-    # テスト
-    print("\n🔤 トークン化テスト:")
-    test_texts = ["Hello world", "What is AI?", "Quantum computing"]
-    for text in test_texts:
-        tokens = tokenizer.encode(text)
-        print(f"   '{text}' -> {len(tokens)} tokens")
-    
     print("\n" + "=" * 50)
-    print("📊 Step 2: 英語学習データ準備")
+    print("📊 Step 2: OASST1データセット準備")
     print("=" * 50)
     
-    texts = get_english_training_data()
+    # OASST1データを読み込み
+    texts = load_oasst1_english_data(max_samples=TRAIN_CONFIG['max_samples'])
+    
+    # データが少ない場合はフォールバック
+    if len(texts) < 100:
+        print("⚠️ データが少ないため、フォールバックデータを追加します")
+        texts.extend(get_fallback_training_data())
+    
     logger.info(f"学習データ: {len(texts)} サンプル")
     
     # データをトークン化
@@ -167,8 +222,12 @@ def train_with_english():
     for i, text in enumerate(texts):
         tokens = tokenizer.encode(text, add_special=False)
         all_tokens.extend(tokens)
+        all_tokens.append(tokenizer.eos_id)  # 各会話の終わりにEOS
+        
         if i < 3:
-            print(f"   Sample {i}: '{text[:50]}...' -> {len(tokens)} tokens")
+            print(f"   Sample {i}: '{text[:80]}...' -> {len(tokens)} tokens")
+        elif i == 3:
+            print(f"   ... (残り {len(texts) - 3} サンプル)")
     
     logger.info(f"総トークン数: {len(all_tokens):,}")
     
@@ -187,20 +246,68 @@ def train_with_english():
         device = torch.device("cpu")
         print("💻 CPU を使用")
     
-    print(f"\n📋 モデル設定:")
-    for key, value in MODEL_CONFIG.items():
-        print(f"   - {key}: {value:,}" if isinstance(value, int) else f"   - {key}: {value}")
+    # モデル設定を取得
+    if MODEL_CONFIGS_AVAILABLE and model_size in ['small', 'large'] and NEUROQUANTUM_AVAILABLE:
+        model_config = get_model_config(model_size)
+        checkpoint_path = get_checkpoint_path(model_size)
+        
+        print(f"\n📋 モデル設定 ({model_config['name']}):")
+        print(f"   - vocab_size: {model_config['vocab_size']:,}")
+        print(f"   - embed_dim: {model_config['embed_dim']:,}")
+        print(f"   - num_heads: {model_config['num_heads']}")
+        print(f"   - num_layers: {model_config['num_layers']}")
+        
+        config = NeuroQuantumConfig()
+        config.vocab_size = model_config['vocab_size']
+        config.embed_dim = model_config['embed_dim']
+        config.num_heads = model_config['num_heads']
+        config.num_layers = model_config['num_layers']
+        config.max_seq_len = model_config.get('max_seq_len', 512)
+        config.dropout = model_config.get('dropout', 0.1)
+        
+        model = NeuroQuantum(config).to(device)
+        model_type = f"NeuroQuantum {model_config['name']}"
+        used_model_config = model_config
+        
+    elif NEUROQUANTUM_AVAILABLE:
+        # Microモデル（従来）
+        print(f"\n📋 モデル設定:")
+        for key, value in MODEL_CONFIG.items():
+            print(f"   - {key}: {value:,}" if isinstance(value, int) else f"   - {key}: {value}")
+        
+        config = NeuroQuantumConfig()
+        config.vocab_size = MODEL_CONFIG['vocab_size']
+        config.embed_dim = MODEL_CONFIG['embed_dim']
+        config.num_heads = MODEL_CONFIG['num_heads']
+        config.num_layers = MODEL_CONFIG['num_layers']
+        config.max_seq_len = 256
+        config.dropout = 0.1
+        
+        model = NeuroQuantum(config).to(device)
+        model_type = "NeuroQuantum (QBNN Transformer)"
+        checkpoint_path = CHECKPOINT_PATH
+        used_model_config = MODEL_CONFIG
+        
+    else:
+        print(f"\n📋 モデル設定:")
+        for key, value in MODEL_CONFIG.items():
+            print(f"   - {key}: {value:,}" if isinstance(value, int) else f"   - {key}: {value}")
+        
+        model = NeuroQuantumBrain(
+            vocab_size=MODEL_CONFIG['vocab_size'],
+            embed_dim=MODEL_CONFIG['embed_dim'],
+            num_heads=MODEL_CONFIG['num_heads'],
+            num_layers=MODEL_CONFIG['num_layers'],
+            num_neurons=MODEL_CONFIG['num_neurons'],
+        ).to(device)
+        model_type = "NeuroQuantumBrain"
+        checkpoint_path = CHECKPOINT_PATH
+        used_model_config = MODEL_CONFIG
     
-    model = NeuroQuantumBrain(
-        vocab_size=MODEL_CONFIG['vocab_size'],
-        embed_dim=MODEL_CONFIG['embed_dim'],
-        num_heads=MODEL_CONFIG['num_heads'],
-        num_layers=MODEL_CONFIG['num_layers'],
-        num_neurons=MODEL_CONFIG['num_neurons'],
-    ).to(device)
+    print(f"   ✅ {model_type} を使用")
     
     total_params = sum(p.numel() for p in model.parameters())
-    logger.info(f"総パラメータ数: {total_params:,}")
+    logger.info(f"総パラメータ数: {total_params:,} ({total_params/1e6:.1f}M)")
     
     print("\n" + "=" * 50)
     print("🎓 Step 4: 学習開始")
@@ -227,14 +334,23 @@ def train_with_english():
     
     print("\n🚀 学習ループ開始...")
     
+    # 総バッチ数を計算
+    total_batches = (len(sequences) - batch_size) // batch_size
+    print(f"   📊 エポックあたりのバッチ数: {total_batches:,}")
+    print(f"   ⚠️  大きなモデルでは1バッチに数秒かかることがあります\n")
+    
+    best_loss = float('inf')
+    
     for epoch in range(epochs):
         model.train()
         total_loss = 0
         batch_count = 0
         
         # シーケンスをシャッフル
-        import random
         random.shuffle(sequences)
+        
+        # 進捗表示間隔（10%ごと、最低10バッチごと）
+        progress_interval = max(10, total_batches // 10)
         
         for i in range(0, len(sequences) - batch_size, batch_size):
             batch = sequences[i:i + batch_size]
@@ -250,7 +366,7 @@ def train_with_english():
             
             # ロス計算
             loss = criterion(
-                logits.reshape(-1, MODEL_CONFIG['vocab_size']),
+                logits.reshape(-1, used_model_config['vocab_size']),
                 target_ids.reshape(-1)
             )
             
@@ -261,34 +377,49 @@ def train_with_english():
             
             total_loss += loss.item()
             batch_count += 1
+            
+            # バッチ単位の進捗表示
+            if batch_count % progress_interval == 0 or batch_count == 1:
+                progress = batch_count / total_batches * 100
+                current_avg_loss = total_loss / batch_count
+                print(f"   Epoch {epoch + 1}/{epochs} - Batch {batch_count:,}/{total_batches:,} ({progress:.0f}%) - Loss: {current_avg_loss:.4f}")
         
         avg_loss = total_loss / max(batch_count, 1)
-        print(f"   Epoch {epoch + 1}/{epochs}: Loss={avg_loss:.4f}")
+        
+        # エポック完了時の表示
+        print(f"   ✅ Epoch {epoch + 1}/{epochs} 完了: Loss={avg_loss:.4f}")
         logger.info(f"Epoch {epoch + 1}: Loss={avg_loss:.4f}")
+        
+        # ベストモデルを更新
+        if avg_loss < best_loss:
+            best_loss = avg_loss
     
-    print("\n   学習完了！")
+    print(f"\n   ✅ 学習完了！ベストロス: {best_loss:.4f}")
     
     print("\n" + "=" * 50)
     print("💾 Step 5: チェックポイント保存")
     print("=" * 50)
     
     # ディレクトリを作成
-    os.makedirs(os.path.dirname(CHECKPOINT_PATH), exist_ok=True)
+    os.makedirs(os.path.dirname(checkpoint_path), exist_ok=True)
     
     # チェックポイントを保存
     checkpoint = {
         'model_state_dict': model.state_dict(),
-        'config': MODEL_CONFIG,
+        'config': used_model_config,
         'tokenizer': {
             'type': 'tiktoken',
             'encoding': ENCODING_NAME,
             'vocab_size': tokenizer.vocab_size,
         },
         'language': 'english',
+        'dataset': 'oasst1',
+        'training_samples': len(texts),
+        'model_size': model_size,
     }
     
-    torch.save(checkpoint, CHECKPOINT_PATH)
-    print(f"✅ チェックポイント保存完了: {CHECKPOINT_PATH}")
+    torch.save(checkpoint, checkpoint_path)
+    print(f"✅ チェックポイント保存完了: {checkpoint_path}")
     
     print("\n" + "=" * 50)
     print("🧪 Step 6: テスト生成 (英語)")
@@ -296,9 +427,10 @@ def train_with_english():
     
     model.eval()
     test_prompts = [
-        "What is AI?",
-        "Hello, how are you?",
-        "Tell me about quantum computing.",
+        "<USER> What is AI? <ASSISTANT>",
+        "<USER> Hello, how are you? <ASSISTANT>",
+        "<USER> Tell me about quantum computing. <ASSISTANT>",
+        "<USER> Can you help me learn programming? <ASSISTANT>",
     ]
     
     for prompt in test_prompts:
@@ -307,7 +439,7 @@ def train_with_english():
             generated = input_ids.copy()
             
             with torch.no_grad():
-                for _ in range(50):
+                for _ in range(80):
                     seq_tensor = torch.tensor([generated[-256:]], device=device)
                     logits = model(seq_tensor)
                     
@@ -325,8 +457,18 @@ def train_with_english():
                     generated.append(next_token)
             
             output = tokenizer.decode(generated, skip_special=True)
-            print(f"\n   Input: '{prompt}'")
-            print(f"   Output: '{output}'")
+            # <ASSISTANT>以降を抽出
+            if '<ASSISTANT>' in output:
+                response = output.split('<ASSISTANT>')[-1].strip()
+            else:
+                response = output
+            
+            # <USER>以降を削除
+            if '<USER>' in response:
+                response = response.split('<USER>')[0].strip()
+            
+            print(f"\n   Q: '{prompt.replace('<USER> ', '').replace(' <ASSISTANT>', '')}'")
+            print(f"   A: '{response[:200]}'")
         except Exception as e:
             print(f"   Error: {e}")
     
@@ -335,11 +477,28 @@ def train_with_english():
     print("=" * 70)
     print(f"""
 次のステップ:
-1. チェックポイントを確認: {CHECKPOINT_PATH}
-2. チャットで使用: python chat.py --tokenizer tiktoken --translate
+1. チェックポイントを確認: {checkpoint_path}
+2. チャットで使用: python chat.py --model-size {model_size} --translate
    （翻訳モードで日本語⇔英語変換）
 """)
 
 
 if __name__ == "__main__":
-    train_with_english()
+    parser = argparse.ArgumentParser(
+        description='TikToken + OASST1英語データによるNeuroQモデル学習'
+    )
+    parser.add_argument(
+        '--model-size', '-m',
+        choices=['micro', 'small', 'large'],
+        default='micro',
+        help='モデルサイズ: micro(128), small(1536), large(3072)'
+    )
+    parser.add_argument(
+        '--epochs', '-e',
+        type=int,
+        default=None,
+        help=f'学習エポック数 (デフォルト: {TRAIN_CONFIG["epochs"]})'
+    )
+    args = parser.parse_args()
+    
+    train_with_oasst1(epochs=args.epochs, model_size=args.model_size)

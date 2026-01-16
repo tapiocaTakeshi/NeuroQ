@@ -32,7 +32,7 @@ print("=" * 60)
 # NeuroQuantumBrainAI をインポート
 try:
     from neuroquantum_brain import NeuroQuantumBrainAI, NeuroQuantumBrain, get_training_data
-    from neuroquantum_layered import NeuroQuantumTokenizer
+    from neuroquantum_layered import NeuroQuantumTokenizer, NeuroQuantum, NeuroQuantumConfig
     print("✅ neuroquantum_brain.py をインポートしました")
     print("✅ neuroquantum_layered.py をインポートしました")
 except ImportError as e:
@@ -40,17 +40,34 @@ except ImportError as e:
     NeuroQuantumBrainAI = None
     NeuroQuantumBrain = None
     NeuroQuantumTokenizer = None
+    NeuroQuantum = None
+    NeuroQuantumConfig = None
+
+# モデル設定をインポート
+try:
+    from model_configs import AVAILABLE_MODELS, get_model_config, get_checkpoint_path, create_model
+    MODEL_CONFIGS_AVAILABLE = True
+    print("✅ model_configs.py をインポートしました")
+except ImportError:
+    MODEL_CONFIGS_AVAILABLE = False
 
 # トークナイザーモデルのパス
 TOKENIZER_MODEL_PATH = "neuroq_tokenizer.model"
 
-# チェックポイントパス
-MODEL_CHECKPOINT_PATH = "checkpoints/neuroq_checkpoint.pt"
+# チェックポイントパス（モデルサイズ別）
+MODEL_CHECKPOINT_PATHS = {
+    'micro': "checkpoints/neuroq_tiktoken_english_checkpoint.pt",
+    'small': "checkpoints/neuroq_small_checkpoint.pt",
+    'large': "checkpoints/neuroq_large_checkpoint.pt",
+}
+MODEL_CHECKPOINT_PATH = MODEL_CHECKPOINT_PATHS['micro']  # デフォルト
 
 # ========================================
 # グローバル変数（起動時は全てNone）
 # ========================================
-model = None  # NeuroQuantumBrainAI インスタンス
+model = None  # NeuroQuantum または NeuroQuantumBrainAI インスタンス
+model_config = None  # 現在のモデル設定
+current_model_size = 'micro'  # 現在のモデルサイズ
 is_initialized = False
 
 # 学習状態管理
@@ -190,61 +207,124 @@ def load_checkpoint(checkpoint_path: str = MODEL_CHECKPOINT_PATH):
 # ========================================
 # Lazy Model Loading（初回リクエスト時のみ）
 # ========================================
-def initialize_model():
+def initialize_model(model_size: str = 'micro'):
     """
     モデルを初期化（初回リクエスト時のみ呼ばれる）
 
     推論専用：チェックポイントをロードするだけで、学習は一切しない
+    
+    Args:
+        model_size: 'micro', 'small', 'large'
     """
-    global model, is_initialized
+    global model, model_config, current_model_size, is_initialized
 
-    if is_initialized:
+    # 既に初期化済みで同じサイズなら何もしない
+    if is_initialized and current_model_size == model_size:
         return True
+    
+    # 異なるサイズが要求された場合は再初期化
+    if is_initialized and current_model_size != model_size:
+        print(f"🔄 モデルサイズ変更: {current_model_size} → {model_size}")
+        is_initialized = False
+        model = None
 
-    print("🔄 モデル初期化開始（推論専用）...")
+    print(f"🔄 モデル初期化開始（{model_size.upper()}）...")
 
     try:
-        if NeuroQuantumBrainAI is None:
-            raise ImportError("NeuroQuantumBrainAI がインポートできていません")
+        # チェックポイントパスを取得
+        checkpoint_path = MODEL_CHECKPOINT_PATHS.get(model_size, MODEL_CHECKPOINT_PATHS['micro'])
+        
+        # MODEL_CONFIGS_AVAILABLEでSmall/Largeモデルを使用
+        if MODEL_CONFIGS_AVAILABLE and model_size in ['small', 'large'] and NeuroQuantum is not None:
+            print(f"📦 {model_size.upper()}モデルを構築中...")
+            
+            config = get_model_config(model_size)
+            model_config = config
+            
+            # チェックポイントが存在するか確認
+            if os.path.exists(checkpoint_path):
+                print(f"💾 チェックポイントをロード: {checkpoint_path}")
+                checkpoint = torch.load(checkpoint_path, map_location=DEVICE)
+                
+                # モデルを構築
+                nq_config = NeuroQuantumConfig()
+                nq_config.vocab_size = config['vocab_size']
+                nq_config.embed_dim = config['embed_dim']
+                nq_config.num_heads = config['num_heads']
+                nq_config.num_layers = config['num_layers']
+                nq_config.max_seq_len = config.get('max_seq_len', 512)
+                nq_config.dropout = config.get('dropout', 0.1)
+                
+                model = NeuroQuantum(nq_config).to(DEVICE)
+                
+                # 重みをロード
+                if isinstance(checkpoint, dict) and 'model_state_dict' in checkpoint:
+                    model.load_state_dict(checkpoint['model_state_dict'])
+                else:
+                    model.load_state_dict(checkpoint, strict=False)
+                
+                model.eval()
+                print(f"✅ {config['name']}をロードしました")
+            else:
+                print(f"⚠️ チェックポイントが見つかりません: {checkpoint_path}")
+                print(f"⚠️ 未学習の{model_size.upper()}モデルを作成します")
+                
+                nq_config = NeuroQuantumConfig()
+                nq_config.vocab_size = config['vocab_size']
+                nq_config.embed_dim = config['embed_dim']
+                nq_config.num_heads = config['num_heads']
+                nq_config.num_layers = config['num_layers']
+                nq_config.max_seq_len = config.get('max_seq_len', 512)
+                nq_config.dropout = config.get('dropout', 0.1)
+                
+                model = NeuroQuantum(nq_config).to(DEVICE)
+            
+            current_model_size = model_size
+            is_initialized = True
+            
+            total_params = sum(p.numel() for p in model.parameters())
+            print(f"✅ {config['name']}初期化完了 ({total_params:,}パラメータ)")
+            return True
+        
+        else:
+            # 従来のNeuroQuantumBrainAIを使用（micro）
+            if NeuroQuantumBrainAI is None:
+                raise ImportError("NeuroQuantumBrainAI がインポートできていません")
 
-        # チェックポイントからロード
-        model = load_checkpoint(MODEL_CHECKPOINT_PATH)
+            # チェックポイントからロード
+            model = load_checkpoint(checkpoint_path)
 
-        if model is None:
-            # チェックポイントがない場合は、未学習モデルを作成（警告を出す）
-            print("⚠️ チェックポイントが見つかりません。未学習モデルを作成します。")
-            print("⚠️ 推論前に action='train' で学習を実行してください。")
+            if model is None:
+                print("⚠️ チェックポイントが見つかりません。未学習モデルを作成します。")
+                print("⚠️ 推論前に action='train' で学習を実行してください。")
 
-            model = NeuroQuantumBrainAI(
-                embed_dim=128,
-                num_heads=4,
-                num_layers=3,
-                num_neurons=100,
-                max_vocab=8000,
-                use_sentencepiece=True
-            )
-
-            # トークナイザーを明示的にロード
-            if os.path.exists(TOKENIZER_MODEL_PATH):
-                print(f"✅ トークナイザーをロード: {TOKENIZER_MODEL_PATH}")
-                model.tokenizer = NeuroQuantumTokenizer(
-                    vocab_size=8000,
-                    model_file=TOKENIZER_MODEL_PATH
+                model = NeuroQuantumBrainAI(
+                    embed_dim=128,
+                    num_heads=4,
+                    num_layers=3,
+                    num_neurons=100,
+                    max_vocab=8000,
+                    use_sentencepiece=True
                 )
 
-            # Note: model.model is None for untrained models
-            # It will be created during training
-            # For now, we don't call eval() since there's no neural network yet
+                if os.path.exists(TOKENIZER_MODEL_PATH):
+                    print(f"✅ トークナイザーをロード: {TOKENIZER_MODEL_PATH}")
+                    model.tokenizer = NeuroQuantumTokenizer(
+                        vocab_size=8000,
+                        model_file=TOKENIZER_MODEL_PATH
+                    )
 
-        is_initialized = True
-        print("✅ モデル初期化完了（推論モード）!")
-        return True
+            current_model_size = 'micro'
+            is_initialized = True
+            print("✅ モデル初期化完了（推論モード）!")
+            return True
 
     except Exception as e:
         print(f"❌ モデル初期化エラー: {e}")
         import traceback
         traceback.print_exc()
         return False
+
 
 
 # ========================================
@@ -394,32 +474,38 @@ def handler(job):
             "status": "ok",
             "initialized": is_initialized,
             "device": DEVICE,
-            "vocab_size": VOCAB_SIZE
+            "vocab_size": VOCAB_SIZE,
+            "current_model_size": current_model_size,
+            "available_model_sizes": ["micro", "small", "large"],
+            "model_configs_available": MODEL_CONFIGS_AVAILABLE
         }
     
     # ========================================
     # GENERATE（モデルが必要な処理）
     # ========================================
     if action == "generate":
-        # Lazy initialization
-        if not is_initialized:
-            print("🔄 初回リクエスト - モデル初期化中...")
-            if not initialize_model():
+        # モデルサイズを取得
+        model_size = job_input.get("model_size", "micro")
+        
+        # Lazy initialization（モデルサイズに応じて初期化）
+        if not is_initialized or current_model_size != model_size:
+            print(f"🔄 モデル初期化中 ({model_size.upper()})...")
+            if not initialize_model(model_size):
                 return {
                     "status": "error",
-                    "error": "Failed to initialize model"
+                    "error": f"Failed to initialize model ({model_size})"
                 }
 
         prompt = job_input.get("prompt", "こんにちは")
-        max_length = job_input.get("max_length", 50)  # 100 → 50 に変更（会話向け）
-        session_id = job_input.get("session_id", "default")  # 会話セッションID
+        max_length = job_input.get("max_length", 50)
+        session_id = job_input.get("session_id", "default")
 
-        # 温度パラメータ（temp_min/temp_max優先、互換性のためtemperatureもサポート）
+        # 温度パラメータ
         temp_min = job_input.get("temp_min")
         temp_max = job_input.get("temp_max")
-        temperature = job_input.get("temperature", 0.5)  # 0.6 → 0.5 に下げて安定性向上
+        temperature = job_input.get("temperature", 0.5)
 
-        print(f"📝 Generate: session_id='{session_id}', prompt='{prompt[:30]}...'")
+        print(f"📝 Generate: model={model_size}, session='{session_id}', prompt='{prompt[:30]}...'")
 
         result = generate_text(
             prompt=prompt,
@@ -434,7 +520,8 @@ def handler(job):
             "status": "success",
             "prompt": prompt,
             "generated": result,
-            "session_id": session_id
+            "session_id": session_id,
+            "model_size": current_model_size
         }
     
     # ========================================
@@ -545,93 +632,249 @@ def handler(job):
         """
         学習専用アクション
 
-        - 学習データで学習を実行
-        - 学習後にチェックポイントを保存
-        - 推論は一切行わない
+        パラメータ:
+        - model_size: 'micro', 'small', 'large'（デフォルト: 'micro'）
+        - epochs: エポック数
+        - batch_size: バッチサイズ
+        - lr: 学習率
+        - seq_length: シーケンス長
+        - texts: 学習テキスト（省略時はデフォルトデータ）
         """
         
-        # モデルが未初期化の場合、新規作成
-        if not is_initialized:
-            print("🔄 学習用モデルを新規作成...")
-            try:
-                model = NeuroQuantumBrainAI(
-                    embed_dim=128,
-                    num_heads=4,
-                    num_layers=3,
-                    num_neurons=100,
-                    max_vocab=8000,
-                    use_sentencepiece=True
-                )
-
-                # トークナイザーをロード
-                if os.path.exists(TOKENIZER_MODEL_PATH):
-                    print(f"✅ トークナイザーをロード: {TOKENIZER_MODEL_PATH}")
-                    model.tokenizer = NeuroQuantumTokenizer(
-                        vocab_size=8000,
-                        model_file=TOKENIZER_MODEL_PATH
-                    )
-
-                is_initialized = True
-
-            except Exception as e:
-                return {
-                    "status": "error",
-                    "error": f"Failed to create model: {e}"
-                }
-
-        # 学習データ
+        model_size = job_input.get("model_size", "micro")
+        epochs = job_input.get("epochs", 30)
+        batch_size = job_input.get("batch_size", 8)
+        lr = job_input.get("lr", 0.0005)
+        seq_length = job_input.get("seq_length", 64)
         texts = job_input.get("texts", None)
-        epochs = job_input.get("epochs", 25)
-        batch_size = job_input.get("batch_size", 16)
-        lr = job_input.get("lr", 0.002)
-        seq_length = job_input.get("seq_length", 48)
-
-        # デフォルトの学習データを使用
-        if texts is None:
-            print("📚 デフォルト学習データを使用")
-            texts = get_training_data()
-
-        if not texts:
-            return {
-                "status": "error",
-                "error": "No training texts provided"
-            }
-
-        print(f"🔄 学習開始: {len(texts)}サンプル, {epochs}エポック")
-
-        try:
-            # 学習実行
-            model.train(
-                texts,
-                epochs=epochs,
-                batch_size=batch_size,
-                lr=lr,
-                seq_length=seq_length
-            )
-
-            # チェックポイント保存
-            checkpoint_path = job_input.get("checkpoint_path", MODEL_CHECKPOINT_PATH)
-            if save_checkpoint(model, checkpoint_path):
+        
+        # モデルサイズに応じて設定を調整
+        if model_size == 'small':
+            batch_size = job_input.get("batch_size", 4)
+            lr = job_input.get("lr", 0.0003)
+        elif model_size == 'large':
+            batch_size = job_input.get("batch_size", 2)
+            lr = job_input.get("lr", 0.0002)
+        
+        print(f"📦 学習モデルサイズ: {model_size.upper()}")
+        
+        # Small/LargeモデルはNeuroQuantumを使用
+        if MODEL_CONFIGS_AVAILABLE and model_size in ['small', 'large'] and NeuroQuantum is not None:
+            print(f"🔄 {model_size.upper()}モデルで学習開始...")
+            
+            try:
+                import tiktoken
+                from tiktoken_tokenizer import TikTokenTokenizer
+                
+                # トークナイザー初期化
+                tokenizer = TikTokenTokenizer(encoding_name="o200k_base")
+                
+                # モデル設定を取得
+                config = get_model_config(model_size)
+                checkpoint_path = MODEL_CHECKPOINT_PATHS.get(model_size, MODEL_CHECKPOINT_PATHS['micro'])
+                
+                print(f"📋 モデル設定: {config['name']}")
+                print(f"   embed_dim: {config['embed_dim']}")
+                print(f"   num_heads: {config['num_heads']}")
+                print(f"   num_layers: {config['num_layers']}")
+                
+                # モデル構築
+                nq_config = NeuroQuantumConfig()
+                nq_config.vocab_size = config['vocab_size']
+                nq_config.embed_dim = config['embed_dim']
+                nq_config.num_heads = config['num_heads']
+                nq_config.num_layers = config['num_layers']
+                nq_config.max_seq_len = config.get('max_seq_len', 512)
+                nq_config.dropout = config.get('dropout', 0.1)
+                
+                train_model = NeuroQuantum(nq_config).to(DEVICE)
+                
+                total_params = sum(p.numel() for p in train_model.parameters())
+                print(f"   総パラメータ数: {total_params:,} ({total_params/1e6:.1f}M)")
+                
+                # 学習データ
+                if texts is None:
+                    texts = get_training_data()
+                
+                print(f"🔄 データトークン化中... ({len(texts)}サンプル)")
+                
+                # トークン化
+                all_tokens = []
+                for text in texts:
+                    tokens = tokenizer.encode(text, add_special=False)
+                    all_tokens.extend(tokens)
+                    all_tokens.append(tokenizer.eos_id)
+                
+                print(f"   総トークン数: {len(all_tokens):,}")
+                
+                # シーケンス作成
+                sequences = []
+                for i in range(0, len(all_tokens) - seq_length, seq_length // 2):
+                    sequences.append(all_tokens[i:i + seq_length])
+                
+                print(f"   シーケンス数: {len(sequences):,}")
+                
+                if len(sequences) == 0:
+                    return {"status": "error", "error": "Not enough data for training"}
+                
+                # 学習ループ
+                optimizer = torch.optim.AdamW(train_model.parameters(), lr=lr)
+                criterion = torch.nn.CrossEntropyLoss()
+                
+                total_batches = (len(sequences) - batch_size) // batch_size
+                print(f"\n🚀 学習開始: {epochs}エポック, バッチ数/エポック: {total_batches}")
+                
+                import random
+                best_loss = float('inf')
+                
+                for epoch in range(epochs):
+                    train_model.train()
+                    total_loss = 0
+                    batch_count = 0
+                    
+                    random.shuffle(sequences)
+                    
+                    for i in range(0, len(sequences) - batch_size, batch_size):
+                        batch = sequences[i:i + batch_size]
+                        batch_tensor = torch.tensor(batch, device=DEVICE)
+                        
+                        input_ids = batch_tensor[:, :-1]
+                        target_ids = batch_tensor[:, 1:]
+                        
+                        optimizer.zero_grad()
+                        logits = train_model(input_ids)
+                        
+                        loss = criterion(
+                            logits.reshape(-1, config['vocab_size']),
+                            target_ids.reshape(-1)
+                        )
+                        
+                        loss.backward()
+                        torch.nn.utils.clip_grad_norm_(train_model.parameters(), 1.0)
+                        optimizer.step()
+                        
+                        total_loss += loss.item()
+                        batch_count += 1
+                        
+                        # 進捗表示（10%ごと）
+                        if batch_count % max(1, total_batches // 10) == 0:
+                            progress = batch_count / total_batches * 100
+                            print(f"   Epoch {epoch+1}/{epochs} - {progress:.0f}% - Loss: {total_loss/batch_count:.4f}")
+                    
+                    avg_loss = total_loss / max(batch_count, 1)
+                    if avg_loss < best_loss:
+                        best_loss = avg_loss
+                    
+                    print(f"   ✅ Epoch {epoch+1}/{epochs} 完了: Loss={avg_loss:.4f}")
+                
+                print(f"\n✅ 学習完了！ベストLoss: {best_loss:.4f}")
+                
+                # チェックポイント保存
+                os.makedirs(os.path.dirname(checkpoint_path), exist_ok=True)
+                
+                checkpoint = {
+                    'model_state_dict': train_model.state_dict(),
+                    'config': config,
+                    'tokenizer': {
+                        'type': 'tiktoken',
+                        'encoding': 'o200k_base',
+                        'vocab_size': tokenizer.vocab_size,
+                    },
+                    'model_size': model_size,
+                }
+                
+                torch.save(checkpoint, checkpoint_path)
+                print(f"💾 チェックポイント保存: {checkpoint_path}")
+                
                 return {
                     "status": "success",
                     "message": f"Training completed ({epochs} epochs)",
+                    "model_size": model_size,
+                    "model_name": config['name'],
+                    "parameters": total_params,
+                    "best_loss": best_loss,
                     "checkpoint_path": checkpoint_path,
                     "num_samples": len(texts)
                 }
-            else:
+                
+            except Exception as e:
+                import traceback
+                traceback.print_exc()
+                return {"status": "error", "error": str(e)}
+        
+        else:
+            # 従来のNeuroQuantumBrainAIを使用（micro）
+            if not is_initialized:
+                print("🔄 学習用モデルを新規作成...")
+                try:
+                    model = NeuroQuantumBrainAI(
+                        embed_dim=128,
+                        num_heads=4,
+                        num_layers=3,
+                        num_neurons=100,
+                        max_vocab=8000,
+                        use_sentencepiece=True
+                    )
+
+                    if os.path.exists(TOKENIZER_MODEL_PATH):
+                        print(f"✅ トークナイザーをロード: {TOKENIZER_MODEL_PATH}")
+                        model.tokenizer = NeuroQuantumTokenizer(
+                            vocab_size=8000,
+                            model_file=TOKENIZER_MODEL_PATH
+                        )
+
+                    is_initialized = True
+
+                except Exception as e:
+                    return {
+                        "status": "error",
+                        "error": f"Failed to create model: {e}"
+                    }
+
+            if texts is None:
+                print("📚 デフォルト学習データを使用")
+                texts = get_training_data()
+
+            if not texts:
                 return {
-                    "status": "warning",
-                    "message": "Training completed but checkpoint save failed",
-                    "num_samples": len(texts)
+                    "status": "error",
+                    "error": "No training texts provided"
                 }
 
-        except Exception as e:
-            import traceback
-            traceback.print_exc()
-            return {
-                "status": "error",
-                "error": str(e)
-            }
+            print(f"🔄 学習開始: {len(texts)}サンプル, {epochs}エポック")
+
+            try:
+                model.train(
+                    texts,
+                    epochs=epochs,
+                    batch_size=batch_size,
+                    lr=lr,
+                    seq_length=seq_length
+                )
+
+                checkpoint_path = job_input.get("checkpoint_path", MODEL_CHECKPOINT_PATH)
+                if save_checkpoint(model, checkpoint_path):
+                    return {
+                        "status": "success",
+                        "message": f"Training completed ({epochs} epochs)",
+                        "model_size": "micro",
+                        "checkpoint_path": checkpoint_path,
+                        "num_samples": len(texts)
+                    }
+                else:
+                    return {
+                        "status": "warning",
+                        "message": "Training completed but checkpoint save failed",
+                        "num_samples": len(texts)
+                    }
+
+            except Exception as e:
+                import traceback
+                traceback.print_exc()
+                return {
+                    "status": "error",
+                    "error": str(e)
+                }
     
     # ========================================
     # CLEAR_SESSION（会話履歴クリア）

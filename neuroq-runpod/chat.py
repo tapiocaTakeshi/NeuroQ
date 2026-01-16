@@ -23,6 +23,13 @@ import argparse
 # カレントディレクトリをパスに追加
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
+# モデル設定をインポート
+try:
+    from model_configs import AVAILABLE_MODELS, get_model_config, get_checkpoint_path, create_model
+    MODEL_CONFIGS_AVAILABLE = True
+except ImportError:
+    MODEL_CONFIGS_AVAILABLE = False
+
 # モデルのインポート（neuroquantum_layered.pyを優先）
 NEUROQUANTUM_LAYERED_AVAILABLE = False
 NEUROQUANTUM_BRAIN_AVAILABLE = False
@@ -74,7 +81,9 @@ except ImportError:
 # 設定
 TOKENIZER_MODEL_PATH = "neuroq_tokenizer.model"
 CHECKPOINT_PATH_SP = "checkpoints/neuroq_checkpoint.pt"  # SentencePiece用（日本語）
-CHECKPOINT_PATH_TK = "checkpoints/neuroq_tiktoken_english_checkpoint.pt"  # TikToken用（英語）
+CHECKPOINT_PATH_TK = "checkpoints/neuroq_tiktoken_english_checkpoint.pt"  # TikToken用（英語・Micro）
+CHECKPOINT_PATH_SMALL = "checkpoints/neuroq_small_checkpoint.pt"  # Small
+CHECKPOINT_PATH_LARGE = "checkpoints/neuroq_large_checkpoint.pt"  # Large
 DEFAULT_TOKENIZER = "tiktoken"  # デフォルトはtiktoken
 DEFAULT_TRANSLATE = True  # 翻訳モード（tiktokenは英語なのでデフォルトオン）
 DEFAULT_TRANSLATOR = "nllb"  # 翻訳エンジン: "nllb" or "deepl"
@@ -83,6 +92,7 @@ DEFAULT_TRANSLATOR = "nllb"  # 翻訳エンジン: "nllb" or "deepl"
 def clean_response(response: str, prompt: str) -> str:
     """
     応答をクリーンアップ
+    - <ASSISTANT>タグ以降の実際の応答を抽出
     - 入力プロンプトの重複を削除
     - 特殊タグを削除
     - 余分な空白を整理
@@ -90,11 +100,18 @@ def clean_response(response: str, prompt: str) -> str:
     """
     original_response = response
     
+    # <ASSISTANT>タグ以降の応答を抽出
+    if '<ASSISTANT>' in response:
+        # 最後の<ASSISTANT>タグ以降を取得
+        parts = response.split('<ASSISTANT>')
+        if len(parts) > 1:
+            response = parts[-1].strip()
+    
     # 入力プロンプトが先頭にある場合は削除
     if response.startswith(prompt):
         response = response[len(prompt):].strip()
     
-    # 特殊タグを削除（タグ以降も削除）
+    # 追加の<USER>タグ以降を削除（次の質問が入らないように）
     response = re.sub(r'<USER>.*', '', response, flags=re.DOTALL)
     response = re.sub(r'<ASSISTANT>.*', '', response, flags=re.DOTALL)
     response = re.sub(r'<[A-Z]+>.*', '', response, flags=re.DOTALL)
@@ -152,8 +169,11 @@ def generate_text(model, tokenizer, prompt, max_length=100, temperature=0.8, dev
     # 温度の範囲をクリップ（極端な値を防ぐ）
     temperature = max(0.1, min(2.0, temperature))
     
+    # プロンプトを学習形式にラップ（<USER>...<ASSISTANT>形式）
+    formatted_prompt = f"<USER> {prompt} <ASSISTANT>"
+    
     # プロンプトをエンコード
-    input_ids = tokenizer.encode(prompt, add_special=True)
+    input_ids = tokenizer.encode(formatted_prompt, add_special=True)
     
     # 生成
     generated = input_ids.copy()
@@ -251,14 +271,17 @@ def main():
     parser.add_argument('--tokenizer', '-t', choices=['tiktoken', 'sentencepiece', 'sp'],
                         default=DEFAULT_TOKENIZER,
                         help='使用するトークナイザー (default: sentencepiece)')
-    parser.add_argument('--encoding', '-e', default='cl100k_base',
-                        help='tiktokenのエンコーディング (default: cl100k_base)')
+    parser.add_argument('--encoding', '-e', default='o200k_base',
+                        help='tiktokenのエンコーディング (default: o200k_base)')
     parser.add_argument('--translate', action='store_true',
                         default=DEFAULT_TRANSLATE,
                         help='翻訳モードを有効にする')
     parser.add_argument('--translator', choices=['nllb', 'deepl'],
                         default=DEFAULT_TRANSLATOR,
                         help='翻訳エンジン (default: nllb)')
+    parser.add_argument('--model-size', '-m', choices=['micro', 'small', 'large'],
+                        default='micro',
+                        help='モデルサイズ: micro(128), small(1536), large(3072)')
     args = parser.parse_args()
     
     print()
@@ -288,9 +311,15 @@ def main():
         else:
             tokenizer = TikTokenTokenizer(encoding_name=args.encoding)
             # tiktokenの語彙サイズをモデルに合わせる
-            vocab_size = 100277  # cl100k_baseの語彙サイズ
+            vocab_size = 200019  # o200k_baseの語彙サイズ
             tokenizer_info = f"TikToken ({args.encoding})"
-            checkpoint_path = CHECKPOINT_PATH_TK
+            # モデルサイズに応じたチェックポイント
+            if args.model_size == 'small':
+                checkpoint_path = CHECKPOINT_PATH_SMALL
+            elif args.model_size == 'large':
+                checkpoint_path = CHECKPOINT_PATH_LARGE
+            else:
+                checkpoint_path = CHECKPOINT_PATH_TK  # micro
     
     if tokenizer_type == 'sentencepiece':
         if not SENTENCEPIECE_AVAILABLE:
@@ -322,7 +351,7 @@ def main():
             config = {}
         
         # モデル設定を取得（チェックポイントの設定を優先）
-        model_vocab_size = config.get('vocab_size', 8000)
+        model_vocab_size = config.get('vocab_size', 200019)  # o200k_baseのデフォルト
         embed_dim = config.get('embed_dim', 128)
         num_heads = config.get('num_heads', 4)
         num_layers = config.get('num_layers', 3)
@@ -370,18 +399,43 @@ def main():
     # モデルを構築（NeuroQuantumを優先、フォールバックでNeuroQuantumBrain）
     print("\n🧠 モデルを構築中...")
     
+    # モデルサイズを表示
+    model_size = args.model_size
+    print(f"   📦 モデルサイズ: {model_size.upper()}")
+    
     if NEUROQUANTUM_LAYERED_AVAILABLE:
-        # NeuroQuantum (neuroquantum_layered.py) を使用
-        config = NeuroQuantumConfig()
-        config.vocab_size = model_vocab_size
-        config.embed_dim = embed_dim
-        config.num_heads = num_heads
-        config.num_layers = num_layers
-        config.max_seq_len = 256
-        config.dropout = 0.1
+        # model_configsが利用可能な場合、設定を使用
+        if MODEL_CONFIGS_AVAILABLE and model_size in ['small', 'large']:
+            model_config = get_model_config(model_size)
+            config_obj = NeuroQuantumConfig()
+            config_obj.vocab_size = model_config['vocab_size']
+            config_obj.embed_dim = model_config['embed_dim']
+            config_obj.num_heads = model_config['num_heads']
+            config_obj.num_layers = model_config['num_layers']
+            config_obj.max_seq_len = model_config.get('max_seq_len', 512)
+            config_obj.dropout = model_config.get('dropout', 0.1)
+            
+            # チェックポイントの設定を上書き
+            embed_dim = model_config['embed_dim']
+            num_heads = model_config['num_heads']
+            num_layers = model_config['num_layers']
+            model_vocab_size = model_config['vocab_size']
+            
+            model = NeuroQuantum(config_obj)
+            model_type = f"NeuroQuantum {model_config['name']}"
+        else:
+            # 従来の方法（microまたはチェックポイントから読み込み）
+            config_obj = NeuroQuantumConfig()
+            config_obj.vocab_size = model_vocab_size
+            config_obj.embed_dim = embed_dim
+            config_obj.num_heads = num_heads
+            config_obj.num_layers = num_layers
+            config_obj.max_seq_len = 256
+            config_obj.dropout = 0.1
+            
+            model = NeuroQuantum(config_obj)
+            model_type = "NeuroQuantum (QBNN Transformer)"
         
-        model = NeuroQuantum(config)
-        model_type = "NeuroQuantum (QBNN Transformer)"
         print(f"   ✅ {model_type} を使用")
     elif NEUROQUANTUM_BRAIN_AVAILABLE:
         # NeuroQuantumBrain (neuroquantum_brain.py) を使用

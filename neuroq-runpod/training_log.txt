@@ -1,0 +1,6 @@
+2026-01-13 21:01:01 [INFO] 学習データ: 3000 サンプル
+2026-01-13 21:01:02 [INFO] 総トークン数: 521,363
+2026-01-13 21:01:05 [INFO] 総パラメータ数: 54,316,047
+2026-01-13 21:01:05 [INFO] シーケンス数: 8,145
+/opt/homebrew/Cellar/python@3.11/3.11.12/Frameworks/Python.framework/Versions/3.11/lib/python3.11/multiprocessing/resource_tracker.py:254: UserWarning: resource_tracker: There appear to be 1 leaked semaphore objects to clean up at shutdown
+  warnings.warn('resource_tracker: There appear to be %d '
