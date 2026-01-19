@@ -983,7 +983,7 @@ class NeuroQInference:
     volumes={"/model_checkpoints": checkpoints_volume},
 )
 @modal.concurrent(max_inputs=10)
-@modal.asgi_app()
+@modal.asgi_app(custom_domains=["api.neuroq.he-ro.jp"])
 def fastapi_app():
     """
     FastAPI Webアプリケーション
