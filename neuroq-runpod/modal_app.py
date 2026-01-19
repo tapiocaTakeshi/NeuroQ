@@ -214,13 +214,13 @@ class NeuroQInference:
                     
                     self.model.eval()
                     
-                    # トークナイザーを初期化
+                    # トークナイザーを初期化（モデルの vocab_size に制限）
                     if tokenizer_info.get('type') == 'tiktoken':
                         try:
                             from tiktoken_tokenizer import TikTokenTokenizer
                             encoding_name = tokenizer_info.get('encoding', 'o200k_base')
-                            self.tokenizer = TikTokenTokenizer(encoding_name=encoding_name)
-                            print(f"   ✅ TikTokenトークナイザー ({encoding_name}) をロード")
+                            self.tokenizer = TikTokenTokenizer(encoding_name=encoding_name, max_vocab=vocab_size)
+                            print(f"   ✅ TikTokenトークナイザー ({encoding_name}, max_vocab={vocab_size}) をロード")
                         except ImportError as e:
                             print(f"   ⚠️ TikTokenTokenizerインポートエラー: {e}")
                     
@@ -254,13 +254,13 @@ class NeuroQInference:
                         use_sentencepiece=False  # TikTokenを使用
                     )
                     
-                    # TikTokenトークナイザーをロード
+                    # TikTokenトークナイザーをロード（モデルの vocab_size に制限）
                     if tokenizer_info.get('type') == 'tiktoken':
                         try:
                             from tiktoken_tokenizer import TikTokenTokenizer
                             encoding_name = tokenizer_info.get('encoding', 'cl100k_base')
-                            self.model.tokenizer = TikTokenTokenizer(encoding_name=encoding_name)
-                            print(f"   ✅ TikTokenトークナイザー ({encoding_name}) をロード")
+                            self.model.tokenizer = TikTokenTokenizer(encoding_name=encoding_name, max_vocab=vocab_size)
+                            print(f"   ✅ TikTokenトークナイザー ({encoding_name}, max_vocab={vocab_size}) をロード")
                         except ImportError as e:
                             print(f"   ⚠️ TikTokenTokenizerインポートエラー: {e}")
                     else:
@@ -514,13 +514,21 @@ class NeuroQInference:
             return {"status": "error", "error": "Model not initialized"}
         
         try:
+            # モデルの vocab_size を取得
+            if hasattr(self.model, 'model') and self.model.model is not None:
+                model_vocab_size = self.model.model.token_embedding.weight.shape[0]
+            elif hasattr(self.model, 'token_embedding'):
+                model_vocab_size = self.model.token_embedding.weight.shape[0]
+            else:
+                model_vocab_size = self.vocab_size
+
             # トークナイザーを取得
             if hasattr(self.model, 'tokenizer') and self.model.tokenizer is not None:
                 tokenizer = self.model.tokenizer
             else:
                 from tiktoken_tokenizer import TikTokenTokenizer
-                tokenizer = TikTokenTokenizer(encoding_name="o200k_base")
-            
+                tokenizer = TikTokenTokenizer(encoding_name="o200k_base", max_vocab=model_vocab_size)
+
             # テキストをトークン化
             token_ids = tokenizer.encode(text, add_special=False)
             
@@ -601,13 +609,6 @@ class NeuroQInference:
             return {"status": "error", "error": "Model not initialized"}
         
         try:
-            # トークナイザーを取得
-            if hasattr(self.model, 'tokenizer') and self.model.tokenizer is not None:
-                tokenizer = self.model.tokenizer
-            else:
-                from tiktoken_tokenizer import TikTokenTokenizer
-                tokenizer = TikTokenTokenizer(encoding_name="o200k_base")
-            
             # モデルの埋め込み層を取得
             if hasattr(self.model, 'model') and self.model.model is not None:
                 embedding_layer = self.model.model.token_embedding
@@ -615,10 +616,17 @@ class NeuroQInference:
                 embedding_layer = self.model.token_embedding
             else:
                 return {"status": "error", "error": "Could not find embedding layer"}
-            
+
             # 埋め込み行列全体を取得
             embedding_matrix = embedding_layer.weight  # [vocab_size, embed_dim]
             vocab_size = embedding_matrix.shape[0]
+
+            # トークナイザーを取得（vocab_size に制限）
+            if hasattr(self.model, 'tokenizer') and self.model.tokenizer is not None:
+                tokenizer = self.model.tokenizer
+            else:
+                from tiktoken_tokenizer import TikTokenTokenizer
+                tokenizer = TikTokenTokenizer(encoding_name="o200k_base", max_vocab=vocab_size)
             
             # 入力ベクトルをテンソルに変換
             input_embeddings = torch.tensor(embeddings, device=self.device, dtype=torch.float32)  # [num_tokens, embed_dim]
@@ -781,11 +789,16 @@ class NeuroQInference:
         print(f"   device: {self.device}")
         if dataset_ids:
             print(f"   dataset_ids: {dataset_ids}")
-        
-        # トークナイザー
+
+        # モデル設定を先に取得（vocab_size を使うため）
+        from model_configs import get_model_config
+        config = get_model_config(model_size)
+        model_vocab_size = config['vocab_size']
+
+        # トークナイザー（モデルの vocab_size に制限）
         from tiktoken_tokenizer import TikTokenTokenizer
-        tokenizer = TikTokenTokenizer(encoding_name="o200k_base")
-        print(f"\n📚 トークナイザー: 語彙サイズ {tokenizer.vocab_size:,}")
+        tokenizer = TikTokenTokenizer(encoding_name="o200k_base", max_vocab=model_vocab_size)
+        print(f"\n📚 トークナイザー: 語彙サイズ {tokenizer.vocab_size:,} (max_vocab={model_vocab_size})")
         
         # 学習データ準備
         print("\n📊 学習データ準備...")
@@ -846,10 +859,8 @@ class NeuroQInference:
         
         # モデル構築
         print("\n🧠 モデル構築...")
-        from model_configs import get_model_config
         from neuroquantum_layered import NeuroQuantum, NeuroQuantumConfig
-        
-        config = get_model_config(model_size)
+
         nq_config = NeuroQuantumConfig()
         nq_config.vocab_size = config['vocab_size']
         nq_config.embed_dim = config['embed_dim']
