@@ -241,9 +241,12 @@ class NeuroQInference:
                     checkpoint = torch.load(checkpoint_path, map_location=self.device)
                     config = checkpoint.get('config', {})
                     tokenizer_info = checkpoint.get('tokenizer', {})
-                    
-                    # チェックポイントの語彙サイズを使用
-                    vocab_size = config.get('vocab_size', tokenizer_info.get('vocab_size', 8000))
+
+                    # チェックポイントの語彙サイズを使用（o200k_base対応: デフォルト200019）
+                    vocab_size = config.get('vocab_size', tokenizer_info.get('vocab_size', 200019))
+                    print(f"   📊 config: {config}")
+                    print(f"   📊 tokenizer_info: {tokenizer_info}")
+                    print(f"   📊 vocab_size: {vocab_size}")
                     
                     self.model = self.NeuroQuantumBrainAI(
                         embed_dim=config.get('embed_dim', 128),
@@ -725,21 +728,43 @@ class NeuroQInference:
                     "error": f"Failed to load model ({model_size})"
                 }
         
-        result = self._generate_text(
-            prompt=prompt,
-            max_length=max_length,
-            temp_min=temp_min,
-            temp_max=temp_max,
-            temperature=temperature,
-            history=history
-        )
-        
-        return {
-            "status": "success",
-            "prompt": prompt,
-            "generated": result,
-            "model_size": self.current_model_size
-        }
+        try:
+            result = self._generate_text(
+                prompt=prompt,
+                max_length=max_length,
+                temp_min=temp_min,
+                temp_max=temp_max,
+                temperature=temperature,
+                history=history
+            )
+
+            # エラーチェック
+            if result.startswith("Error:"):
+                return {
+                    "status": "error",
+                    "error": result,
+                    "prompt": prompt,
+                    "model_size": self.current_model_size
+                }
+
+            return {
+                "status": "success",
+                "prompt": prompt,
+                "generated": result,
+                "model_size": self.current_model_size
+            }
+        except Exception as e:
+            import traceback
+            error_detail = traceback.format_exc()
+            print(f"❌ Generate error: {e}")
+            print(error_detail)
+            return {
+                "status": "error",
+                "error": str(e),
+                "error_detail": error_detail,
+                "prompt": prompt,
+                "model_size": self.current_model_size
+            }
     
     @modal.method()
     def train(
@@ -1377,10 +1402,12 @@ def train_model(
         if max_samples:
             print(f"   max_samples: {max_samples} (per dataset)")
     
-    # トークナイザー
+    # モデル設定を先に取得（vocab_size を使うため）
     print("\n📚 トークナイザー初期化...")
-    tokenizer = TikTokenTokenizer(encoding_name="o200k_base")
-    print(f"   語彙サイズ: {tokenizer.vocab_size:,}")
+    config = get_model_config(model_size)
+    model_vocab_size = config['vocab_size']
+    tokenizer = TikTokenTokenizer(encoding_name="o200k_base", max_vocab=model_vocab_size)
+    print(f"   語彙サイズ: {tokenizer.vocab_size:,} (max_vocab={model_vocab_size})")
     
     # 学習データ
     print("\n📊 学習データ準備...")
