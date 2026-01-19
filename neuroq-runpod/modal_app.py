@@ -1604,3 +1604,405 @@ def download_checkpoint(model_size: str = "small"):
     else:
         print(f"❌ チェックポイントが見つかりません: {checkpoint_path}")
         return None
+
+
+# ========================================
+# OpenAssistant Conversations 学習API
+# ========================================
+
+@app.function(
+    image=image,
+    gpu="A100",  # 学習にはA100推奨
+    timeout=10800,  # 3時間
+    volumes={"/model_checkpoints": checkpoints_volume},
+)
+def train_openassistant(
+    model_size: str = "micro",
+    epochs: int = 30,
+    batch_size: int = None,
+    lr: float = None,
+    max_samples: int = 5000,
+    languages: str = "en",
+    dataset: str = "oasst1",
+):
+    """
+    OpenAssistant Conversationsデータセットを使用してNeuroQモデルを学習
+
+    Hugging Face APIを使用してOpenAssistant/oasst1またはoasst2データセットを
+    ダウンロードし、会話形式でモデルを学習します。
+
+    Args:
+        model_size: 'micro', 'small', 'large' (default: micro)
+        epochs: 学習エポック数 (default: 30)
+        batch_size: バッチサイズ（Noneならモデルサイズに応じて自動設定）
+        lr: 学習率（Noneならモデルサイズに応じて自動設定）
+        max_samples: 最大会話数 (default: 5000)
+        languages: 言語フィルタ（カンマ区切り、例: "en" or "en,ja"）
+        dataset: 'oasst1' or 'oasst2' (default: oasst1)
+
+    使い方:
+        # 英語データで学習
+        modal run modal_app.py::train_openassistant --languages en
+
+        # 日本語と英語で学習
+        modal run modal_app.py::train_openassistant --languages "en,ja"
+
+        # Smallモデルで学習
+        modal run modal_app.py::train_openassistant --model-size small --epochs 20
+
+        # OASST2データセットを使用
+        modal run modal_app.py::train_openassistant --dataset oasst2
+
+    Returns:
+        dict: 学習結果（status, model_size, best_loss, checkpoint_path等）
+    """
+    import sys
+    import os
+    import torch
+    import random
+    from torch.cuda.amp import autocast, GradScaler
+
+    sys.path.insert(0, "/root/neuroq")
+    os.chdir("/root/neuroq")
+
+    print("=" * 70)
+    print("🚀 OpenAssistant Conversations API 学習")
+    print("=" * 70)
+
+    # 言語リストをパース
+    lang_list = [lang.strip() for lang in languages.split(",")]
+
+    print(f"📊 データセット: OpenAssistant/{dataset}")
+    print(f"📊 言語: {lang_list}")
+    print(f"📊 モデル: {model_size.upper()}")
+    print(f"📊 エポック: {epochs}")
+    print(f"📊 最大サンプル: {max_samples}")
+
+    # デバイス
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    print(f"📊 Device: {device}")
+    if torch.cuda.is_available():
+        print(f"📊 GPU: {torch.cuda.get_device_name(0)}")
+        print(f"📊 VRAM: {torch.cuda.get_device_properties(0).total_memory / 1e9:.1f} GB")
+        torch.cuda.empty_cache()
+
+    # モジュールインポート
+    from datasets import load_dataset
+    from neuroquantum_layered import NeuroQuantum, NeuroQuantumConfig
+    from tiktoken_tokenizer import TikTokenTokenizer
+    from model_configs import get_model_config, AVAILABLE_MODELS
+
+    # 学習設定
+    if batch_size is None:
+        batch_size = 8 if model_size == 'micro' else (4 if model_size == 'small' else 2)
+    if lr is None:
+        lr = 0.0005 if model_size == 'micro' else (0.0003 if model_size == 'small' else 0.0002)
+    seq_length = 128
+
+    print(f"\n📋 学習設定:")
+    print(f"   batch_size: {batch_size}")
+    print(f"   learning_rate: {lr}")
+    print(f"   seq_length: {seq_length}")
+
+    # ========================================
+    # Step 1: データセットロード
+    # ========================================
+    print("\n" + "=" * 50)
+    print("📥 Step 1: OpenAssistantデータセットをロード")
+    print("=" * 50)
+
+    dataset_id = f"OpenAssistant/{dataset}"
+    ds = load_dataset(dataset_id, split="train")
+    print(f"✅ ロード完了: {len(ds):,} メッセージ")
+
+    # メッセージをIDでインデックス化
+    print("🔄 会話ツリーを構築中...")
+    messages_by_id = {}
+    for msg in ds:
+        msg_id = msg.get('message_id', '')
+        if msg_id:
+            messages_by_id[msg_id] = {
+                'text': msg.get('text', ''),
+                'role': msg.get('role', ''),
+                'parent_id': msg.get('parent_id'),
+                'lang': msg.get('lang', ''),
+                'rank': msg.get('rank'),
+            }
+
+    print(f"✅ メッセージ数: {len(messages_by_id):,}")
+
+    # 会話を抽出
+    print(f"🔄 会話を抽出中... (言語: {lang_list})")
+    conversations = []
+    lang_stats = {}
+
+    for msg_id, msg in messages_by_id.items():
+        if len(conversations) >= max_samples:
+            break
+
+        # ルートメッセージ（prompter）を探す
+        if msg['parent_id'] is not None or msg['role'] != 'prompter':
+            continue
+
+        # 言語フィルタ
+        if msg['lang'] not in lang_list:
+            continue
+
+        # 子メッセージ（assistantの返答）を探す
+        children = [
+            (mid, m) for mid, m in messages_by_id.items()
+            if m['parent_id'] == msg_id and m['role'] == 'assistant'
+        ]
+
+        if children:
+            # ランクが高い返答を選択
+            children.sort(key=lambda x: x[1].get('rank') or 999)
+            response_id, response_msg = children[0]
+
+            user_text = msg['text'].strip()[:500]
+            assistant_text = response_msg['text'].strip()[:1000]
+
+            if len(user_text) > 5 and len(assistant_text) > 10:
+                conversation = f"<USER> {user_text} <ASSISTANT> {assistant_text}"
+                conversations.append(conversation)
+
+                lang = msg['lang']
+                lang_stats[lang] = lang_stats.get(lang, 0) + 1
+
+    print(f"✅ 会話数: {len(conversations):,}")
+    print(f"📊 言語分布: {lang_stats}")
+
+    if not conversations:
+        return {
+            "status": "error",
+            "message": "会話が見つかりませんでした。言語設定を確認してください。"
+        }
+
+    # サンプル表示
+    print("\n📋 サンプル会話:")
+    for i, conv in enumerate(conversations[:2]):
+        print(f"   {i+1}. {conv[:100]}...")
+
+    # ========================================
+    # Step 2: トークナイザー・モデル初期化
+    # ========================================
+    print("\n" + "=" * 50)
+    print("🧠 Step 2: モデル初期化")
+    print("=" * 50)
+
+    tokenizer = TikTokenTokenizer(encoding_name="o200k_base")
+    print(f"✅ トークナイザー語彙サイズ: {tokenizer.vocab_size:,}")
+
+    # モデル設定
+    if model_size in ['small', 'large']:
+        config = get_model_config(model_size)
+    else:
+        config = {
+            'name': 'NeuroQ-Micro',
+            'vocab_size': tokenizer.vocab_size,
+            'embed_dim': 128,
+            'num_heads': 4,
+            'num_layers': 3,
+            'max_seq_len': 256,
+            'dropout': 0.1,
+        }
+
+    config['vocab_size'] = tokenizer.vocab_size
+
+    print(f"📋 モデル設定: {config.get('name', model_size.upper())}")
+    print(f"   vocab_size: {config['vocab_size']:,}")
+    print(f"   embed_dim: {config['embed_dim']}")
+    print(f"   num_heads: {config['num_heads']}")
+    print(f"   num_layers: {config['num_layers']}")
+
+    nq_config = NeuroQuantumConfig()
+    nq_config.vocab_size = config['vocab_size']
+    nq_config.embed_dim = config['embed_dim']
+    nq_config.num_heads = config['num_heads']
+    nq_config.num_layers = config['num_layers']
+    nq_config.max_seq_len = config.get('max_seq_len', 256)
+    nq_config.dropout = config.get('dropout', 0.1)
+
+    model = NeuroQuantum(nq_config).to(device)
+
+    total_params = sum(p.numel() for p in model.parameters())
+    print(f"✅ パラメータ数: {total_params:,} ({total_params/1e6:.1f}M)")
+
+    # ========================================
+    # Step 3: データ準備
+    # ========================================
+    print("\n" + "=" * 50)
+    print("📊 Step 3: データ準備")
+    print("=" * 50)
+
+    print("🔄 トークン化中...")
+    all_tokens = []
+    for conv in conversations:
+        tokens = tokenizer.encode(conv, add_special=False)
+        all_tokens.extend(tokens)
+        all_tokens.append(tokenizer.eos_id)
+
+    print(f"✅ 総トークン数: {len(all_tokens):,}")
+
+    # シーケンス作成
+    sequences = []
+    for i in range(0, len(all_tokens) - seq_length, seq_length // 2):
+        sequences.append(all_tokens[i:i + seq_length])
+
+    print(f"✅ シーケンス数: {len(sequences):,}")
+
+    # ========================================
+    # Step 4: 学習
+    # ========================================
+    print("\n" + "=" * 50)
+    print("🎓 Step 4: 学習開始")
+    print("=" * 50)
+
+    optimizer = torch.optim.AdamW(model.parameters(), lr=lr)
+    criterion = torch.nn.CrossEntropyLoss()
+    scaler = GradScaler()
+
+    total_batches = len(sequences) // batch_size
+    print(f"📊 エポックあたりバッチ数: {total_batches:,}")
+
+    best_loss = float('inf')
+
+    for epoch in range(epochs):
+        model.train()
+        total_loss = 0
+        batch_count = 0
+
+        random.shuffle(sequences)
+
+        for i in range(0, len(sequences) - batch_size, batch_size):
+            batch = sequences[i:i + batch_size]
+            batch_tensor = torch.tensor(batch, device=device)
+
+            input_ids = batch_tensor[:, :-1]
+            target_ids = batch_tensor[:, 1:]
+
+            optimizer.zero_grad()
+
+            with autocast():
+                logits = model(input_ids)
+                loss = criterion(
+                    logits.reshape(-1, config['vocab_size']),
+                    target_ids.reshape(-1)
+                )
+
+            scaler.scale(loss).backward()
+            scaler.unscale_(optimizer)
+            torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
+            scaler.step(optimizer)
+            scaler.update()
+
+            total_loss += loss.item()
+            batch_count += 1
+
+            if batch_count % max(1, total_batches // 10) == 0:
+                progress = batch_count / total_batches * 100
+                print(f"   Epoch {epoch+1}/{epochs} - {progress:.0f}% - Loss: {total_loss/batch_count:.4f}")
+
+        avg_loss = total_loss / max(batch_count, 1)
+        if avg_loss < best_loss:
+            best_loss = avg_loss
+        print(f"   ✅ Epoch {epoch+1}/{epochs} 完了: Loss={avg_loss:.4f}")
+
+    print(f"\n✅ 学習完了！ ベストLoss: {best_loss:.4f}")
+
+    # ========================================
+    # Step 5: チェックポイント保存
+    # ========================================
+    print("\n" + "=" * 50)
+    print("💾 Step 5: チェックポイント保存")
+    print("=" * 50)
+
+    checkpoint_filename = f"neuroq_oasst_{model_size}_checkpoint.pt"
+    checkpoint_path = f"/model_checkpoints/{checkpoint_filename}"
+
+    checkpoint = {
+        'model_state_dict': model.state_dict(),
+        'config': config,
+        'tokenizer': {
+            'type': 'tiktoken',
+            'encoding': 'o200k_base',
+            'vocab_size': tokenizer.vocab_size,
+        },
+        'training_info': {
+            'dataset': dataset_id,
+            'languages': lang_list,
+            'conversations_count': len(conversations),
+            'epochs': epochs,
+            'batch_size': batch_size,
+            'learning_rate': lr,
+        },
+        'model_size': model_size,
+    }
+
+    torch.save(checkpoint, checkpoint_path)
+    checkpoints_volume.commit()
+    print(f"✅ チェックポイント保存: {checkpoint_path}")
+
+    # ========================================
+    # Step 6: 生成テスト
+    # ========================================
+    print("\n" + "=" * 50)
+    print("🧪 Step 6: 生成テスト")
+    print("=" * 50)
+
+    model.eval()
+    test_prompts = [
+        "<USER> What is artificial intelligence? <ASSISTANT>",
+        "<USER> Hello, how can you help me? <ASSISTANT>",
+    ]
+
+    for prompt in test_prompts:
+        try:
+            input_ids = tokenizer.encode(prompt)
+            generated = input_ids.copy()
+
+            with torch.no_grad():
+                for _ in range(60):
+                    seq_tensor = torch.tensor([generated[-256:]], device=device)
+                    logits = model(seq_tensor)
+
+                    probs = torch.softmax(logits[0, -1, :] / 0.8, dim=-1)
+                    top_k = 50
+                    top_probs, top_indices = torch.topk(probs, min(top_k, probs.size(-1)))
+                    top_probs = top_probs / top_probs.sum()
+                    idx = torch.multinomial(top_probs, num_samples=1)
+                    next_token = top_indices[idx].item()
+
+                    if next_token == tokenizer.eos_id:
+                        break
+                    generated.append(next_token)
+
+            output = tokenizer.decode(generated, skip_special=True)
+            if '<ASSISTANT>' in output:
+                response = output.split('<ASSISTANT>')[-1].strip()
+            else:
+                response = output
+            if '<USER>' in response:
+                response = response.split('<USER>')[0].strip()
+
+            question = prompt.replace('<USER> ', '').replace(' <ASSISTANT>', '')
+            print(f"\n   Q: {question[:50]}...")
+            print(f"   A: {response[:100]}...")
+        except Exception as e:
+            print(f"   ⚠️ 生成エラー: {e}")
+
+    print("\n" + "=" * 70)
+    print("✅ OpenAssistant学習完了！")
+    print("=" * 70)
+
+    return {
+        "status": "success",
+        "model_size": model_size,
+        "dataset": dataset_id,
+        "languages": lang_list,
+        "conversations": len(conversations),
+        "parameters": total_params,
+        "best_loss": best_loss,
+        "checkpoint_path": checkpoint_path,
+        "epochs": epochs,
+    }
