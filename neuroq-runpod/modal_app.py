@@ -450,13 +450,17 @@ class NeuroQInference:
     def _generate_neuroq(self, prompt: str, max_length: int = 50, temperature: float = 0.5) -> str:
         """NeuroQuantum モデル用のテキスト生成（繰り返しペナルティ付き）"""
         import torch
-        
+
         # トークナイザーを取得
         if self.tokenizer is None:
             return "Error: Tokenizer not initialized"
-        
-        # プロンプトをトークン化
+
+        # モデルの語彙サイズを取得（範囲外のトークンを防ぐため）
+        model_vocab_size = self.model.config.vocab_size if hasattr(self.model, 'config') else 200019
+
+        # プロンプトをトークン化（語彙サイズ内にクランプ）
         input_ids = self.tokenizer.encode(prompt)
+        input_ids = [min(t, model_vocab_size - 1) for t in input_ids]  # クランプ
         generated = input_ids.copy()
         
         # <USER>トークンのIDを取得（終了条件用）
@@ -471,21 +475,23 @@ class NeuroQInference:
         
         # 生成ループ
         for step in range(max_length):
-            # 最大シーケンス長に制限
-            seq = generated[-512:]
+            # 最大シーケンス長に制限（トークンIDをクランプ）
+            seq = [min(t, model_vocab_size - 1) for t in generated[-512:]]
             seq_tensor = torch.tensor([seq], device=self.device)
             
             # モデル推論
             logits = self.model(seq_tensor)
             next_token_logits = logits[0, -1, :].clone()
             
-            # 繰り返しペナルティを適用
+            # 繰り返しペナルティを適用（範囲内のトークンのみ）
+            vocab_len = next_token_logits.size(0)
             for token_id in set(generated[-50:]):  # 最近50トークンに対してペナルティ
-                if next_token_logits[token_id] > 0:
-                    next_token_logits[token_id] /= repetition_penalty
-                else:
-                    next_token_logits[token_id] *= repetition_penalty
-            
+                if token_id < vocab_len:
+                    if next_token_logits[token_id] > 0:
+                        next_token_logits[token_id] /= repetition_penalty
+                    else:
+                        next_token_logits[token_id] *= repetition_penalty
+
             # n-gram繰り返し防止
             if no_repeat_ngram_size > 0 and len(generated) >= no_repeat_ngram_size:
                 # 現在のn-1 gramを取得
@@ -494,7 +500,8 @@ class NeuroQInference:
                 for i in range(len(generated) - no_repeat_ngram_size):
                     if tuple(generated[i:i+no_repeat_ngram_size-1]) == ngram_prefix:
                         banned_token = generated[i + no_repeat_ngram_size - 1]
-                        next_token_logits[banned_token] = float('-inf')
+                        if banned_token < vocab_len:
+                            next_token_logits[banned_token] = float('-inf')
             
             # 次のトークンを予測
             probs = torch.softmax(next_token_logits / temperature, dim=-1)
@@ -509,11 +516,13 @@ class NeuroQInference:
             # EOSトークンなら終了
             if next_token == self.tokenizer.eos_id:
                 break
-            
+
             # <USER>トークンの開始なら終了
             if user_token_ids and next_token == user_token_ids[0]:
                 break
-            
+
+            # トークンIDをクランプして追加
+            next_token = min(next_token, model_vocab_size - 1)
             generated.append(next_token)
             
             # 生成中のテキストに<USER>が含まれていたら終了
