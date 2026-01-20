@@ -159,13 +159,18 @@ def load_checkpoint(checkpoint_path: str = MODEL_CHECKPOINT_PATH):
         # 設定を復元
         config = checkpoint['config']
 
+        # vocab_size を取得（'vocab_size' または 'max_vocab' キーをサポート）
+        vocab_size = config.get('vocab_size') or config.get('max_vocab')
+        if vocab_size is None:
+            raise ValueError("チェックポイントに vocab_size または max_vocab が見つかりません")
+
         # モデルを構築
         model_instance = NeuroQuantumBrainAI(
             embed_dim=config['embed_dim'],
             num_heads=config['num_heads'],
             num_layers=config['num_layers'],
             num_neurons=config['num_neurons'],
-            max_vocab=config['max_vocab'],
+            max_vocab=vocab_size,
             use_sentencepiece=True
         )
 
@@ -173,14 +178,14 @@ def load_checkpoint(checkpoint_path: str = MODEL_CHECKPOINT_PATH):
         if os.path.exists(TOKENIZER_MODEL_PATH):
             print(f"✅ トークナイザーをロード: {TOKENIZER_MODEL_PATH}")
             model_instance.tokenizer = NeuroQuantumTokenizer(
-                vocab_size=config['max_vocab'],
+                vocab_size=vocab_size,
                 model_file=TOKENIZER_MODEL_PATH
             )
 
         # NeuroQuantumBrainモデルを作成
         print(f"📦 NeuroQuantumBrainモデルを構築中...")
         model_instance.model = NeuroQuantumBrain(
-            vocab_size=config['max_vocab'],
+            vocab_size=vocab_size,
             embed_dim=config['embed_dim'],
             num_heads=config['num_heads'],
             num_layers=config['num_layers'],
