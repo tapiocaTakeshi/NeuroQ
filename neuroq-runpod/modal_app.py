@@ -191,7 +191,8 @@ class NeuroQInference:
                     tokenizer_info = checkpoint.get('tokenizer', {})
                     
                     # 語彙サイズをチェックポイントから取得
-                    vocab_size = saved_config.get('vocab_size', config['vocab_size'])
+                    # 注意: 古いチェックポイントは 'max_vocab' キー、新しいチェックポイントは 'vocab_size' キーを使用
+                    vocab_size = saved_config.get('vocab_size') or saved_config.get('max_vocab') or config['vocab_size']
                     
                     nq_config = self.NeuroQuantumConfig()
                     nq_config.vocab_size = vocab_size
@@ -241,8 +242,9 @@ class NeuroQInference:
                     config = checkpoint.get('config', {})
                     tokenizer_info = checkpoint.get('tokenizer', {})
 
-                    # チェックポイントの語彙サイズを使用（o200k_base対応: デフォルト200019）
-                    vocab_size = config.get('vocab_size', tokenizer_info.get('vocab_size', 200019))
+                    # チェックポイントの語彙サイズを使用
+                    # 注意: 古いチェックポイントは 'max_vocab' キー、新しいチェックポイントは 'vocab_size' キーを使用
+                    vocab_size = config.get('vocab_size') or config.get('max_vocab') or tokenizer_info.get('vocab_size', 200019)
                     print(f"   📊 config: {config}")
                     print(f"   📊 tokenizer_info: {tokenizer_info}")
                     print(f"   📊 vocab_size: {vocab_size}")
