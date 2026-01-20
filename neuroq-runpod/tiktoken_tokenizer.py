@@ -71,7 +71,8 @@ class TikTokenTokenizer:
         Returns:
             トークンIDのリスト
         """
-        tokens = self.encoder.encode(text)
+        # 特殊トークン（<|endoftext|>など）を通常テキストとしてエンコード
+        tokens = self.encoder.encode(text, allowed_special="all")
         
         # max_vocabを超えるトークンは0に置き換え
         if self.max_vocab < self.vocab_size:
