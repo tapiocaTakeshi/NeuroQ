@@ -114,36 +114,72 @@ def remap_state_dict_keys(state_dict: dict, model_state_dict: dict) -> dict:
     model_keys = set(model_state_dict.keys())
     checkpoint_keys = set(state_dict.keys())
 
-    # キー名のマッピングを定義（双方向）
-    key_mappings = {
-        'blocks': 'transformer_blocks',
-        'transformer_blocks': 'blocks',
-        'text_embedding': 'token_embedding',
-        'token_embedding': 'text_embedding',
-        'dropout': 'embedding_dropout',
-        'embedding_dropout': 'dropout',
-    }
+    # キーが完全一致なら変換不要
+    if model_keys == checkpoint_keys:
+        return state_dict
 
-    # 変換が必要かチェック
-    needs_conversion = False
-    for model_key in model_keys:
-        if model_key not in checkpoint_keys:
-            needs_conversion = True
-            break
+    # モデルとチェックポイントのキープレフィックスを検出
+    def has_prefix(keys, prefix):
+        return any(k.startswith(prefix + '.') for k in keys)
 
-    if not needs_conversion:
+    model_uses_transformer_blocks = has_prefix(model_keys, 'transformer_blocks')
+    model_uses_blocks = has_prefix(model_keys, 'blocks')
+    checkpoint_uses_transformer_blocks = has_prefix(checkpoint_keys, 'transformer_blocks')
+    checkpoint_uses_blocks = has_prefix(checkpoint_keys, 'blocks')
+
+    model_uses_token_embedding = has_prefix(model_keys, 'token_embedding')
+    model_uses_text_embedding = has_prefix(model_keys, 'text_embedding')
+    checkpoint_uses_token_embedding = has_prefix(checkpoint_keys, 'token_embedding')
+    checkpoint_uses_text_embedding = has_prefix(checkpoint_keys, 'text_embedding')
+
+    model_uses_embedding_dropout = has_prefix(model_keys, 'embedding_dropout')
+    model_uses_dropout = has_prefix(model_keys, 'dropout')
+    checkpoint_uses_embedding_dropout = has_prefix(checkpoint_keys, 'embedding_dropout')
+    checkpoint_uses_dropout = has_prefix(checkpoint_keys, 'dropout')
+
+    # 実際に必要な変換方向のみマッピングを構築
+    key_mappings = {}
+
+    # blocks <-> transformer_blocks
+    if model_uses_transformer_blocks and checkpoint_uses_blocks and not checkpoint_uses_transformer_blocks:
+        key_mappings['blocks'] = 'transformer_blocks'
+    elif model_uses_blocks and checkpoint_uses_transformer_blocks and not checkpoint_uses_blocks:
+        key_mappings['transformer_blocks'] = 'blocks'
+
+    # text_embedding <-> token_embedding
+    if model_uses_token_embedding and checkpoint_uses_text_embedding and not checkpoint_uses_token_embedding:
+        key_mappings['text_embedding'] = 'token_embedding'
+    elif model_uses_text_embedding and checkpoint_uses_token_embedding and not checkpoint_uses_text_embedding:
+        key_mappings['token_embedding'] = 'text_embedding'
+
+    # dropout <-> embedding_dropout
+    if model_uses_embedding_dropout and checkpoint_uses_dropout and not checkpoint_uses_embedding_dropout:
+        key_mappings['dropout'] = 'embedding_dropout'
+    elif model_uses_dropout and checkpoint_uses_embedding_dropout and not checkpoint_uses_dropout:
+        key_mappings['embedding_dropout'] = 'dropout'
+
+    if not key_mappings:
+        # マッピング不要（キーは異なるが変換対象外）
+        print("⚠️ state_dictキー名が一致しませんが、変換マッピングが見つかりません")
+        print(f"   モデルキー例: {list(model_keys)[:3]}")
+        print(f"   チェックポイントキー例: {list(checkpoint_keys)[:3]}")
         return state_dict
 
     print("🔄 state_dictキー名を変換中...")
+    print(f"   変換マッピング: {key_mappings}")
+
     new_state_dict = {}
+    converted_count = 0
     for key, value in state_dict.items():
         new_key = key
         for old_name, new_name in key_mappings.items():
             if key.startswith(old_name + '.'):
                 new_key = new_name + key[len(old_name):]
+                converted_count += 1
                 break
         new_state_dict[new_key] = value
 
+    print(f"   ✅ {converted_count}個のキーを変換しました")
     return new_state_dict
 
 
