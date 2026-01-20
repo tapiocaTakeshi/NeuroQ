@@ -47,6 +47,56 @@ try:
 except ImportError:
     pass
 
+
+def remap_state_dict_keys(state_dict: dict, model_state_dict: dict) -> dict:
+    """
+    state_dictのキー名をモデルのキー名に変換する
+
+    neuroq-runpod版: transformer_blocks, token_embedding, embedding_dropout
+    メイン版: blocks, text_embedding, dropout
+
+    Args:
+        state_dict: チェックポイントのstate_dict
+        model_state_dict: モデルのstate_dict（期待されるキー名の参照用）
+
+    Returns:
+        変換後のstate_dict
+    """
+    model_keys = set(model_state_dict.keys())
+    checkpoint_keys = set(state_dict.keys())
+
+    # キー名のマッピングを定義（双方向）
+    key_mappings = {
+        'blocks': 'transformer_blocks',
+        'transformer_blocks': 'blocks',
+        'text_embedding': 'token_embedding',
+        'token_embedding': 'text_embedding',
+        'dropout': 'embedding_dropout',
+        'embedding_dropout': 'dropout',
+    }
+
+    # 変換が必要かチェック
+    needs_conversion = False
+    for model_key in model_keys:
+        if model_key not in checkpoint_keys:
+            needs_conversion = True
+            break
+
+    if not needs_conversion:
+        return state_dict
+
+    print("🔄 state_dictキー名を変換中...")
+    new_state_dict = {}
+    for key, value in state_dict.items():
+        new_key = key
+        for old_name, new_name in key_mappings.items():
+            if key.startswith(old_name + '.'):
+                new_key = new_name + key[len(old_name):]
+                break
+        new_state_dict[new_key] = value
+
+    return new_state_dict
+
 # トークナイザーのインポート（両方サポート）
 TIKTOKEN_AVAILABLE = False
 SENTENCEPIECE_AVAILABLE = False
@@ -452,11 +502,12 @@ def main():
         print("❌ モデルが利用できません。")
         sys.exit(1)
     
-    # 重みをロード
+    # 重みをロード（キー名の互換性を保証）
+    remapped_state_dict = remap_state_dict_keys(state_dict, model.state_dict())
     try:
-        model.load_state_dict(state_dict)
+        model.load_state_dict(remapped_state_dict)
     except Exception as e:
-        model.load_state_dict(state_dict, strict=False)
+        model.load_state_dict(remapped_state_dict, strict=False)
     
     model = model.to(device)
     model.eval()
