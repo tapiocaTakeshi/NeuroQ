@@ -956,10 +956,13 @@ class NeuroQuantumBrain(nn.Module):
                     quantum_noise = torch.randn_like(next_logits) * T_clamped * 0.15
                     next_logits = next_logits + quantum_noise
 
-                # Top-K フィルタリング
+                # Top-K フィルタリング（vocab_sizeを超えないように制限）
                 if top_k > 0:
-                    indices_to_remove = next_logits < torch.topk(next_logits, top_k)[0][-1]
-                    next_logits[indices_to_remove] = float('-inf')
+                    vocab_size = next_logits.size(-1)
+                    actual_top_k = min(top_k, vocab_size)
+                    if actual_top_k > 0:
+                        indices_to_remove = next_logits < torch.topk(next_logits, actual_top_k)[0][-1]
+                        next_logits[indices_to_remove] = float('-inf')
 
                 # Top-P フィルタリング
                 if top_p < 1.0:
@@ -973,8 +976,13 @@ class NeuroQuantumBrain(nn.Module):
                     indices_to_remove = sorted_indices[sorted_indices_to_remove]
                     next_logits[indices_to_remove] = float('-inf')
 
-                # サンプリング
+                # サンプリング（NaN対策付き）
                 probs = F.softmax(next_logits, dim=-1)
+                if torch.isnan(probs).any() or torch.isinf(probs).any() or probs.sum() == 0:
+                    # フォールバック: 上位トークンから均等サンプリング
+                    probs = torch.zeros_like(next_logits)
+                    top_indices = torch.topk(next_logits.nan_to_num(0), min(10, next_logits.size(-1)))[1]
+                    probs[top_indices] = 1.0 / len(top_indices)
                 next_token = torch.multinomial(probs, 1)
 
                 # トークン連結

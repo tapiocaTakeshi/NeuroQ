@@ -498,11 +498,20 @@ class NeuroQInference:
             
             # 次のトークンを予測
             probs = torch.softmax(next_token_logits / temperature, dim=-1)
-            
+
+            # NaN/Inf対策
+            if torch.isnan(probs).any() or torch.isinf(probs).any() or probs.sum() == 0:
+                probs = torch.ones_like(probs) / probs.size(-1)
+
             # Top-k sampling
             top_k = 50
             top_probs, top_indices = torch.topk(probs, min(top_k, probs.size(-1)))
             top_probs = top_probs / top_probs.sum()
+
+            # top_probsのNaN対策
+            if torch.isnan(top_probs).any() or top_probs.sum() == 0:
+                top_probs = torch.ones_like(top_probs) / top_probs.size(-1)
+
             idx = torch.multinomial(top_probs, num_samples=1)
             next_token = top_indices[idx].item()
             
