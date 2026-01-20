@@ -163,7 +163,56 @@ class NeuroQInference:
         print("=" * 60)
         print("⚛️ NeuroQ Modal API - Ready!")
         print("=" * 60)
-    
+
+    def _remap_state_dict_keys(self, state_dict: dict, model_state_dict: dict) -> dict:
+        """
+        state_dictのキー名をモデルのキー名に変換する
+
+        neuroq-runpod版: transformer_blocks, token_embedding, embedding_dropout
+        メイン版: blocks, text_embedding, dropout
+
+        Args:
+            state_dict: チェックポイントのstate_dict
+            model_state_dict: モデルのstate_dict（期待されるキー名の参照用）
+
+        Returns:
+            変換後のstate_dict
+        """
+        model_keys = set(model_state_dict.keys())
+        checkpoint_keys = set(state_dict.keys())
+
+        # キー名のマッピングを定義（双方向）
+        key_mappings = {
+            'blocks': 'transformer_blocks',
+            'transformer_blocks': 'blocks',
+            'text_embedding': 'token_embedding',
+            'token_embedding': 'text_embedding',
+            'dropout': 'embedding_dropout',
+            'embedding_dropout': 'dropout',
+        }
+
+        # 変換が必要かチェック
+        needs_conversion = False
+        for model_key in model_keys:
+            if model_key not in checkpoint_keys:
+                needs_conversion = True
+                break
+
+        if not needs_conversion:
+            return state_dict
+
+        print("🔄 state_dictキー名を変換中...")
+        new_state_dict = {}
+        for key, value in state_dict.items():
+            new_key = key
+            for old_name, new_name in key_mappings.items():
+                if key.startswith(old_name + '.'):
+                    new_key = new_name + key[len(old_name):]
+                    break
+            new_state_dict[new_key] = value
+
+        return new_state_dict
+
     def _load_model(self, model_size: str = 'micro') -> bool:
         """モデルをロード"""
         import torch
@@ -206,12 +255,15 @@ class NeuroQInference:
                     print(f"   embed_dim: {nq_config.embed_dim}")
                     
                     self.model = self.NeuroQuantum(nq_config).to(self.device)
-                    
+
+                    # 重みをロード（キー名の互換性を保証）
                     if isinstance(checkpoint, dict) and 'model_state_dict' in checkpoint:
-                        self.model.load_state_dict(checkpoint['model_state_dict'])
+                        state_dict = self._remap_state_dict_keys(checkpoint['model_state_dict'], self.model.state_dict())
+                        self.model.load_state_dict(state_dict)
                     else:
-                        self.model.load_state_dict(checkpoint, strict=False)
-                    
+                        state_dict = self._remap_state_dict_keys(checkpoint, self.model.state_dict())
+                        self.model.load_state_dict(state_dict, strict=False)
+
                     self.model.eval()
                     
                     # トークナイザーを初期化（モデルの vocab_size に制限）
@@ -286,8 +338,10 @@ class NeuroQInference:
                         max_seq_len=256,
                         dropout=0.1
                     ).to(self.device)
-                    
-                    self.model.model.load_state_dict(checkpoint['model_state_dict'])
+
+                    # 重みをロード（キー名の互換性を保証）
+                    state_dict = self._remap_state_dict_keys(checkpoint['model_state_dict'], self.model.model.state_dict())
+                    self.model.model.load_state_dict(state_dict)
                     self.model.model.eval()
                     total_params = sum(p.numel() for p in self.model.model.parameters())
                     print(f"✅ NeuroQuantumBrainAI (micro) ロード完了 ({total_params:,}パラメータ)")
