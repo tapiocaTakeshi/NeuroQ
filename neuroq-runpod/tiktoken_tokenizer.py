@@ -62,16 +62,23 @@ class TikTokenTokenizer:
     def encode(self, text: str, add_special: bool = True, verbose: bool = False) -> List[int]:
         """
         テキストをトークンIDのリストに変換
-        
+
         Args:
             text: 入力テキスト
             add_special: 特殊トークンを追加するか（現在は使用していない）
             verbose: 詳細ログを出力するか
-            
+
         Returns:
             トークンIDのリスト
         """
-        tokens = self.encoder.encode(text)
+        # Allow all special tokens to be encoded as special tokens, and disable
+        # the check for disallowed special tokens. This prevents errors when
+        # training data contains literal special token strings like <|endoftext|>
+        tokens = self.encoder.encode(
+            text,
+            allowed_special="all",
+            disallowed_special=()
+        )
         
         # max_vocabを超えるトークンは0に置き換え
         if self.max_vocab < self.vocab_size:
