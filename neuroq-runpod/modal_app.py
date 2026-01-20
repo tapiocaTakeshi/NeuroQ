@@ -1037,10 +1037,10 @@ class NeuroQInference:
                 best_loss = avg_loss
             print(f"   Epoch {epoch+1}/{epochs}: Loss={avg_loss:.4f}")
         
-        # チェックポイント保存
+        # チェックポイント保存（Modalボリュームに保存）
         checkpoint_filename = f"neuroq_{model_size}_checkpoint.pt"
-        checkpoint_path = f"checkpoints/{checkpoint_filename}"
-        os.makedirs("checkpoints", exist_ok=True)
+        checkpoint_path = f"/model_checkpoints/{checkpoint_filename}"
+        os.makedirs("/model_checkpoints", exist_ok=True)
         
         checkpoint = {
             'model_state_dict': model.state_dict(),
@@ -1054,8 +1054,9 @@ class NeuroQInference:
         }
         
         torch.save(checkpoint, checkpoint_path)
+        checkpoints_volume.commit()
         print(f"\n💾 チェックポイント保存: {checkpoint_path}")
-        
+
         # モデルを更新
         self._load_model(model_size)
         
