@@ -1645,7 +1645,7 @@ def train_model(
     
     # チェックポイント保存
     checkpoint_filename = f"neuroq_{model_size}_checkpoint.pt"
-    checkpoint_path = f"/checkpoints/{checkpoint_filename}"
+    checkpoint_path = f"/model_checkpoints/{checkpoint_filename}"
     local_path = f"checkpoints/{checkpoint_filename}"
     
     checkpoint = {
@@ -1685,19 +1685,19 @@ def train_model(
 
 @app.function(
     image=image,
-    volumes={"/checkpoints": checkpoints_volume},
+    volumes={"/model_checkpoints": checkpoints_volume},
 )
 def download_checkpoint(model_size: str = "small"):
     """
     学習済みチェックポイントをダウンロード
-    
+
     使い方:
         modal run modal_app.py::download_checkpoint --model-size small
     """
     import os
-    
+
     checkpoint_filename = f"neuroq_{model_size}_checkpoint.pt"
-    checkpoint_path = f"/checkpoints/{checkpoint_filename}"
+    checkpoint_path = f"/model_checkpoints/{checkpoint_filename}"
     
     if os.path.exists(checkpoint_path):
         with open(checkpoint_path, "rb") as f:
