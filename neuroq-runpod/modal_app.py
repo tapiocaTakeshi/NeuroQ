@@ -227,8 +227,10 @@ class NeuroQInference:
         try:
             checkpoint_path = self.checkpoint_paths.get(model_size, self.checkpoint_paths['micro'])
             
-            # Small/Largeモデル
-            if self.model_configs_available and model_size in ['small', 'large'] and self.NeuroQuantum is not None:
+            # NeuroQuantumモデル（micro/small/large共通）
+            # チェックポイントはNeuroQuantum (QBNNTransformerBlock)で学習されているため、
+            # 全モデルサイズでNeuroQuantumを使用する
+            if self.model_configs_available and self.NeuroQuantum is not None:
                 config = self.get_model_config(model_size)
                 
                 if os.path.exists(checkpoint_path):
@@ -282,8 +284,14 @@ class NeuroQInference:
                     print(f"⚠️ チェックポイントが見つかりません: {checkpoint_path}")
                     return False
             
-            # Microモデル (NeuroQuantumBrainAI)
+            # フォールバック: NeuroQuantumが利用できない場合（通常は発生しない）
+            # 注意: このフォールバックはNeuroQuantumBrainを使用しますが、
+            # 現在のチェックポイントはNeuroQuantum (QBNNTransformerBlock)で学習されているため、
+            # アーキテクチャの不一致により正常に動作しない可能性があります。
             else:
+                print("⚠️ フォールバックモード: NeuroQuantumが利用できないため、NeuroQuantumBrainを使用します")
+                print("   ⚠️ 注意: チェックポイントとアーキテクチャが異なる可能性があります")
+
                 if self.NeuroQuantumBrainAI is None:
                     print("❌ NeuroQuantumBrainAI がインポートできていません")
                     return False
@@ -339,12 +347,13 @@ class NeuroQInference:
                         dropout=0.1
                     ).to(self.device)
 
-                    # 重みをロード（キー名の互換性を保証）
+                    # 重みをロード（strict=Falseでアーキテクチャ不一致を許容）
                     state_dict = self._remap_state_dict_keys(checkpoint['model_state_dict'], self.model.model.state_dict())
-                    self.model.model.load_state_dict(state_dict)
+                    self.model.model.load_state_dict(state_dict, strict=False)
                     self.model.model.eval()
                     total_params = sum(p.numel() for p in self.model.model.parameters())
-                    print(f"✅ NeuroQuantumBrainAI (micro) ロード完了 ({total_params:,}パラメータ)")
+                    print(f"⚠️ NeuroQuantumBrainAI (フォールバック) ロード完了 ({total_params:,}パラメータ)")
+                    print(f"   ⚠️ 一部の重みが初期化されている可能性があります")
                 else:
                     print(f"⚠️ チェックポイントが見つかりません: {checkpoint_path}")
                     return False
