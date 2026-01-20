@@ -55,10 +55,11 @@ except ImportError:
 TOKENIZER_MODEL_PATH = "neuroq_tokenizer.model"
 
 # チェックポイントパス（モデルサイズ別）
+# 全モデルを/model_checkpointsから参照
 MODEL_CHECKPOINT_PATHS = {
-    'micro': "checkpoints/neuroq_tiktoken_english_checkpoint.pt",
-    'small': "checkpoints/neuroq_small_checkpoint.pt",
-    'large': "checkpoints/neuroq_large_checkpoint.pt",
+    'micro': "/model_checkpoints/neuroq_micro_checkpoint.pt",
+    'small': "/model_checkpoints/neuroq_small_checkpoint.pt",
+    'large': "/model_checkpoints/neuroq_large_checkpoint.pt",
 }
 MODEL_CHECKPOINT_PATH = MODEL_CHECKPOINT_PATHS['micro']  # デフォルト
 

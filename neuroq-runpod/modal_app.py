@@ -122,10 +122,9 @@ class NeuroQInference:
         self.tokenizer = None  # Small/Large用
         
         # チェックポイントパス
-        # micro: ローカルファイル（add_local_dirでアップロード）
-        # small/large: Modalボリューム（train_modelで保存）
+        # 全モデルをModalボリューム（/model_checkpoints）から参照
         self.checkpoint_paths = {
-            'micro': "checkpoints/neuroq_tiktoken_checkpoint.pt",
+            'micro': "/model_checkpoints/neuroq_micro_checkpoint.pt",
             'small': "/model_checkpoints/neuroq_small_checkpoint.pt",
             'large': "/model_checkpoints/neuroq_large_checkpoint.pt",
         }
