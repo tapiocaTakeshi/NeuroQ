@@ -1634,11 +1634,45 @@ def train_model(
     if dataset_ids and len(dataset_ids) > 0:
         # Hugging Faceデータセットからロード
         from datasets import load_dataset
-        
+
         for dataset_id in dataset_ids:
-            print(f"\n   🤗 Hugging Faceからデータセットをロード: {dataset_id}")
-            
+            print(f"\n   🤗 ロード中: {dataset_id}")
+
             try:
+                # oasst1_ja の場合はローカルファイルから読み込み
+                if dataset_id == "oasst1_ja":
+                    data_file_candidates = [
+                        "/root/neuroq/data/oasst1_ja_conversations.txt",
+                        "data/oasst1_ja_conversations.txt",
+                        "../data/oasst1_ja_conversations.txt",
+                    ]
+                    data_file = None
+                    for path in data_file_candidates:
+                        if os.path.exists(path):
+                            data_file = path
+                            break
+
+                    if data_file is None:
+                        print(f"   ❌ oasst1_ja: data file not found")
+                        print(f"      検索パス: {data_file_candidates}")
+                        continue
+
+                    print(f"   📖 oasst1_ja会話データ読み込み: {data_file}")
+                    with open(data_file, 'r', encoding='utf-8') as f:
+                        content = f.read()
+
+                    # 空行で区切られた会話ブロックに分割
+                    blocks = content.split('\n\n')
+                    oasst1_ja_count = 0
+                    for block in blocks:
+                        block = block.strip()
+                        if block and 'User:' in block and 'Assistant:' in block:
+                            texts.append(block)
+                            oasst1_ja_count += 1
+
+                    print(f"   ✅ oasst1_ja: {oasst1_ja_count} 会話サンプル")
+                    continue
+
                 # データセット名にサブセットが含まれる場合（例: "wikitext/wikitext-2-raw-v1"）
                 if "/" in dataset_id and dataset_id.count("/") >= 2:
                     parts = dataset_id.split("/")
