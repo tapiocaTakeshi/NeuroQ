@@ -51,6 +51,15 @@ try:
 except ImportError:
     MODEL_CONFIGS_AVAILABLE = False
 
+# BPEトークナイザー学習モジュールをインポート
+try:
+    from bpe_tokenizer_trainer import BPETokenizerTrainer, TrainedBPETokenizer, train_bpe_tokenizer
+    BPE_TRAINER_AVAILABLE = True
+    print("✅ bpe_tokenizer_trainer.py をインポートしました")
+except ImportError as e:
+    BPE_TRAINER_AVAILABLE = False
+    print(f"⚠️ bpe_tokenizer_trainer.py のインポートに失敗: {e}")
+
 # トークナイザーモデルのパス
 TOKENIZER_MODEL_PATH = "neuroq_tokenizer.model"
 
@@ -62,6 +71,14 @@ MODEL_CHECKPOINT_PATHS = {
     'large': "/model_checkpoints/neuroq_large_checkpoint.pt",
 }
 MODEL_CHECKPOINT_PATH = MODEL_CHECKPOINT_PATHS['micro']  # デフォルト
+
+# 学習済みBPEトークナイザーの保存パス
+TRAINED_TOKENIZER_PATHS = {
+    'default': "/model_checkpoints/neuroq_bpe_tokenizer.json",
+    'micro': "/model_checkpoints/neuroq_bpe_tokenizer_micro.json",
+    'small': "/model_checkpoints/neuroq_bpe_tokenizer_small.json",
+    'large': "/model_checkpoints/neuroq_bpe_tokenizer_large.json",
+}
 
 # ========================================
 # グローバル変数（起動時は全てNone）
@@ -564,10 +581,12 @@ def generate_text(prompt: str, max_length: int = 50,
 def handler(job):
     """
     RunPod Serverless Handler
-    
+
     重要: health checkは即座に返す！
     """
-    global model, is_initialized
+    global model, is_initialized, current_model_size, model_config
+    global conversation_sessions, session_system_prompts
+    global pretrain_process, pretrain_status
     
     job_input = job.get("input", {})
     action = job_input.get("action", "generate")
@@ -652,8 +671,6 @@ def handler(job):
     # PRETRAIN_OPENAI（OpenAIデータセット事前学習）
     # ========================================
     if action == "pretrain_openai":
-        global pretrain_process, pretrain_status
-
         # 既に実行中の場合
         if pretrain_status == "running":
             return {
@@ -750,6 +767,94 @@ def handler(job):
         }
 
     # ========================================
+    # TRAIN_TOKENIZER（BPEトークナイザー学習）
+    # ========================================
+    if action == "train_tokenizer":
+        """
+        BPEトークナイザー学習アクション
+
+        tiktoken スタイルの BPE トークナイザーを学習データから学習します。
+
+        パラメータ:
+        - vocab_size: 語彙サイズ（デフォルト: 32000）
+        - min_frequency: 最小出現頻度（デフォルト: 2）
+        - texts: 学習テキスト（省略時はデフォルトデータ）
+        - model_size: 保存先のモデルサイズ（'default', 'micro', 'small', 'large'）
+        """
+
+        if not BPE_TRAINER_AVAILABLE:
+            return {
+                "status": "error",
+                "error": "BPE tokenizer trainer not available. Install 'tokenizers' library."
+            }
+
+        vocab_size = job_input.get("vocab_size", 32000)
+        min_frequency = job_input.get("min_frequency", 2)
+        texts = job_input.get("texts", None)
+        model_size = job_input.get("model_size", "default")
+
+        print(f"🔤 BPEトークナイザー学習開始")
+        print(f"   語彙サイズ: {vocab_size:,}")
+        print(f"   最小出現頻度: {min_frequency}")
+
+        try:
+            # 学習データ取得
+            if texts is None:
+                print("📚 デフォルト学習データを使用")
+                texts = get_training_data()
+
+            print(f"📊 学習データ: {len(texts)} サンプル")
+
+            # トークナイザー学習
+            trainer = BPETokenizerTrainer(
+                vocab_size=vocab_size,
+                min_frequency=min_frequency,
+            )
+            trainer.train(texts)
+
+            # 保存
+            save_path = TRAINED_TOKENIZER_PATHS.get(model_size, TRAINED_TOKENIZER_PATHS['default'])
+            os.makedirs(os.path.dirname(save_path), exist_ok=True)
+            trainer.save(save_path)
+
+            # テスト
+            test_texts = [
+                "こんにちは",
+                "量子コンピュータ",
+                "Hello World",
+            ]
+
+            test_results = []
+            for text in test_texts:
+                tokens = trainer.encode(text)
+                test_results.append({
+                    "text": text,
+                    "token_count": len(tokens),
+                    "tokens": trainer.get_tokens(text)[:10],  # 最初の10トークン
+                })
+
+            print(f"✅ トークナイザー学習完了！")
+            print(f"💾 保存先: {save_path}")
+
+            return {
+                "status": "success",
+                "message": "Tokenizer training completed",
+                "vocab_size": trainer.get_vocab_size(),
+                "requested_vocab_size": vocab_size,
+                "num_samples": len(texts),
+                "save_path": save_path,
+                "test_results": test_results,
+            }
+
+        except Exception as e:
+            import traceback
+            traceback.print_exc()
+            return {
+                "status": "error",
+                "error": str(e)
+            }
+
+    # ========================================
     # TRAIN（学習 - チェックポイント保存付き）
     # ========================================
     if action == "train":
@@ -763,15 +868,21 @@ def handler(job):
         - lr: 学習率
         - seq_length: シーケンス長
         - texts: 学習テキスト（省略時はデフォルトデータ）
+        - train_tokenizer: トークナイザーも学習するか（デフォルト: False）
+        - tokenizer_vocab_size: トークナイザー語彙サイズ（デフォルト: 32000）
+        - use_custom_tokenizer: カスタムトークナイザーを使用するか（デフォルト: False）
         """
-        
+
         model_size = job_input.get("model_size", "micro")
         epochs = job_input.get("epochs", 30)
         batch_size = job_input.get("batch_size", 8)
         lr = job_input.get("lr", 0.0005)
         seq_length = job_input.get("seq_length", 64)
         texts = job_input.get("texts", None)
-        
+        train_tokenizer_flag = job_input.get("train_tokenizer", False)
+        tokenizer_vocab_size = job_input.get("tokenizer_vocab_size", 32000)
+        use_custom_tokenizer = job_input.get("use_custom_tokenizer", False)
+
         # モデルサイズに応じて設定を調整
         if model_size == 'small':
             batch_size = job_input.get("batch_size", 4)
@@ -779,23 +890,71 @@ def handler(job):
         elif model_size == 'large':
             batch_size = job_input.get("batch_size", 2)
             lr = job_input.get("lr", 0.0002)
-        
+
         print(f"📦 学習モデルサイズ: {model_size.upper()}")
         
         # Small/LargeモデルはNeuroQuantumを使用
         if MODEL_CONFIGS_AVAILABLE and model_size in ['small', 'large'] and NeuroQuantum is not None:
             print(f"🔄 {model_size.upper()}モデルで学習開始...")
-            
+
             try:
-                import tiktoken
-                from tiktoken_tokenizer import TikTokenTokenizer
-                
+                # 学習データ取得（トークナイザー学習に必要）
+                if texts is None:
+                    texts = get_training_data()
+
                 # トークナイザー初期化
-                tokenizer = TikTokenTokenizer(encoding_name="o200k_base")
-                
+                tokenizer = None
+                tokenizer_type = 'tiktoken'
+                custom_tokenizer_path = None
+
+                # カスタムトークナイザー学習
+                if train_tokenizer_flag and BPE_TRAINER_AVAILABLE:
+                    print(f"🔤 カスタムBPEトークナイザーを学習中...")
+                    print(f"   語彙サイズ: {tokenizer_vocab_size:,}")
+
+                    trainer = BPETokenizerTrainer(
+                        vocab_size=tokenizer_vocab_size,
+                        min_frequency=2,
+                    )
+                    trainer.train(texts)
+
+                    # 保存
+                    custom_tokenizer_path = TRAINED_TOKENIZER_PATHS.get(model_size, TRAINED_TOKENIZER_PATHS['default'])
+                    os.makedirs(os.path.dirname(custom_tokenizer_path), exist_ok=True)
+                    trainer.save(custom_tokenizer_path)
+
+                    # カスタムトークナイザーを使用
+                    tokenizer = TrainedBPETokenizer(custom_tokenizer_path)
+                    tokenizer_type = 'custom_bpe'
+                    print(f"✅ カスタムトークナイザー学習完了: {custom_tokenizer_path}")
+
+                # 既存のカスタムトークナイザーを使用
+                elif use_custom_tokenizer and BPE_TRAINER_AVAILABLE:
+                    custom_tokenizer_path = TRAINED_TOKENIZER_PATHS.get(model_size, TRAINED_TOKENIZER_PATHS['default'])
+                    if os.path.exists(custom_tokenizer_path):
+                        tokenizer = TrainedBPETokenizer(custom_tokenizer_path)
+                        tokenizer_type = 'custom_bpe'
+                        print(f"✅ カスタムトークナイザーを読み込み: {custom_tokenizer_path}")
+                    else:
+                        print(f"⚠️ カスタムトークナイザーが見つかりません: {custom_tokenizer_path}")
+                        print(f"   tiktoken を使用します")
+
+                # デフォルト: tiktoken
+                if tokenizer is None:
+                    import tiktoken
+                    from tiktoken_tokenizer import TikTokenTokenizer
+                    tokenizer = TikTokenTokenizer(encoding_name="o200k_base")
+                    tokenizer_type = 'tiktoken'
+
                 # モデル設定を取得
                 config = get_model_config(model_size)
                 checkpoint_path = MODEL_CHECKPOINT_PATHS.get(model_size, MODEL_CHECKPOINT_PATHS['micro'])
+
+                # カスタムトークナイザー使用時は vocab_size を更新
+                if tokenizer_type == 'custom_bpe':
+                    config = config.copy()  # 元の設定を変更しない
+                    config['vocab_size'] = tokenizer.vocab_size
+                    print(f"📊 カスタムトークナイザー語彙サイズ: {tokenizer.vocab_size:,}")
                 
                 print(f"📋 モデル設定: {config['name']}")
                 print(f"   embed_dim: {config['embed_dim']}")
@@ -815,11 +974,7 @@ def handler(job):
                 
                 total_params = sum(p.numel() for p in train_model.parameters())
                 print(f"   総パラメータ数: {total_params:,} ({total_params/1e6:.1f}M)")
-                
-                # 学習データ
-                if texts is None:
-                    texts = get_training_data()
-                
+
                 print(f"🔄 データトークン化中... ({len(texts)}サンプル)")
                 
                 # トークン化
@@ -892,25 +1047,35 @@ def handler(job):
                     print(f"   ✅ Epoch {epoch+1}/{epochs} 完了: Loss={avg_loss:.4f}")
                 
                 print(f"\n✅ 学習完了！ベストLoss: {best_loss:.4f}")
-                
+
                 # チェックポイント保存
                 os.makedirs(os.path.dirname(checkpoint_path), exist_ok=True)
-                
-                checkpoint = {
-                    'model_state_dict': train_model.state_dict(),
-                    'config': config,
-                    'tokenizer': {
+
+                # トークナイザー情報を作成
+                if tokenizer_type == 'custom_bpe':
+                    tokenizer_info = {
+                        'type': 'custom_bpe',
+                        'path': custom_tokenizer_path,
+                        'vocab_size': tokenizer.vocab_size,
+                    }
+                else:
+                    tokenizer_info = {
                         'type': 'tiktoken',
                         'encoding': 'o200k_base',
                         'vocab_size': tokenizer.vocab_size,
-                    },
+                    }
+
+                checkpoint = {
+                    'model_state_dict': train_model.state_dict(),
+                    'config': config,
+                    'tokenizer': tokenizer_info,
                     'model_size': model_size,
                 }
-                
+
                 torch.save(checkpoint, checkpoint_path)
                 print(f"💾 チェックポイント保存: {checkpoint_path}")
-                
-                return {
+
+                result = {
                     "status": "success",
                     "message": f"Training completed ({epochs} epochs)",
                     "model_size": model_size,
@@ -918,8 +1083,15 @@ def handler(job):
                     "parameters": total_params,
                     "best_loss": best_loss,
                     "checkpoint_path": checkpoint_path,
-                    "num_samples": len(texts)
+                    "num_samples": len(texts),
+                    "tokenizer_type": tokenizer_type,
                 }
+
+                if tokenizer_type == 'custom_bpe':
+                    result["tokenizer_path"] = custom_tokenizer_path
+                    result["tokenizer_vocab_size"] = tokenizer.vocab_size
+
+                return result
                 
             except Exception as e:
                 import traceback
@@ -1004,7 +1176,6 @@ def handler(job):
     # CLEAR_SESSION（会話履歴クリア）
     # ========================================
     if action == "clear_session":
-        global conversation_sessions, session_system_prompts
         session_id = job_input.get("session_id", "default")
         clear_system_prompt = job_input.get("clear_system_prompt", True)
 
@@ -1031,7 +1202,6 @@ def handler(job):
     # SET_SYSTEM_PROMPT（システムプロンプト設定）
     # ========================================
     if action == "set_system_prompt":
-        global session_system_prompts
         session_id = job_input.get("session_id", "default")
         system_prompt = job_input.get("system_prompt")
 
