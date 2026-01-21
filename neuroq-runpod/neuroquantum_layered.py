@@ -621,7 +621,16 @@ class NeuroQuantumEmbedding(nn.Module):
             texts: OpenAI Embedding使用時に必要。トークンIDに対応するテキストのリスト
         """
         batch_size, seq_len = token_ids.shape
-        
+
+        # Bounds checking to prevent CUDA gather index out of bounds error
+        # Clamp token_ids to valid range [0, vocab_size-1]
+        token_ids = token_ids.clamp(0, self.config.vocab_size - 1)
+
+        # Clamp sequence length to max_seq_len
+        if seq_len > self.config.max_seq_len:
+            token_ids = token_ids[:, :self.config.max_seq_len]
+            seq_len = self.config.max_seq_len
+
         if self.use_openai_embedding and self.openai_wrapper is not None:
             if texts is None:
                 if self.tokenizer is not None:
@@ -663,12 +672,14 @@ class NeuroQuantumEmbedding(nn.Module):
         
         # 位置埋め込み
         positions = torch.arange(seq_len, device=token_ids.device).unsqueeze(0).expand(batch_size, -1)
+        # Clamp positions to valid range [0, max_seq_len-1]
+        positions = positions.clamp(0, self.config.max_seq_len - 1)
         pos_embeds = self.position_embedding(positions)
-        
+
         # 合成
         embeds = text_embeds + pos_embeds
         embeds = self.dropout(embeds)
-        
+
         return embeds
 
 
@@ -842,7 +853,16 @@ class NeuroQuantum(nn.Module):
         logger = logging.getLogger(__name__)
         
         batch, seq = token_ids.shape
-        
+
+        # Bounds checking to prevent CUDA gather index out of bounds error
+        # Clamp token_ids to valid range [0, vocab_size-1]
+        token_ids = token_ids.clamp(0, self.config.vocab_size - 1)
+
+        # Clamp sequence length to max_seq_len
+        if seq > self.config.max_seq_len:
+            token_ids = token_ids[:, :self.config.max_seq_len]
+            seq = self.config.max_seq_len
+
         if verbose:
             logger.info("=" * 70)
             logger.info("🧠 NeuroQuantum フォワードパス開始")
@@ -851,7 +871,7 @@ class NeuroQuantum(nn.Module):
             logger.info(f"  - 形状: (batch={batch}, seq={seq})")
             logger.info(f"  - トークンID例 (先頭5): {token_ids[0, :min(5, seq)].tolist()}")
             logger.info(f"  - dtype: {token_ids.dtype}, device: {token_ids.device}")
-        
+
         # ========================================
         # [1] トークン埋め込み層 + [2] 位置埋め込み層
         # ========================================
@@ -876,6 +896,8 @@ class NeuroQuantum(nn.Module):
             
             # [2] 位置埋め込み層
             positions = torch.arange(seq, device=token_ids.device).unsqueeze(0).expand(batch, -1)
+            # Clamp positions to valid range [0, max_seq_len-1]
+            positions = positions.clamp(0, self.config.max_seq_len - 1)
             pos_embeds = self.position_embedding(positions)
             
             if verbose:
