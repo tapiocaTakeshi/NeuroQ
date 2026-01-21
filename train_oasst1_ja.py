@@ -385,10 +385,18 @@ def train_model(
     return model, tokenizer
 
 
-def test_generation(model, tokenizer):
-    """生成テスト"""
+def test_generation(model, tokenizer, temperature: float = 0.5):
+    """
+    生成テスト
+
+    Args:
+        model: 学習済みモデル
+        tokenizer: トークナイザー
+        temperature: 生成温度（低いほど安定、推奨: 0.3-0.7）
+    """
     print("\n" + "=" * 70)
     print("生成テスト")
+    print(f"生成パラメータ: temperature={temperature}, top_k=40, top_p=0.9")
     print("=" * 70)
 
     test_prompts = [
@@ -405,10 +413,11 @@ def test_generation(model, tokenizer):
         print(f"\n入力: {prompt}")
         tokens = tokenizer.encode(prompt)
 
+        # 安定した生成のための推奨パラメータ
         generated = model.generate(
             prompt_tokens=tokens,
-            max_length=100,
-            temperature=0.7,
+            max_length=80,  # 短めに制限
+            temperature=temperature,  # 低温度で安定性向上
             top_k=40,
             top_p=0.9,
             eos_id=tokenizer.eos_id
@@ -417,16 +426,43 @@ def test_generation(model, tokenizer):
         output = tokenizer.decode(generated)
         print(f"出力: {output}")
 
+    print("\n" + "-" * 70)
+    print("ヒント: 文字化けが発生する場合は temperature を 0.3 程度に下げてください")
+    print("        python train_oasst1_ja.py --use-cleaned で再学習も効果的です")
+    print("-" * 70)
+
 
 def main():
+    import argparse
+
+    parser = argparse.ArgumentParser(description="oasst1-89k-ja User/Assistant 形式データ学習")
+    parser.add_argument("--data", type=str, default=None, help="学習データファイルパス")
+    parser.add_argument("--use-cleaned", action="store_true", help="クリーニング済みデータを使用")
+    parser.add_argument("--epochs", type=int, default=5, help="エポック数")
+    parser.add_argument("--batch-size", type=int, default=8, help="バッチサイズ")
+    parser.add_argument("--seq-len", type=int, default=128, help="シーケンス長")
+    parser.add_argument("--lr", type=float, default=0.0003, help="学習率")
+    args = parser.parse_args()
+
     print("=" * 70)
     print("oasst1-89k-ja User/Assistant 形式データ学習")
     print("=" * 70)
 
     # 設定
-    data_path = "data/oasst1_ja_conversations.txt"
+    if args.data:
+        data_path = args.data
+    elif args.use_cleaned:
+        # クリーニング済みデータを優先
+        data_path = "data/combined_clean_data.txt"
+        if not os.path.exists(data_path):
+            data_path = "data/oasst1_ja_cleaned.txt"
+    else:
+        data_path = "data/oasst1_ja_conversations.txt"
+
     tokenizer_path = "neuroq_tokenizer_oasst1_ja.model"
     checkpoint_path = "checkpoints/oasst1_ja_model.pt"
+
+    print(f"学習データ: {data_path}")
 
     # データ読み込み
     conversations = load_conversation_data(data_path)
@@ -445,14 +481,14 @@ def main():
     model, tokenizer = train_model(
         conversations=conversations,
         tokenizer=tokenizer,
-        epochs=5,
-        batch_size=8,
-        seq_len=128,
-        lr=0.0003,
+        epochs=args.epochs,
+        batch_size=args.batch_size,
+        seq_len=args.seq_len,
+        lr=args.lr,
         checkpoint_path=checkpoint_path
     )
 
-    # 生成テスト
+    # 生成テスト（低温度で安定性確認）
     test_generation(model, tokenizer)
 
     print("\n完了!")
