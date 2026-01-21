@@ -513,11 +513,13 @@ class NeuroQInference:
             next_token_logits = logits[0, -1, :].clone()
             
             # 繰り返しペナルティを適用
+            vocab_size = next_token_logits.size(-1)
             for token_id in set(generated[-50:]):  # 最近50トークンに対してペナルティ
-                if next_token_logits[token_id] > 0:
-                    next_token_logits[token_id] /= repetition_penalty
-                else:
-                    next_token_logits[token_id] *= repetition_penalty
+                if token_id < vocab_size:  # bounds check to prevent CUDA gather error
+                    if next_token_logits[token_id] > 0:
+                        next_token_logits[token_id] /= repetition_penalty
+                    else:
+                        next_token_logits[token_id] *= repetition_penalty
             
             # n-gram繰り返し防止
             if no_repeat_ngram_size > 0 and len(generated) >= no_repeat_ngram_size:
@@ -527,7 +529,8 @@ class NeuroQInference:
                 for i in range(len(generated) - no_repeat_ngram_size):
                     if tuple(generated[i:i+no_repeat_ngram_size-1]) == ngram_prefix:
                         banned_token = generated[i + no_repeat_ngram_size - 1]
-                        next_token_logits[banned_token] = float('-inf')
+                        if banned_token < vocab_size:  # bounds check to prevent CUDA gather error
+                            next_token_logits[banned_token] = float('-inf')
             
             # 次のトークンを予測
             probs = torch.softmax(next_token_logits / temperature, dim=-1)

@@ -943,9 +943,11 @@ class NeuroQuantumBrain(nn.Module):
                 next_logits = (logits[0, -1] / temperature).detach()
 
                 # 繰り返しペナルティ
+                vocab_size = next_logits.size(-1)
                 if len(generated) > 0:
                     for prev_token in set(generated[-20:]):
-                        next_logits[prev_token] /= repetition_penalty
+                        if prev_token < vocab_size:  # bounds check to prevent CUDA gather error
+                            next_logits[prev_token] /= repetition_penalty
 
                 # 量子ゆらぎを追加（制約された範囲で）
                 if len(self.blocks) > 0:
