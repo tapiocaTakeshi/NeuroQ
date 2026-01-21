@@ -226,13 +226,36 @@ class NeuroQInference:
         """モデルをロード"""
         import torch
         import os
-        
+        import gc
+
         # 既にロード済みなら何もしない
         if self.is_initialized and self.current_model_size == model_size:
             return True
-        
+
         print(f"🔄 モデルロード開始 ({model_size.upper()})...")
-        
+
+        # 既存のモデルがある場合はメモリを解放
+        if self.model is not None:
+            print("🗑️ 既存モデルのメモリを解放中...")
+            del self.model
+            self.model = None
+        if self.tokenizer is not None:
+            del self.tokenizer
+            self.tokenizer = None
+        self.is_initialized = False
+        gc.collect()
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+            torch.cuda.synchronize()
+        print("✅ メモリ解放完了")
+
+        # GPUメモリ状態を表示
+        if torch.cuda.is_available():
+            total_mem = torch.cuda.get_device_properties(0).total_memory / (1024**3)
+            allocated = torch.cuda.memory_allocated(0) / (1024**3)
+            reserved = torch.cuda.memory_reserved(0) / (1024**3)
+            print(f"📊 GPU Memory: Total={total_mem:.2f}GB, Allocated={allocated:.2f}GB, Reserved={reserved:.2f}GB")
+
         try:
             checkpoint_path = self.checkpoint_paths.get(model_size, self.checkpoint_paths['micro'])
             
