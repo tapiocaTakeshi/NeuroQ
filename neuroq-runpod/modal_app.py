@@ -961,9 +961,34 @@ class NeuroQInference:
         config = get_model_config(model_size)
         model_vocab_size = config['vocab_size']
 
+        # oasst1_ja がdataset_idsに含まれているかチェック
+        use_oasst1_ja = dataset_ids and "oasst1_ja" in dataset_ids
+
         # SentencePieceトークナイザー
         from neuroquantum_layered import NeuroQuantumTokenizer
-        tokenizer_path = "/root/neuroq/neuroq_tokenizer.model"
+        if use_oasst1_ja:
+            # oasst1_ja用のトークナイザーを使用
+            tokenizer_candidates = [
+                "/root/neuroq/neuroq_tokenizer_oasst1_ja.model",
+                "neuroq_tokenizer_oasst1_ja.model",
+                "../neuroq_tokenizer_oasst1_ja.model",
+            ]
+            tokenizer_path = None
+            for path in tokenizer_candidates:
+                if os.path.exists(path):
+                    tokenizer_path = path
+                    break
+            if tokenizer_path is None:
+                tokenizer_path = "/root/neuroq/neuroq_tokenizer.model"
+                print(f"⚠️ oasst1_ja用トークナイザーが見つからないため、デフォルトを使用")
+            else:
+                print(f"🔤 oasst1_ja用トークナイザー: {tokenizer_path}")
+            # oasst1_ja用のデフォルト設定
+            seq_length = 128
+            if lr is None or lr == 0.0005:
+                lr = 0.0003
+        else:
+            tokenizer_path = "/root/neuroq/neuroq_tokenizer.model"
         tokenizer = NeuroQuantumTokenizer(vocab_size=model_vocab_size, model_file=tokenizer_path)
         print(f"\n📚 SentencePieceトークナイザー: 語彙サイズ {tokenizer.vocab_size:,}")
         
@@ -973,10 +998,44 @@ class NeuroQInference:
         
         if dataset_ids and len(dataset_ids) > 0:
             from datasets import load_dataset
-            
+
             for dataset_id in dataset_ids:
                 print(f"   🤗 ロード中: {dataset_id}")
                 try:
+                    # oasst1_ja の場合はローカルファイルから読み込み
+                    if dataset_id == "oasst1_ja":
+                        data_file_candidates = [
+                            "/root/neuroq/data/oasst1_ja_conversations.txt",
+                            "data/oasst1_ja_conversations.txt",
+                            "../data/oasst1_ja_conversations.txt",
+                        ]
+                        data_file = None
+                        for path in data_file_candidates:
+                            if os.path.exists(path):
+                                data_file = path
+                                break
+
+                        if data_file is None:
+                            print(f"   ❌ oasst1_ja: data file not found")
+                            print(f"      検索パス: {data_file_candidates}")
+                            continue
+
+                        print(f"   📖 oasst1_ja会話データ読み込み: {data_file}")
+                        with open(data_file, 'r', encoding='utf-8') as f:
+                            content = f.read()
+
+                        # 空行で区切られた会話ブロックに分割
+                        blocks = content.split('\n\n')
+                        oasst1_ja_count = 0
+                        for block in blocks:
+                            block = block.strip()
+                            if block and 'User:' in block and 'Assistant:' in block:
+                                texts.append(block)
+                                oasst1_ja_count += 1
+
+                        print(f"   ✅ oasst1_ja: {oasst1_ja_count} 会話サンプル")
+                        continue
+
                     if "/" in dataset_id and dataset_id.count("/") >= 2:
                         parts = dataset_id.split("/")
                         ds_name = "/".join(parts[:-1])
