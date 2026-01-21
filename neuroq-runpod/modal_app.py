@@ -1002,12 +1002,15 @@ class NeuroQInference:
             for dataset_id in dataset_ids:
                 print(f"   🤗 ロード中: {dataset_id}")
                 try:
-                    # oasst1_ja の場合はローカルファイルから読み込み
+                    # oasst1_ja の場合はローカルファイルから読み込み（クリーニング済みデータ優先）
                     if dataset_id == "oasst1_ja":
                         data_file_candidates = [
+                            "/root/neuroq/data/combined_clean_data.txt",
+                            "/root/neuroq/data/oasst1_ja_cleaned.txt",
                             "/root/neuroq/data/oasst1_ja_conversations.txt",
+                            "data/combined_clean_data.txt",
+                            "data/oasst1_ja_cleaned.txt",
                             "data/oasst1_ja_conversations.txt",
-                            "../data/oasst1_ja_conversations.txt",
                         ]
                         data_file = None
                         for path in data_file_candidates:
@@ -1639,12 +1642,15 @@ def train_model(
             print(f"\n   🤗 ロード中: {dataset_id}")
 
             try:
-                # oasst1_ja の場合はローカルファイルから読み込み
+                # oasst1_ja の場合はローカルファイルから読み込み（クリーニング済みデータ優先）
                 if dataset_id == "oasst1_ja":
                     data_file_candidates = [
+                        "/root/neuroq/data/combined_clean_data.txt",
+                        "/root/neuroq/data/oasst1_ja_cleaned.txt",
                         "/root/neuroq/data/oasst1_ja_conversations.txt",
+                        "data/combined_clean_data.txt",
+                        "data/oasst1_ja_cleaned.txt",
                         "data/oasst1_ja_conversations.txt",
-                        "../data/oasst1_ja_conversations.txt",
                     ]
                     data_file = None
                     for path in data_file_candidates:
