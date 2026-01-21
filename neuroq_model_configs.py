@@ -36,7 +36,7 @@ NEUROQ_SMALL = {
     'vocab_size': 200019,      # o200k_base (GPT-4o トークナイザー)
     'embed_dim': 1536,         # text-embedding-3-small と同じ
     'num_heads': 4,            # 固定
-    'num_layers': 3,           # 固定
+    'num_layers': 2,           # 固定
     'max_seq_len': 512,
     'dropout': 0.1,
 }
@@ -47,7 +47,7 @@ NEUROQ_LARGE = {
     'vocab_size': 200019,      # o200k_base (GPT-4o トークナイザー)
     'embed_dim': 3072,         # text-embedding-3-large と同じ
     'num_heads': 4,            # 固定
-    'num_layers': 3,           # 固定
+    'num_layers': 2,           # 固定
     'max_seq_len': 512,
     'dropout': 0.1,
 }
