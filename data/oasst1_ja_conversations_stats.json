@@ -1,0 +1,8 @@
+{
+  "total_conversations": 10279,
+  "total_characters": 7089316,
+  "avg_conversation_length": 689.6892693841813,
+  "file_size_bytes": 18008091,
+  "format": "User/Assistant",
+  "source": "kunishou/oasst1-89k-ja"
+}
