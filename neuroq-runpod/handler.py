@@ -1171,6 +1171,269 @@ def handler(job):
                 }
     
     # ========================================
+    # TRAIN_OASST1_JA（日本語会話データで学習）
+    # ========================================
+    if action == "train_oasst1_ja":
+        """
+        kunishou/oasst1-89k-ja を変換した User/Assistant 形式のデータで学習
+
+        パラメータ:
+        - data_file: 会話データファイルパス（デフォルト: data/oasst1_ja_conversations.txt）
+        - tokenizer_model: トークナイザーモデルパス（デフォルト: neuroq_tokenizer_oasst1_ja.model）
+        - epochs: エポック数（デフォルト: 5）
+        - batch_size: バッチサイズ（デフォルト: 8）
+        - seq_length: シーケンス長（デフォルト: 128）
+        - lr: 学習率（デフォルト: 0.0003）
+        - embed_dim: 埋め込み次元（デフォルト: 256）
+        - num_heads: アテンションヘッド数（デフォルト: 4）
+        - num_layers: レイヤー数（デフォルト: 4）
+        - checkpoint_path: チェックポイント保存先（デフォルト: /model_checkpoints/oasst1_ja_model.pt）
+        """
+        import sentencepiece as spm
+
+        # パラメータ取得
+        data_file = job_input.get("data_file", "../data/oasst1_ja_conversations.txt")
+        tokenizer_model = job_input.get("tokenizer_model", "../neuroq_tokenizer_oasst1_ja.model")
+        epochs = job_input.get("epochs", 5)
+        batch_size = job_input.get("batch_size", 8)
+        seq_length = job_input.get("seq_length", 128)
+        lr = job_input.get("lr", 0.0003)
+        embed_dim = job_input.get("embed_dim", 256)
+        num_heads = job_input.get("num_heads", 4)
+        num_layers = job_input.get("num_layers", 4)
+        ff_dim = job_input.get("ff_dim", 512)
+        checkpoint_path = job_input.get("checkpoint_path", "/model_checkpoints/oasst1_ja_model.pt")
+
+        print("=" * 70)
+        print("日本語会話データ (oasst1-89k-ja) で学習開始")
+        print("=" * 70)
+
+        try:
+            # 会話データ読み込み
+            print(f"\n会話データ読み込み: {data_file}")
+
+            if not os.path.exists(data_file):
+                return {
+                    "status": "error",
+                    "error": f"Data file not found: {data_file}"
+                }
+
+            with open(data_file, 'r', encoding='utf-8') as f:
+                content = f.read()
+
+            # 空行で区切られた会話ブロックに分割
+            conversations = []
+            blocks = content.split('\n\n')
+            for block in blocks:
+                block = block.strip()
+                if block and 'User:' in block and 'Assistant:' in block:
+                    conversations.append(block)
+
+            print(f"  {len(conversations)} 個の会話を読み込みました")
+
+            if not conversations:
+                return {
+                    "status": "error",
+                    "error": "No valid conversations found in data file"
+                }
+
+            # トークナイザー読み込み
+            print(f"\nトークナイザー読み込み: {tokenizer_model}")
+
+            if not os.path.exists(tokenizer_model):
+                return {
+                    "status": "error",
+                    "error": f"Tokenizer model not found: {tokenizer_model}"
+                }
+
+            sp = spm.SentencePieceProcessor()
+            sp.load(tokenizer_model)
+            vocab_size = sp.get_piece_size()
+            eos_id = sp.eos_id()
+
+            print(f"  語彙サイズ: {vocab_size}")
+
+            # データ準備
+            print("\nデータ準備...")
+            all_tokens = []
+            for conv in conversations:
+                tokens = sp.encode(conv, out_type=int)
+                all_tokens.extend(tokens)
+                all_tokens.append(eos_id)
+
+            all_tokens = torch.tensor(all_tokens, dtype=torch.long)
+            print(f"  総トークン数: {len(all_tokens):,}")
+
+            # シーケンス作成
+            sequences = []
+            step = max(1, seq_length // 2)
+            for i in range(0, len(all_tokens) - seq_length - 1, step):
+                x = all_tokens[i:i + seq_length]
+                y = all_tokens[i + 1:i + seq_length + 1]
+                if len(x) == seq_length and len(y) == seq_length:
+                    sequences.append((x, y))
+
+            print(f"  シーケンス数: {len(sequences):,}")
+
+            # モデル作成
+            print("\nモデル構築...")
+            import torch.nn as nn
+
+            class SimpleTransformerForAPI(nn.Module):
+                def __init__(self, vocab_size, embed_dim, num_heads, num_layers, ff_dim, max_seq_len, dropout=0.1):
+                    super().__init__()
+                    self.vocab_size = vocab_size
+                    self.embed_dim = embed_dim
+                    self.token_embedding = nn.Embedding(vocab_size, embed_dim)
+                    self.position_embedding = nn.Embedding(max_seq_len, embed_dim)
+                    encoder_layer = nn.TransformerEncoderLayer(
+                        d_model=embed_dim, nhead=num_heads, dim_feedforward=ff_dim,
+                        dropout=dropout, activation='gelu', batch_first=True
+                    )
+                    self.transformer = nn.TransformerEncoder(encoder_layer, num_layers=num_layers)
+                    self.layer_norm = nn.LayerNorm(embed_dim)
+                    self.output_layer = nn.Linear(embed_dim, vocab_size)
+                    self._init_weights()
+
+                def _init_weights(self):
+                    nn.init.normal_(self.token_embedding.weight, std=0.02)
+                    nn.init.normal_(self.position_embedding.weight, std=0.02)
+                    nn.init.normal_(self.output_layer.weight, std=0.02)
+                    nn.init.zeros_(self.output_layer.bias)
+
+                def forward(self, x):
+                    batch_size, seq_len = x.shape
+                    device = x.device
+                    positions = torch.arange(seq_len, device=device).unsqueeze(0).expand(batch_size, -1)
+                    x = self.token_embedding(x) + self.position_embedding(positions)
+                    mask = torch.triu(torch.ones(seq_len, seq_len, device=device), diagonal=1)
+                    mask = mask.masked_fill(mask == 1, float('-inf'))
+                    x = self.transformer(x, mask=mask)
+                    x = self.layer_norm(x)
+                    return self.output_layer(x)
+
+            train_model = SimpleTransformerForAPI(
+                vocab_size=vocab_size,
+                embed_dim=embed_dim,
+                num_heads=num_heads,
+                num_layers=num_layers,
+                ff_dim=ff_dim,
+                max_seq_len=seq_length + 32,
+                dropout=0.1
+            ).to(DEVICE)
+
+            num_params = sum(p.numel() for p in train_model.parameters() if p.requires_grad)
+            print(f"  総パラメータ数: {num_params:,}")
+
+            # 学習設定
+            optimizer = torch.optim.AdamW(train_model.parameters(), lr=lr, weight_decay=0.01)
+            scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=epochs)
+            criterion = nn.CrossEntropyLoss()
+
+            # 学習ループ
+            print(f"\n学習ループ開始...")
+            print(f"  エポック数: {epochs}")
+            print(f"  バッチサイズ: {batch_size}")
+            print(f"  シーケンス長: {seq_length}")
+            print(f"  学習率: {lr}")
+
+            import numpy as np
+            best_loss = float('inf')
+            training_log = []
+
+            for epoch in range(epochs):
+                train_model.train()
+                total_loss = 0
+                num_batches = 0
+
+                indices = np.random.permutation(len(sequences))
+
+                for i in range(0, len(sequences), batch_size):
+                    batch_indices = indices[i:i + batch_size]
+                    if len(batch_indices) == 0:
+                        continue
+
+                    x_batch = torch.stack([sequences[idx][0] for idx in batch_indices]).to(DEVICE)
+                    y_batch = torch.stack([sequences[idx][1] for idx in batch_indices]).to(DEVICE)
+
+                    optimizer.zero_grad()
+                    logits = train_model(x_batch)
+
+                    loss = criterion(
+                        logits.view(-1, vocab_size),
+                        y_batch.view(-1)
+                    )
+
+                    loss.backward()
+                    torch.nn.utils.clip_grad_norm_(train_model.parameters(), 1.0)
+                    optimizer.step()
+
+                    total_loss += loss.item()
+                    num_batches += 1
+
+                scheduler.step()
+                avg_loss = total_loss / max(1, num_batches)
+                training_log.append({"epoch": epoch + 1, "loss": avg_loss})
+
+                print(f"  Epoch {epoch + 1:3d}/{epochs}: Loss = {avg_loss:.4f}")
+
+                if avg_loss < best_loss:
+                    best_loss = avg_loss
+
+            # チェックポイント保存
+            os.makedirs(os.path.dirname(checkpoint_path), exist_ok=True)
+
+            checkpoint = {
+                'model_state_dict': train_model.state_dict(),
+                'config': {
+                    'vocab_size': vocab_size,
+                    'embed_dim': embed_dim,
+                    'num_heads': num_heads,
+                    'num_layers': num_layers,
+                    'ff_dim': ff_dim,
+                    'max_seq_len': seq_length + 32,
+                },
+                'tokenizer': {
+                    'type': 'sentencepiece',
+                    'path': tokenizer_model,
+                    'vocab_size': vocab_size,
+                },
+                'training_info': {
+                    'epochs': epochs,
+                    'best_loss': best_loss,
+                    'num_conversations': len(conversations),
+                    'num_sequences': len(sequences),
+                },
+            }
+
+            torch.save(checkpoint, checkpoint_path)
+            print(f"\nチェックポイント保存: {checkpoint_path}")
+
+            print("\n" + "=" * 70)
+            print("学習完了!")
+            print("=" * 70)
+
+            return {
+                "status": "success",
+                "message": f"Training completed ({epochs} epochs)",
+                "checkpoint_path": checkpoint_path,
+                "best_loss": best_loss,
+                "num_conversations": len(conversations),
+                "num_sequences": len(sequences),
+                "num_parameters": num_params,
+                "vocab_size": vocab_size,
+                "training_log": training_log[-5:],  # 最後の5エポック
+            }
+
+        except Exception as e:
+            import traceback
+            traceback.print_exc()
+            return {
+                "status": "error",
+                "error": str(e)
+            }
+
+    # ========================================
     # CLEAR_SESSION（会話履歴クリア）
     # ========================================
     if action == "clear_session":
@@ -1242,6 +1505,7 @@ def handler(job):
             "health",             # ヘルスチェック
             "status",             # ステータス確認
             "train",              # 学習（チェックポイント保存）
+            "train_oasst1_ja",    # 日本語会話データ学習
             "generate",           # 推論（チェックポイントロード）
             "pretrain_openai",    # OpenAIデータセット事前学習
             "pretrain_status",    # 事前学習ステータス
