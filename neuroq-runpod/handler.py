@@ -904,7 +904,7 @@ def handler(job):
 
                 # トークナイザー初期化
                 tokenizer = None
-                tokenizer_type = 'tiktoken'
+                tokenizer_type = 'sentencepiece'
                 custom_tokenizer_path = None
 
                 # カスタムトークナイザー学習
@@ -937,14 +937,13 @@ def handler(job):
                         print(f"✅ カスタムトークナイザーを読み込み: {custom_tokenizer_path}")
                     else:
                         print(f"⚠️ カスタムトークナイザーが見つかりません: {custom_tokenizer_path}")
-                        print(f"   tiktoken を使用します")
+                        print(f"   SentencePiece を使用します")
 
-                # デフォルト: tiktoken
+                # デフォルト: SentencePiece
                 if tokenizer is None:
-                    import tiktoken
-                    from tiktoken_tokenizer import TikTokenTokenizer
-                    tokenizer = TikTokenTokenizer(encoding_name="o200k_base")
-                    tokenizer_type = 'tiktoken'
+                    tokenizer = NeuroQuantumTokenizer(vocab_size=config.get('vocab_size', 8000))
+                    tokenizer.build_vocab(texts, model_prefix="neuroq_tokenizer")
+                    tokenizer_type = 'sentencepiece'
 
                 # モデル設定を取得
                 config = get_model_config(model_size)
@@ -1060,8 +1059,7 @@ def handler(job):
                     }
                 else:
                     tokenizer_info = {
-                        'type': 'tiktoken',
-                        'encoding': 'o200k_base',
+                        'type': 'sentencepiece',
                         'vocab_size': tokenizer.vocab_size,
                     }
 
