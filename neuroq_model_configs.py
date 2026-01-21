@@ -33,7 +33,7 @@ if runpod_dir not in sys.path:
 NEUROQ_SMALL = {
     'name': 'NeuroQ-Small',
     'description': 'OpenAI text-embedding-3-small (1536次元) 対応',
-    'vocab_size': 200019,      # o200k_base (GPT-4o トークナイザー)
+    'vocab_size': 8000,        # SentencePiece BPE トークナイザー
     'embed_dim': 1536,         # text-embedding-3-small と同じ
     'num_heads': 4,            # 固定
     'num_layers': 2,           # 固定
@@ -44,7 +44,7 @@ NEUROQ_SMALL = {
 NEUROQ_LARGE = {
     'name': 'NeuroQ-Large',
     'description': 'OpenAI text-embedding-3-large (3072次元) 対応',
-    'vocab_size': 200019,      # o200k_base (GPT-4o トークナイザー)
+    'vocab_size': 8000,        # SentencePiece BPE トークナイザー
     'embed_dim': 3072,         # text-embedding-3-large と同じ
     'num_heads': 4,            # 固定
     'num_layers': 2,           # 固定
