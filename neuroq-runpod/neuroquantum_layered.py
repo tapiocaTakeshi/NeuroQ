@@ -1918,6 +1918,7 @@ class NeuroQuantumAI:
 
                 # 強化された繰り返しペナルティ（温度調整の前に適用）
                 # 最近のトークンに対する強力なペナルティ（recency-weighted）
+                vocab_size = next_logits.size(-1)
                 if len(generated) > 0:
                     # 最近100トークンに重複ペナルティ（50 → 100に拡大）
                     window_size = min(100, len(generated))
@@ -1931,6 +1932,8 @@ class NeuroQuantumAI:
                         token_positions[token_id].append(pos)
 
                     for token_id, positions in token_positions.items():
+                        if token_id >= vocab_size:  # bounds check to prevent CUDA gather error
+                            continue
                         count = len(positions)
                         # 最も新しい出現位置（0が最古、window_size-1が最新）
                         most_recent_pos = max(positions)
@@ -1970,7 +1973,8 @@ class NeuroQuantumAI:
                     # banされたトークンに強力なペナルティを適用
                     if banned_tokens:
                         for token_id in banned_tokens:
-                            next_logits[token_id] = float('-inf')
+                            if token_id < vocab_size:  # bounds check to prevent CUDA gather error
+                                next_logits[token_id] = float('-inf')
                 
                 # Top-K（より厳格に）
                 if top_k > 0:
