@@ -73,6 +73,14 @@ image = (
 # チェックポイント保存用ボリューム（推論時も使用）
 checkpoints_volume = modal.Volume.from_name("neuroq-checkpoints", create_if_missing=True)
 
+# デフォルトシステムプロンプト
+DEFAULT_SYSTEM_PROMPT = """あなたは親切で正確なアシスタントです。
+以下のルールに従ってください：
+1. ユーザーの質問に短く正確に答える
+2. わからないことは質問する
+3. 聞かれたことだけに答える（余計な情報を追加しない）
+4. 前の文脈を踏まえて返答する"""
+
 @app.cls(
     image=image,
     gpu="T4",  # GPU選択: T4, A10G, A100, H100など
@@ -118,6 +126,7 @@ class NeuroQInference:
         self.current_model_size = None
         self.is_initialized = False
         self.conversation_sessions = {}
+        self.session_system_prompts = {}  # セッションごとのシステムプロンプト
         self.vocab_size = 8000
         self.tokenizer = None  # Small/Large用
         
@@ -368,11 +377,12 @@ class NeuroQInference:
             traceback.print_exc()
             return False
     
-    def _generate_text(self, prompt: str, max_length: int = 50, 
+    def _generate_text(self, prompt: str, max_length: int = 50,
                        temp_min: float = None, temp_max: float = None,
-                       temperature: float = None, history: List[Dict] = None) -> str:
+                       temperature: float = None, history: List[Dict] = None,
+                       system_prompt: str = None, session_id: str = None) -> str:
         """テキスト生成（ヒストリー方式）
-        
+
         Args:
             prompt: ユーザーの入力
             max_length: 最大生成トークン数
@@ -380,38 +390,61 @@ class NeuroQInference:
             temp_max: 最大温度（micro用）
             temperature: 温度（small/large用）
             history: 会話履歴 [{"role": "user", "content": "..."}, {"role": "assistant", "content": "..."}, ...]
+            system_prompt: カスタムシステムプロンプト（Noneの場合はセッションの既存設定またはデフォルトを使用）
+            session_id: セッションID（システムプロンプトの保存用）
         """
         import torch
-        
+
         if self.model is None or not self.is_initialized:
             return "Error: Model not initialized"
-        
+
         try:
+            # システムプロンプトの処理
+            # 1. リクエストで指定された場合はそれを使用し、セッションに保存
+            # 2. 指定されていない場合はセッションの既存設定を使用
+            # 3. セッションにも設定がない場合はデフォルトを使用
+            if system_prompt is not None and session_id:
+                self.session_system_prompts[session_id] = system_prompt
+                active_system_prompt = system_prompt
+            elif session_id:
+                active_system_prompt = self.session_system_prompts.get(session_id, DEFAULT_SYSTEM_PROMPT)
+            elif system_prompt is not None:
+                active_system_prompt = system_prompt
+            else:
+                active_system_prompt = DEFAULT_SYSTEM_PROMPT
+
             # 温度設定
             if temperature is not None and temp_min is None:
                 temp_min = temperature * 0.8
                 temp_max = temperature * 1.2
-            
+
             if temp_min is None:
                 temp_min = 0.4
             if temp_max is None:
                 temp_max = 0.7
-            
+
             # 推論モード
             if hasattr(self.model, 'model') and self.model.model is not None:
                 self.model.model.eval()
             elif hasattr(self.model, 'eval'):
                 self.model.eval()
-            
+
+            # コンテキストを構築
+            context_parts = []
+
+            # システムプロンプトをコンテキストの先頭に追加
+            if active_system_prompt:
+                context_parts.append(f"<SYSTEM>{active_system_prompt}")
+
             # 会話履歴をコンテキストに変換（最新4ターンまで）
-            history_context = ""
             if history:
                 for turn in history[-4:]:
                     if turn.get("role") == "user":
-                        history_context += f"<USER>{turn.get('content', '')}"
+                        context_parts.append(f"<USER>{turn.get('content', '')}")
                     elif turn.get("role") == "assistant":
-                        history_context += f"<ASSISTANT>{turn.get('content', '')}"
-            
+                        context_parts.append(f"<ASSISTANT>{turn.get('content', '')}")
+
+            history_context = "".join(context_parts)
             full_prompt = history_context + prompt if history_context else prompt
             
             # 生成
@@ -777,12 +810,13 @@ class NeuroQInference:
             return {"status": "error", "error": str(e)}
     
     @modal.method()
-    def generate(self, prompt: str, max_length: int = 50, 
-                 temperature: float = 0.5, temp_min: float = None, 
+    def generate(self, prompt: str, max_length: int = 50,
+                 temperature: float = 0.5, temp_min: float = None,
                  temp_max: float = None, history: List[Dict] = None,
-                 model_size: str = "micro") -> Dict[str, Any]:
+                 model_size: str = "micro", system_prompt: str = None,
+                 session_id: str = None) -> Dict[str, Any]:
         """テキスト生成（ヒストリー方式）
-        
+
         Args:
             prompt: ユーザーの入力
             max_length: 最大生成トークン数
@@ -791,8 +825,10 @@ class NeuroQInference:
             temp_max: 最大温度
             history: 会話履歴 [{"role": "user", "content": "..."}, {"role": "assistant", "content": "..."}, ...]
             model_size: モデルサイズ（micro, small, large）
+            system_prompt: カスタムシステムプロンプト（Noneの場合はデフォルトを使用）
+            session_id: セッションID（システムプロンプトの永続化用）
         """
-        
+
         # モデルサイズが変更された場合はリロード
         if self.current_model_size != model_size:
             if not self._load_model(model_size):
@@ -800,7 +836,7 @@ class NeuroQInference:
                     "status": "error",
                     "error": f"Failed to load model ({model_size})"
                 }
-        
+
         try:
             result = self._generate_text(
                 prompt=prompt,
@@ -808,7 +844,9 @@ class NeuroQInference:
                 temp_min=temp_min,
                 temp_max=temp_max,
                 temperature=temperature,
-                history=history
+                history=history,
+                system_prompt=system_prompt,
+                session_id=session_id
             )
 
             # エラーチェック
@@ -820,11 +858,21 @@ class NeuroQInference:
                     "model_size": self.current_model_size
                 }
 
+            # 使用されたシステムプロンプトを取得
+            if system_prompt is not None:
+                used_system_prompt = system_prompt
+            elif session_id:
+                used_system_prompt = self.session_system_prompts.get(session_id, DEFAULT_SYSTEM_PROMPT)
+            else:
+                used_system_prompt = DEFAULT_SYSTEM_PROMPT
+
             return {
                 "status": "success",
                 "prompt": prompt,
                 "generated": result,
-                "model_size": self.current_model_size
+                "model_size": self.current_model_size,
+                "system_prompt": used_system_prompt,
+                "session_id": session_id
             }
         except Exception as e:
             import traceback
@@ -1127,12 +1175,16 @@ def fastapi_app():
         temp_max: Optional[float] = None
         history: Optional[List[HistoryItem]] = None  # 会話履歴
         model_size: str = "micro"
+        system_prompt: Optional[str] = None  # カスタムシステムプロンプト
+        session_id: Optional[str] = None  # セッションID（システムプロンプトの永続化用）
     
     class GenerateResponse(BaseModel):
         status: str
         prompt: str
         generated: str
         model_size: str
+        system_prompt: Optional[str] = None
+        session_id: Optional[str] = None
     
     class HealthResponse(BaseModel):
         status: str
@@ -1179,12 +1231,21 @@ def fastapi_app():
             "description": "Quantum-Bit Neural Network Language Model",
             "endpoints": {
                 "health": "GET /health",
-                "status": "GET /status", 
-                "generate": "POST /generate",
+                "status": "GET /status",
+                "generate": "POST /generate (supports system_prompt and session_id)",
                 "embeddings": "POST /embeddings",
                 "decode_embeddings": "POST /decode_embeddings",
                 "train": "POST /train",
                 "train_status": "GET /train/status/{call_id}"
+            },
+            "generate_params": {
+                "prompt": "ユーザー入力（必須）",
+                "max_length": "最大生成トークン数（デフォルト: 50）",
+                "temperature": "温度（デフォルト: 0.5）",
+                "history": "会話履歴 [{role, content}, ...]",
+                "model_size": "micro, small, large（デフォルト: micro）",
+                "system_prompt": "カスタムシステムプロンプト（省略時はデフォルト）",
+                "session_id": "セッションID（システムプロンプトの永続化用）"
             }
         }
     
@@ -1206,7 +1267,7 @@ def fastapi_app():
             history_list = None
             if request.history:
                 history_list = [{"role": item.role, "content": item.content} for item in request.history]
-            
+
             result = neuroq.generate.remote(
                 prompt=request.prompt,
                 max_length=request.max_length,
@@ -1214,12 +1275,14 @@ def fastapi_app():
                 temp_min=request.temp_min,
                 temp_max=request.temp_max,
                 history=history_list,
-                model_size=request.model_size
+                model_size=request.model_size,
+                system_prompt=request.system_prompt,
+                session_id=request.session_id
             )
-            
+
             if result.get("status") == "error":
                 raise HTTPException(status_code=500, detail=result.get("error"))
-            
+
             return result
         except Exception as e:
             raise HTTPException(status_code=500, detail=str(e))

@@ -83,13 +83,16 @@ conversation_sessions = {}  # session_id -> list of {role, content}
 VOCAB_SIZE = 8000
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 
-# システムプロンプト（会話指示）
-SYSTEM_PROMPT = """あなたは親切で正確なアシスタントです。
+# デフォルトシステムプロンプト（会話指示）
+DEFAULT_SYSTEM_PROMPT = """あなたは親切で正確なアシスタントです。
 以下のルールに従ってください：
 1. ユーザーの質問に短く正確に答える
 2. わからないことは質問する
 3. 聞かれたことだけに答える（余計な情報を追加しない）
 4. 前の文脈を踏まえて返答する"""
+
+# セッションごとのシステムプロンプト
+session_system_prompts = {}  # session_id -> system_prompt
 
 print(f"📊 Device: {DEVICE}")
 print(f"📊 CUDA Available: {torch.cuda.is_available()}")
@@ -460,7 +463,8 @@ def save_conversation_turn(session_id: str, user_message: str, assistant_respons
 # ========================================
 def generate_text(prompt: str, max_length: int = 50,
                   temp_min: float = None, temp_max: float = None,
-                  temperature: float = None, session_id: str = "default") -> str:
+                  temperature: float = None, session_id: str = "default",
+                  system_prompt: str = None) -> str:
     """
     テキスト生成（会話対応版 - NeuroQuantumBrainAI使用）
 
@@ -473,11 +477,12 @@ def generate_text(prompt: str, max_length: int = 50,
         temp_max: 最高温度
         temperature: 互換性のための単一温度（指定された場合は自動的にtemp_min/temp_maxに変換）
         session_id: 会話セッションID（会話履歴管理用）
+        system_prompt: カスタムシステムプロンプト（Noneの場合はセッションの既存設定またはデフォルトを使用）
 
     Returns:
         生成されたテキスト
     """
-    global model
+    global model, session_system_prompts
 
     if model is None:
         return "Error: Model not initialized"
@@ -489,6 +494,16 @@ def generate_text(prompt: str, max_length: int = 50,
     try:
         # 推論モードに設定（重要：学習を防ぐ）
         model.model.eval()
+
+        # システムプロンプトの処理
+        # 1. リクエストで指定された場合はそれを使用し、セッションに保存
+        # 2. 指定されていない場合はセッションの既存設定を使用
+        # 3. セッションにも設定がない場合はデフォルトを使用
+        if system_prompt is not None:
+            session_system_prompts[session_id] = system_prompt
+            active_system_prompt = system_prompt
+        else:
+            active_system_prompt = session_system_prompts.get(session_id, DEFAULT_SYSTEM_PROMPT)
 
         # temperatureが指定された場合、temp_min/temp_maxに変換
         if temperature is not None and temp_min is None:
@@ -506,14 +521,20 @@ def generate_text(prompt: str, max_length: int = 50,
         # ただし、履歴を追加するためにここでプレフィックスを構築
         history = conversation_sessions.get(session_id, [])[-4:]  # 最新4ターン
 
-        history_context = ""
+        # システムプロンプトをコンテキストの先頭に追加
+        context_parts = []
+        if active_system_prompt:
+            context_parts.append(f"<SYSTEM>{active_system_prompt}")
+
+        # 会話履歴を追加
         for turn in history:
             if turn["role"] == "user":
-                history_context += f"<USER>{turn['content']}"
+                context_parts.append(f"<USER>{turn['content']}")
             elif turn["role"] == "assistant":
-                history_context += f"<ASSISTANT>{turn['content']}"
+                context_parts.append(f"<ASSISTANT>{turn['content']}")
 
         # 履歴を含む完全なプロンプト
+        history_context = "".join(context_parts)
         full_prompt = history_context + prompt if history_context else prompt
 
         # 推論実行（torch.no_grad()で勾配計算を無効化）
@@ -582,7 +603,7 @@ def handler(job):
     if action == "generate":
         # モデルサイズを取得
         model_size = job_input.get("model_size", "micro")
-        
+
         # Lazy initialization（モデルサイズに応じて初期化）
         if not is_initialized or current_model_size != model_size:
             print(f"🔄 モデル初期化中 ({model_size.upper()})...")
@@ -601,7 +622,12 @@ def handler(job):
         temp_max = job_input.get("temp_max")
         temperature = job_input.get("temperature", 0.5)
 
+        # システムプロンプト（カスタム設定可能）
+        system_prompt = job_input.get("system_prompt")
+
         print(f"📝 Generate: model={model_size}, session='{session_id}', prompt='{prompt[:30]}...'")
+        if system_prompt:
+            print(f"📝 System prompt: '{system_prompt[:50]}...'")
 
         result = generate_text(
             prompt=prompt,
@@ -609,7 +635,8 @@ def handler(job):
             temp_min=temp_min,
             temp_max=temp_max,
             temperature=temperature,
-            session_id=session_id
+            session_id=session_id,
+            system_prompt=system_prompt
         )
 
         return {
@@ -617,7 +644,8 @@ def handler(job):
             "prompt": prompt,
             "generated": result,
             "session_id": session_id,
-            "model_size": current_model_size
+            "model_size": current_model_size,
+            "system_prompt": session_system_prompts.get(session_id, DEFAULT_SYSTEM_PROMPT)
         }
     
     # ========================================
@@ -976,14 +1004,22 @@ def handler(job):
     # CLEAR_SESSION（会話履歴クリア）
     # ========================================
     if action == "clear_session":
-        global conversation_sessions
+        global conversation_sessions, session_system_prompts
         session_id = job_input.get("session_id", "default")
+        clear_system_prompt = job_input.get("clear_system_prompt", True)
 
+        cleared_items = []
         if session_id in conversation_sessions:
             del conversation_sessions[session_id]
+            cleared_items.append("history")
+        if clear_system_prompt and session_id in session_system_prompts:
+            del session_system_prompts[session_id]
+            cleared_items.append("system_prompt")
+
+        if cleared_items:
             return {
                 "status": "success",
-                "message": f"Session '{session_id}' cleared"
+                "message": f"Session '{session_id}' cleared ({', '.join(cleared_items)})"
             }
         else:
             return {
@@ -992,19 +1028,58 @@ def handler(job):
             }
 
     # ========================================
+    # SET_SYSTEM_PROMPT（システムプロンプト設定）
+    # ========================================
+    if action == "set_system_prompt":
+        global session_system_prompts
+        session_id = job_input.get("session_id", "default")
+        system_prompt = job_input.get("system_prompt")
+
+        if system_prompt is None:
+            return {
+                "status": "error",
+                "error": "system_prompt is required"
+            }
+
+        session_system_prompts[session_id] = system_prompt
+        return {
+            "status": "success",
+            "message": f"System prompt set for session '{session_id}'",
+            "session_id": session_id,
+            "system_prompt": system_prompt
+        }
+
+    # ========================================
+    # GET_SYSTEM_PROMPT（システムプロンプト取得）
+    # ========================================
+    if action == "get_system_prompt":
+        session_id = job_input.get("session_id", "default")
+        system_prompt = session_system_prompts.get(session_id, DEFAULT_SYSTEM_PROMPT)
+        is_default = session_id not in session_system_prompts
+
+        return {
+            "status": "success",
+            "session_id": session_id,
+            "system_prompt": system_prompt,
+            "is_default": is_default
+        }
+
+    # ========================================
     # UNKNOWN ACTION
     # ========================================
     return {
         "status": "error",
         "error": f"Unknown action: {action}",
         "available_actions": [
-            "health",           # ヘルスチェック
-            "status",           # ステータス確認
-            "train",            # 学習（チェックポイント保存）
-            "generate",         # 推論（チェックポイントロード）
-            "pretrain_openai",  # OpenAIデータセット事前学習
-            "pretrain_status",  # 事前学習ステータス
-            "clear_session"     # 会話履歴クリア
+            "health",             # ヘルスチェック
+            "status",             # ステータス確認
+            "train",              # 学習（チェックポイント保存）
+            "generate",           # 推論（チェックポイントロード）
+            "pretrain_openai",    # OpenAIデータセット事前学習
+            "pretrain_status",    # 事前学習ステータス
+            "clear_session",      # 会話履歴クリア
+            "set_system_prompt",  # システムプロンプト設定
+            "get_system_prompt"   # システムプロンプト取得
         ]
     }
 
