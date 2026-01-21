@@ -48,16 +48,29 @@ class TikTokenTokenizer:
             self.max_vocab = max_vocab
         else:
             self.max_vocab = self.vocab_size
-        
+
         # 特殊トークンID
-        self.pad_id = 0
-        self.unk_id = 0  # tiktokenにはUNKがないので0を使用
-        self.bos_id = self.encoder.eot_token  # End of Text を BOS として使用
-        self.eos_id = self.encoder.eot_token  # End of Text
+        # max_vocab制限時は、特殊トークンIDが範囲内に収まるようにする
+        # （SentencePieceと同じ規約: pad=0, unk=1, bos=2, eos=3）
+        if max_vocab and max_vocab < self.vocab_size:
+            # 制限された語彙サイズの場合、範囲内の小さな値を使用
+            self.pad_id = 0
+            self.unk_id = 1
+            self.bos_id = 2
+            self.eos_id = 3
+        else:
+            # 制限なしの場合、tiktokenのネイティブトークンを使用
+            self.pad_id = 0
+            self.unk_id = 0  # tiktokenにはUNKがないので0を使用
+            self.bos_id = self.encoder.eot_token  # End of Text を BOS として使用
+            self.eos_id = self.encoder.eot_token  # End of Text
         
         print(f"📚 TikToken トークナイザー初期化")
         print(f"   エンコーディング: {self.encoding_name}")
         print(f"   語彙サイズ: {self.vocab_size:,}")
+        if self.max_vocab < self.vocab_size:
+            print(f"   制限語彙サイズ: {self.max_vocab:,}")
+            print(f"   特殊トークン: pad={self.pad_id}, unk={self.unk_id}, bos={self.bos_id}, eos={self.eos_id}")
     
     def encode(self, text: str, add_special: bool = True, verbose: bool = False) -> List[int]:
         """
