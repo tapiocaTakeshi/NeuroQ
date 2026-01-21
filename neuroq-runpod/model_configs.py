@@ -37,7 +37,7 @@ NEUROQ_MICRO = {
     'vocab_size': 200019,      # o200k_base
     'embed_dim': 128,
     'num_heads': 4,
-    'num_layers': 3,
+    'num_layers': 2,
     'max_seq_len': 256,
     'dropout': 0.1,
 }
@@ -49,7 +49,7 @@ NEUROQ_SMALL = {
     'vocab_size': 200019,      # o200k_base
     'embed_dim': 1536,         # text-embedding-3-small と同じ
     'num_heads': 4,
-    'num_layers': 3,
+    'num_layers': 2,
     'max_seq_len': 512,
     'dropout': 0.1,
 }
@@ -61,7 +61,7 @@ NEUROQ_LARGE = {
     'vocab_size': 200019,      # o200k_base
     'embed_dim': 3072,         # text-embedding-3-large と同じ
     'num_heads': 4,
-    'num_layers': 3,
+    'num_layers': 2,
     'max_seq_len': 512,
     'dropout': 0.1,
 }
