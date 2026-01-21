@@ -6,8 +6,8 @@ NeuroQ チャットインターフェース
 出力はマークダウン形式で表示されます。
 
 トークナイザー:
-  - tiktoken (デフォルト): OpenAI GPT-4/GPT-3.5と同じトークン化
-  - sentencepiece: 従来のSentencePieceトークナイザー
+  - sentencepiece (デフォルト): SentencePieceトークナイザー（8k語彙）
+  - tiktoken: OpenAI GPT-4/GPT-3.5と同じトークン化（オプション）
 
 モデル:
   - NeuroQuantum (デフォルト): neuroquantum_layered.pyのQBNN拡張Transformer
@@ -134,8 +134,8 @@ CHECKPOINT_PATH_SP = "checkpoints/neuroq_checkpoint.pt"  # SentencePiece用（�
 CHECKPOINT_PATH_TK = "checkpoints/neuroq_tiktoken_english_checkpoint.pt"  # TikToken用（英語・Micro）
 CHECKPOINT_PATH_SMALL = "checkpoints/neuroq_small_checkpoint.pt"  # Small
 CHECKPOINT_PATH_LARGE = "checkpoints/neuroq_large_checkpoint.pt"  # Large
-DEFAULT_TOKENIZER = "tiktoken"  # デフォルトはtiktoken
-DEFAULT_TRANSLATE = True  # 翻訳モード（tiktokenは英語なのでデフォルトオン）
+DEFAULT_TOKENIZER = "sentencepiece"  # デフォルトはSentencePiece
+DEFAULT_TRANSLATE = False  # 翻訳モード（SentencePieceは日本語対応なのでデフォルトオフ）
 DEFAULT_TRANSLATOR = "nllb"  # 翻訳エンジン: "nllb" or "deepl"
 
 
@@ -320,7 +320,7 @@ def main():
     parser = argparse.ArgumentParser(description='NeuroQ チャットインターフェース')
     parser.add_argument('--tokenizer', '-t', choices=['tiktoken', 'sentencepiece', 'sp'],
                         default=DEFAULT_TOKENIZER,
-                        help='使用するトークナイザー (default: sentencepiece)')
+                        help='使用するトークナイザー (default: SentencePiece)')
     parser.add_argument('--encoding', '-e', default='o200k_base',
                         help='tiktokenのエンコーディング (default: o200k_base)')
     parser.add_argument('--translate', action='store_true',
