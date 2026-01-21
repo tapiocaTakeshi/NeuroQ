@@ -300,15 +300,16 @@ class NeuroQInference:
 
                     self.model.eval()
                     
-                    # トークナイザーを初期化（モデルの vocab_size に制限）
-                    if tokenizer_info.get('type') == 'tiktoken':
-                        try:
-                            from tiktoken_tokenizer import TikTokenTokenizer
-                            encoding_name = tokenizer_info.get('encoding', 'o200k_base')
-                            self.tokenizer = TikTokenTokenizer(encoding_name=encoding_name, max_vocab=vocab_size)
-                            print(f"   ✅ TikTokenトークナイザー ({encoding_name}, max_vocab={vocab_size}) をロード")
-                        except ImportError as e:
-                            print(f"   ⚠️ TikTokenTokenizerインポートエラー: {e}")
+                    # トークナイザーを初期化（SentencePiece優先）
+                    tokenizer_path = "/root/neuroq/neuroq_tokenizer.model"
+                    if os.path.exists(tokenizer_path):
+                        self.tokenizer = self.NeuroQuantumTokenizer(
+                            vocab_size=vocab_size,
+                            model_file=tokenizer_path
+                        )
+                        print(f"   ✅ SentencePieceトークナイザー (vocab_size={vocab_size}) をロード")
+                    else:
+                        print(f"   ⚠️ トークナイザーモデルが見つかりません: {tokenizer_path}")
                     
                     total_params = sum(p.numel() for p in self.model.parameters())
                     print(f"✅ {config['name']} ロード完了 ({total_params:,}パラメータ)")
@@ -350,23 +351,16 @@ class NeuroQInference:
                         use_sentencepiece=False  # TikTokenを使用
                     )
                     
-                    # TikTokenトークナイザーをロード（モデルの vocab_size に制限）
-                    if tokenizer_info.get('type') == 'tiktoken':
-                        try:
-                            from tiktoken_tokenizer import TikTokenTokenizer
-                            encoding_name = tokenizer_info.get('encoding', 'cl100k_base')
-                            self.model.tokenizer = TikTokenTokenizer(encoding_name=encoding_name, max_vocab=vocab_size)
-                            print(f"   ✅ TikTokenトークナイザー ({encoding_name}, max_vocab={vocab_size}) をロード")
-                        except ImportError as e:
-                            print(f"   ⚠️ TikTokenTokenizerインポートエラー: {e}")
+                    # SentencePieceトークナイザーをロード
+                    tokenizer_path = "/root/neuroq/neuroq_tokenizer.model"
+                    if os.path.exists(tokenizer_path):
+                        self.model.tokenizer = self.NeuroQuantumTokenizer(
+                            vocab_size=vocab_size,
+                            model_file=tokenizer_path
+                        )
+                        print(f"   ✅ SentencePieceトークナイザー (vocab_size={vocab_size}) をロード")
                     else:
-                        # SentencePieceトークナイザー
-                        tokenizer_path = "neuroq_tokenizer.model"
-                        if os.path.exists(tokenizer_path):
-                            self.model.tokenizer = self.NeuroQuantumTokenizer(
-                                vocab_size=vocab_size,
-                                model_file=tokenizer_path
-                            )
+                        print(f"   ⚠️ トークナイザーモデルが見つかりません: {tokenizer_path}")
                     
                     # モデル構築・重みロード
                     self.model.model = self.NeuroQuantumBrain(
@@ -661,8 +655,8 @@ class NeuroQInference:
             if hasattr(self.model, 'tokenizer') and self.model.tokenizer is not None:
                 tokenizer = self.model.tokenizer
             else:
-                from tiktoken_tokenizer import TikTokenTokenizer
-                tokenizer = TikTokenTokenizer(encoding_name="o200k_base", max_vocab=model_vocab_size)
+                tokenizer_path = "/root/neuroq/neuroq_tokenizer.model"
+                tokenizer = self.NeuroQuantumTokenizer(vocab_size=model_vocab_size, model_file=tokenizer_path)
 
             # テキストをトークン化
             token_ids = tokenizer.encode(text, add_special=False)
@@ -760,8 +754,8 @@ class NeuroQInference:
             if hasattr(self.model, 'tokenizer') and self.model.tokenizer is not None:
                 tokenizer = self.model.tokenizer
             else:
-                from tiktoken_tokenizer import TikTokenTokenizer
-                tokenizer = TikTokenTokenizer(encoding_name="o200k_base", max_vocab=vocab_size)
+                tokenizer_path = "/root/neuroq/neuroq_tokenizer.model"
+                tokenizer = self.NeuroQuantumTokenizer(vocab_size=vocab_size, model_file=tokenizer_path)
             
             # 入力ベクトルをテンソルに変換
             input_embeddings = torch.tensor(embeddings, device=self.device, dtype=torch.float32)  # [num_tokens, embed_dim]
@@ -967,10 +961,11 @@ class NeuroQInference:
         config = get_model_config(model_size)
         model_vocab_size = config['vocab_size']
 
-        # トークナイザー（モデルの vocab_size に制限）
-        from tiktoken_tokenizer import TikTokenTokenizer
-        tokenizer = TikTokenTokenizer(encoding_name="o200k_base", max_vocab=model_vocab_size)
-        print(f"\n📚 トークナイザー: 語彙サイズ {tokenizer.vocab_size:,} (max_vocab={model_vocab_size})")
+        # SentencePieceトークナイザー
+        from neuroquantum_layered import NeuroQuantumTokenizer
+        tokenizer_path = "/root/neuroq/neuroq_tokenizer.model"
+        tokenizer = NeuroQuantumTokenizer(vocab_size=model_vocab_size, model_file=tokenizer_path)
+        print(f"\n📚 SentencePieceトークナイザー: 語彙サイズ {tokenizer.vocab_size:,}")
         
         # 学習データ準備
         print("\n📊 学習データ準備...")
@@ -1129,8 +1124,8 @@ class NeuroQInference:
             'model_state_dict': model.state_dict(),
             'config': config,
             'tokenizer': {
-                'type': 'tiktoken',
-                'encoding': 'o200k_base',
+                'type': 'sentencepiece',
+                'model_path': 'neuroq_tokenizer.model',
                 'vocab_size': tokenizer.vocab_size,
             },
             'model_size': model_size,
@@ -1541,9 +1536,8 @@ def train_model(
         torch.cuda.empty_cache()
     
     # モジュールインポート
-    from neuroquantum_layered import NeuroQuantum, NeuroQuantumConfig
+    from neuroquantum_layered import NeuroQuantum, NeuroQuantumConfig, NeuroQuantumTokenizer
     from neuroquantum_brain import get_training_data
-    from tiktoken_tokenizer import TikTokenTokenizer
     from model_configs import get_model_config, get_checkpoint_path, AVAILABLE_MODELS
     
     # 学習設定（A100用に調整）
@@ -1566,11 +1560,12 @@ def train_model(
             print(f"   max_samples: {max_samples} (per dataset)")
     
     # モデル設定を先に取得（vocab_size を使うため）
-    print("\n📚 トークナイザー初期化...")
+    print("\n📚 SentencePieceトークナイザー初期化...")
     config = get_model_config(model_size)
     model_vocab_size = config['vocab_size']
-    tokenizer = TikTokenTokenizer(encoding_name="o200k_base", max_vocab=model_vocab_size)
-    print(f"   語彙サイズ: {tokenizer.vocab_size:,} (max_vocab={model_vocab_size})")
+    tokenizer_path = "neuroq_tokenizer.model"
+    tokenizer = NeuroQuantumTokenizer(vocab_size=model_vocab_size, model_file=tokenizer_path)
+    print(f"   語彙サイズ: {tokenizer.vocab_size:,}")
     
     # 学習データ
     print("\n📊 学習データ準備...")
@@ -1750,13 +1745,13 @@ def train_model(
         'model_state_dict': model.state_dict(),
         'config': config,
         'tokenizer': {
-            'type': 'tiktoken',
-            'encoding': 'o200k_base',
+            'type': 'sentencepiece',
+            'model_path': 'neuroq_tokenizer.model',
             'vocab_size': tokenizer.vocab_size,
         },
         'model_size': model_size,
     }
-    
+
     # ボリュームに保存
     torch.save(checkpoint, checkpoint_path)
     checkpoints_volume.commit()

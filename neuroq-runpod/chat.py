@@ -355,21 +355,9 @@ def main():
     print(f"📚 トークナイザーをロード中...")
     
     if tokenizer_type == 'tiktoken':
-        if not TIKTOKEN_AVAILABLE:
-            print("⚠️ tiktokenが利用できません。SentencePieceにフォールバックします。")
-            tokenizer_type = 'sentencepiece'
-        else:
-            tokenizer = TikTokenTokenizer(encoding_name=args.encoding)
-            # tiktokenの語彙サイズをモデルに合わせる
-            vocab_size = 200019  # o200k_baseの語彙サイズ
-            tokenizer_info = f"TikToken ({args.encoding})"
-            # モデルサイズに応じたチェックポイント
-            if args.model_size == 'small':
-                checkpoint_path = CHECKPOINT_PATH_SMALL
-            elif args.model_size == 'large':
-                checkpoint_path = CHECKPOINT_PATH_LARGE
-            else:
-                checkpoint_path = CHECKPOINT_PATH_TK  # micro
+        # TikTokenが指定された場合でもSentencePieceを使用（推奨）
+        print("⚠️ TikTokenからSentencePieceに切り替えます（推奨設定）")
+        tokenizer_type = 'sentencepiece'
     
     if tokenizer_type == 'sentencepiece':
         if not SENTENCEPIECE_AVAILABLE:
@@ -381,7 +369,13 @@ def main():
         tokenizer = NeuroQuantumTokenizer(vocab_size=8000, model_file=TOKENIZER_MODEL_PATH)
         vocab_size = tokenizer.vocab_size
         tokenizer_info = f"SentencePiece ({TOKENIZER_MODEL_PATH})"
-        checkpoint_path = CHECKPOINT_PATH_SP
+        # モデルサイズに応じたチェックポイント
+        if args.model_size == 'small':
+            checkpoint_path = CHECKPOINT_PATH_SMALL
+        elif args.model_size == 'large':
+            checkpoint_path = CHECKPOINT_PATH_LARGE
+        else:
+            checkpoint_path = CHECKPOINT_PATH_SP  # micro (デフォルト)
     
     # チェックポイントをロード
     print(f"💾 チェックポイントをロード: {checkpoint_path}")
@@ -401,7 +395,7 @@ def main():
             config = {}
         
         # モデル設定を取得（チェックポイントの設定を優先）
-        model_vocab_size = config.get('vocab_size', 200019)  # o200k_baseのデフォルト
+        model_vocab_size = config.get('vocab_size', 8000)  # SentencePieceのデフォルト
         embed_dim = config.get('embed_dim', 128)
         num_heads = config.get('num_heads', 4)
         num_layers = config.get('num_layers', 3)
