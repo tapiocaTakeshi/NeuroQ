@@ -621,7 +621,16 @@ class NeuroQuantumEmbedding(nn.Module):
             texts: OpenAI Embedding使用時に必要。トークンIDに対応するテキストのリスト
         """
         batch_size, seq_len = token_ids.shape
-        
+
+        # Bounds checking to prevent CUDA gather index out of bounds error
+        # Clamp token_ids to valid range [0, vocab_size-1]
+        token_ids = token_ids.clamp(0, self.config.vocab_size - 1)
+
+        # Clamp sequence length to max_seq_len
+        if seq_len > self.config.max_seq_len:
+            token_ids = token_ids[:, :self.config.max_seq_len]
+            seq_len = self.config.max_seq_len
+
         if self.use_openai_embedding and self.openai_wrapper is not None:
             if texts is None:
                 if self.tokenizer is not None:
@@ -663,6 +672,8 @@ class NeuroQuantumEmbedding(nn.Module):
         
         # 位置埋め込み
         positions = torch.arange(seq_len, device=token_ids.device).unsqueeze(0).expand(batch_size, -1)
+        # Clamp positions to valid range [0, max_seq_len-1]
+        positions = positions.clamp(0, self.config.max_seq_len - 1)
         pos_embeds = self.position_embedding(positions)
         
         # 合成
@@ -803,7 +814,16 @@ class NeuroQuantum(nn.Module):
             (batch, seq, vocab_size) ロジット（後処理ステップ後の出力）
         """
         batch, seq = token_ids.shape
-        
+
+        # Bounds checking to prevent CUDA gather index out of bounds error
+        # Clamp token_ids to valid range [0, vocab_size-1]
+        token_ids = token_ids.clamp(0, self.config.vocab_size - 1)
+
+        # Clamp sequence length to max_seq_len
+        if seq > self.config.max_seq_len:
+            token_ids = token_ids[:, :self.config.max_seq_len]
+            seq = self.config.max_seq_len
+
         # ステップ1: トークンID → テキストエンベディング
         if self.use_openai_embedding and self.embedding is not None:
             # OpenAI Embeddingを使用
@@ -813,6 +833,8 @@ class NeuroQuantum(nn.Module):
             text_embeds = self.text_embedding(token_ids)  # (batch, seq, embed_dim)
             # Position Embedding: 位置情報を追加
             positions = torch.arange(seq, device=token_ids.device).unsqueeze(0).expand(batch, -1)
+            # Clamp positions to valid range [0, max_seq_len-1]
+            positions = positions.clamp(0, self.config.max_seq_len - 1)
             pos_embeds = self.position_embedding(positions)  # (batch, seq, embed_dim)
             # 埋め込みの合成 + Dropout
             hidden_states = self.dropout(text_embeds + pos_embeds)
