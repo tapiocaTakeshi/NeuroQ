@@ -956,7 +956,7 @@ def main(lang='en', num_neurons: int = 128):
             use_quantum=True,
             top_k=50,
             top_p=0.9,
-            repetition_penalty=1.5
+            repetition_penalty=1.2
         )
         print(f"   Prompt: '{prompt}'")
         print(f"   → {generated}\n")
@@ -1045,8 +1045,8 @@ def chat_mode(lang='en'):
     use_quantum = True
     top_k = 40
     top_p = 0.9
-    repetition_penalty = 1.5
-    
+    repetition_penalty = 1.2
+
     while True:
         try:
             user_input = input("\n🧑 You: ").strip()
