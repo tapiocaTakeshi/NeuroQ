@@ -1878,7 +1878,7 @@ class NeuroQuantumAI:
         temp_max: float = 0.8,       # 温度の上限
         top_k: int = 40,
         top_p: float = 0.9,
-        repetition_penalty: float = 2.0,  # 強化（1.15 → 2.0、より強力に）
+        repetition_penalty: float = 1.2,  # 調整（1.1〜1.3の範囲）
         no_repeat_ngram_size: int = 3,  # N-gram重複防止
         temperature: float = None,   # 後方互換性のため（指定された場合temp_min/temp_maxを自動計算）
     ) -> str:
