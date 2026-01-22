@@ -60,6 +60,19 @@ except ImportError:
     OPENAI_AVAILABLE = False
     warnings.warn("OpenAI APIが利用できません。openai>=1.0.0をインストールしてください。")
 
+# Translation Pipeline（オプション）
+try:
+    from translation_pipeline import (
+        TranslationPipeline,
+        TiktokenWrapper,
+        TranslatedNeuroQuantumAI,
+        create_english_training_data,
+    )
+    TRANSLATION_PIPELINE_AVAILABLE = True
+except ImportError:
+    TRANSLATION_PIPELINE_AVAILABLE = False
+    # オプションなので警告を表示しない
+
 # ========================================
 # qbnn_layered.py からコアコンポーネントをインポート
 # ========================================
@@ -2054,7 +2067,44 @@ class NeuroQuantumAI:
         # デコード（BOS/EOSを除く）
         decoded = self.tokenizer.decode(generated, skip_special=True)
         return decoded.strip()
-    
+
+    def enable_translation_pipeline(
+        self,
+        translation_model: str = "facebook/nllb-200-distilled-600M",
+        device: Optional[str] = None,
+    ) -> 'TranslatedNeuroQuantumAI':
+        """
+        翻訳パイプラインを有効化
+
+        日本語入力 → 英語翻訳 → AI生成 → 日本語翻訳 → 出力
+        のパイプラインを構築
+
+        Args:
+            translation_model: NLLB翻訳モデル名
+            device: 使用するデバイス
+
+        Returns:
+            TranslatedNeuroQuantumAI インスタンス
+
+        Usage:
+            ai = NeuroQuantumAI()
+            ai.train(english_texts)  # 英語データで学習
+            translated_ai = ai.enable_translation_pipeline()
+            response = translated_ai.generate("こんにちは")  # 日本語で対話可能
+        """
+        if not TRANSLATION_PIPELINE_AVAILABLE:
+            raise ImportError(
+                "Translation pipeline is not available. "
+                "Make sure translation_pipeline.py is in the same directory "
+                "and required dependencies (transformers, tiktoken) are installed."
+            )
+
+        return TranslatedNeuroQuantumAI(
+            neuroq_model=self,
+            translation_model=translation_model,
+            device=device,
+        )
+
     def chat(self):
         """対話モード"""
         print("\n" + "=" * 70)

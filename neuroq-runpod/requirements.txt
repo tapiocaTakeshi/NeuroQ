@@ -22,3 +22,7 @@ openai>=1.0.0
 
 # TikToken (for English training)
 tiktoken>=0.5.0
+
+# Translation Pipeline (NLLB-200)
+transformers>=4.30.0
+sacremoses>=0.0.53
