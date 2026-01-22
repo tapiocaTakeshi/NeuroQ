@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """
-SentencePiece トークナイザーを使用したNeuroQモデル学習スクリプト
+TikToken トークナイザーを使用したNeuroQモデル学習スクリプト
 
-このスクリプトを実行すると、SentencePieceトークナイザーを使った
+このスクリプトを実行すると、TikTokenトークナイザー（OpenAI GPT-4o と同じ）を使った
 モデルのチェックポイントを生成します。
 
 使い方:
@@ -34,14 +34,15 @@ if current_dir not in sys.path:
     sys.path.insert(0, current_dir)
 
 print("=" * 70)
-print("SentencePiece ベースの NeuroQ モデル学習")
+print("TikToken ベースの NeuroQ モデル学習")
 print("=" * 70)
 
 # インポート
 try:
-    from neuroquantum_layered import NeuroQuantum, NeuroQuantumConfig, NeuroQuantumTokenizer
+    from neuroquantum_layered import NeuroQuantum, NeuroQuantumConfig
     from neuroquantum_brain import get_training_data
     from model_configs import AVAILABLE_MODELS, get_model_config, get_checkpoint_path
+    from tiktoken_tokenizer import TikTokenTokenizer
     print("モジュールをインポートしました")
     MODEL_CONFIGS_AVAILABLE = True
 except ImportError as e:
@@ -49,15 +50,16 @@ except ImportError as e:
     MODEL_CONFIGS_AVAILABLE = False
     try:
         from neuroquantum_brain import NeuroQuantumBrain, get_training_data
-        from neuroquantum_layered import NeuroQuantumTokenizer
+        from tiktoken_tokenizer import TikTokenTokenizer
         print("基本モジュールをインポートしました（Microモード）")
     except ImportError as e2:
         print(f"インポートに失敗: {e2}")
         sys.exit(1)
 
-# 設定
-TOKENIZER_MODEL_PATH = "neuroq_tokenizer.model"
-VOCAB_SIZE = 8000  # SentencePieceの語彙サイズ
+# TikToken設定
+TIKTOKEN_ENCODING = "o200k_base"  # GPT-4o と同じエンコーディング
+VOCAB_SIZE = 200019  # o200k_base の語彙サイズ（制限する場合は MAX_VOCAB を設定）
+MAX_VOCAB = 32000  # 実際に使用する語彙サイズ（メモリ節約のため制限）
 
 # デフォルト学習設定
 DEFAULT_TRAIN_CONFIG = {
@@ -68,9 +70,9 @@ DEFAULT_TRAIN_CONFIG = {
 }
 
 
-def train_with_sentencepiece(model_size='micro', epochs=None, batch_size=None, lr=None):
+def train_with_tiktoken(model_size='micro', epochs=None, batch_size=None, lr=None):
     """
-    SentencePieceトークナイザーでモデルを学習
+    TikTokenトークナイザーでモデルを学習
 
     Args:
         model_size: 'micro', 'small', 'large'
@@ -99,16 +101,12 @@ def train_with_sentencepiece(model_size='micro', epochs=None, batch_size=None, l
     print(f"\nモデルサイズ: {model_size.upper()}")
 
     print("\n" + "=" * 50)
-    print("Step 1: トークナイザー初期化")
+    print("Step 1: TikTokenトークナイザー初期化")
     print("=" * 50)
 
-    # SentencePieceトークナイザーを初期化
-    if not os.path.exists(TOKENIZER_MODEL_PATH):
-        print(f"トークナイザーモデルが見つかりません: {TOKENIZER_MODEL_PATH}")
-        print("train_sentencepiece_tokenizer.py を先に実行してください")
-        sys.exit(1)
-
-    tokenizer = NeuroQuantumTokenizer(vocab_size=VOCAB_SIZE, model_file=TOKENIZER_MODEL_PATH)
+    # TikTokenトークナイザーを初期化
+    tokenizer = TikTokenTokenizer(encoding_name=TIKTOKEN_ENCODING, max_vocab=MAX_VOCAB)
+    logger.info(f"TikTokenトークナイザー: {TIKTOKEN_ENCODING}, 語彙サイズ: {tokenizer.vocab_size:,} (制限: {MAX_VOCAB:,})")
 
     # テスト
     test_texts = ["Hello", "こんにちは", "AI"]
@@ -156,8 +154,8 @@ def train_with_sentencepiece(model_size='micro', epochs=None, batch_size=None, l
         config = get_model_config(model_size)
         checkpoint_path = get_checkpoint_path(model_size)
 
-        # vocab_sizeをSentencePieceに合わせる
-        config['vocab_size'] = VOCAB_SIZE
+        # vocab_sizeをTikTokenに合わせる
+        config['vocab_size'] = MAX_VOCAB
 
         print(f"\nモデル設定 ({config['name']}):")
         print(f"   - vocab_size: {config['vocab_size']:,}")
@@ -180,12 +178,12 @@ def train_with_sentencepiece(model_size='micro', epochs=None, batch_size=None, l
     else:
         # Microモデル（従来）
         model_config = {
-            'vocab_size': VOCAB_SIZE,
+            'vocab_size': MAX_VOCAB,
             'embed_dim': 128,
             'num_heads': 4,
             'num_layers': 5,
         }
-        checkpoint_path = "checkpoints/neuroq_sentencepiece_checkpoint.pt"
+        checkpoint_path = "checkpoints/neuroq_tiktoken_checkpoint.pt"
 
         print(f"\nモデル設定 (Micro):")
         for key, value in model_config.items():
@@ -301,9 +299,10 @@ def train_with_sentencepiece(model_size='micro', epochs=None, batch_size=None, l
         'model_state_dict': model.state_dict(),
         'config': model_config,
         'tokenizer': {
-            'type': 'sentencepiece',
-            'model_path': TOKENIZER_MODEL_PATH,
+            'type': 'tiktoken',
+            'encoding': TIKTOKEN_ENCODING,
             'vocab_size': tokenizer.vocab_size,
+            'max_vocab': MAX_VOCAB,
         },
         'model_size': model_size,
     }
@@ -360,13 +359,13 @@ def train_with_sentencepiece(model_size='micro', epochs=None, batch_size=None, l
     print(f"""
 次のステップ:
 1. チェックポイントを確認: {checkpoint_path}
-2. チャットで使用: python chat.py --model-size {model_size} --tokenizer sentencepiece
+2. チャットで使用: python chat.py --model-size {model_size} --tokenizer tiktoken
 """)
 
 
 def main():
     parser = argparse.ArgumentParser(
-        description='SentencePiece ベースの NeuroQ モデル学習'
+        description='TikToken ベースの NeuroQ モデル学習'
     )
     parser.add_argument(
         '--model-size', '-m',
@@ -395,7 +394,7 @@ def main():
 
     args = parser.parse_args()
 
-    train_with_sentencepiece(
+    train_with_tiktoken(
         model_size=args.model_size,
         epochs=args.epochs,
         batch_size=args.batch_size,
