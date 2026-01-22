@@ -32,7 +32,9 @@ def is_lfs_pointer(file_path: str) -> bool:
         with open(file_path, 'r', encoding='utf-8') as f:
             content = f.read(200)
             return content.startswith('version https://git-lfs.github.com/spec/')
-    except:
+    except (OSError, UnicodeDecodeError):
+        # OSError: file read errors (permissions, etc.)
+        # UnicodeDecodeError: binary file that can't be decoded as UTF-8
         return False
 
 
