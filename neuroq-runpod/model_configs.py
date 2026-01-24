@@ -34,34 +34,34 @@ if current_dir not in sys.path:
 NEUROQ_MICRO = {
     'name': 'NeuroQ-Micro',
     'description': '軽量高速モデル（開発・テスト用）',
-    'vocab_size': 8000,        # SentencePiece BPE トークナイザー
+    'vocab_size': 200019,      # o200k_base
     'embed_dim': 128,
     'num_heads': 4,
-    'num_layers': 2,
+    'num_layers': 6,
     'max_seq_len': 256,
     'dropout': 0.1,
 }
 
-# OpenAI text-embedding-3-small 対応
+# OpenAI text-embedding-3-small 
 NEUROQ_SMALL = {
     'name': 'NeuroQ-Small',
     'description': 'OpenAI text-embedding-3-small (1536次元) 対応',
-    'vocab_size': 8000,        # SentencePiece BPE トークナイザー
+    'vocab_size': 200019,      # o200k_base
     'embed_dim': 1536,         # text-embedding-3-small と同じ
-    'num_heads': 4,
-    'num_layers': 2,
+    'num_heads': 12,
+    'num_layers': 10,
     'max_seq_len': 512,
     'dropout': 0.1,
 }
 
-# OpenAI text-embedding-3-large 対応
+# OpenAI text-embedding-3-large 
 NEUROQ_LARGE = {
     'name': 'NeuroQ-Large',
     'description': 'OpenAI text-embedding-3-large (3072次元) 対応',
-    'vocab_size': 8000,        # SentencePiece BPE トークナイザー
+    'vocab_size': 200019,      # o200k_base
     'embed_dim': 3072,         # text-embedding-3-large と同じ
-    'num_heads': 4,
-    'num_layers': 2,
+    'num_heads': 16,
+    'num_layers': 10,
     'max_seq_len': 512,
     'dropout': 0.1,
 }

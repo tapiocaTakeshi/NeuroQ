@@ -105,7 +105,7 @@ class TikTokenTokenizer:
     
     def decode(self, token_ids: List[int], skip_special: bool = True, verbose: bool = False) -> str:
         """
-        トークンIDのリストをテキストに変換
+        トークンID의 リストをテキストに変換
         
         Args:
             token_ids: トークンIDのリスト

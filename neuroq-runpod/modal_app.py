@@ -84,7 +84,7 @@ DEFAULT_SYSTEM_PROMPT = """あなたは親切で正確なアシスタントで�
 @app.cls(
     image=image,
     gpu="T4",  # GPU選択: T4, A10G, A100, H100など
-    timeout=300,
+    timeout=86400,  # 24時間 (Modalの最大値)
     scaledown_window=120,  # アイドル状態で2分後にコンテナを停止
     volumes={"/model_checkpoints": checkpoints_volume},
 )
@@ -131,7 +131,7 @@ class NeuroQInference:
         self.tokenizer = None  # Small/Large用
         
         # チェックポイントパス
-        # 全モデルをModalボリューム（/model_checkpoints）から参照
+        # 全てのモデルサイズでModalボリュームを参照（train_modelで保存された最新版を使用）
         self.checkpoint_paths = {
             'micro': "/model_checkpoints/neuroq_micro_checkpoint.pt",
             'small': "/model_checkpoints/neuroq_small_checkpoint.pt",
@@ -266,61 +266,72 @@ class NeuroQInference:
                 config = self.get_model_config(model_size)
                 
                 if os.path.exists(checkpoint_path):
-                    print(f"💾 チェックポイントをロード: {checkpoint_path}")
-                    checkpoint = torch.load(checkpoint_path, map_location=self.device)
-                    
-                    # チェックポイントから設定を取得（オーバーライド）
-                    saved_config = checkpoint.get('config', {})
-                    tokenizer_info = checkpoint.get('tokenizer', {})
-                    
-                    # 語彙サイズをチェックポイントから取得
-                    # 注意: 古いチェックポイントは 'max_vocab' キー、新しいチェックポイントは 'vocab_size' キーを使用
-                    vocab_size = saved_config.get('vocab_size') or saved_config.get('max_vocab') or config['vocab_size']
-                    
-                    nq_config = self.NeuroQuantumConfig()
-                    nq_config.vocab_size = vocab_size
-                    nq_config.embed_dim = saved_config.get('embed_dim', config['embed_dim'])
-                    nq_config.num_heads = saved_config.get('num_heads', config['num_heads'])
-                    nq_config.num_layers = saved_config.get('num_layers', config['num_layers'])
-                    nq_config.max_seq_len = saved_config.get('max_seq_len', config.get('max_seq_len', 512))
-                    nq_config.dropout = saved_config.get('dropout', config.get('dropout', 0.1))
-                    
-                    print(f"   vocab_size: {nq_config.vocab_size:,}")
-                    print(f"   embed_dim: {nq_config.embed_dim}")
-                    
-                    self.model = self.NeuroQuantum(nq_config).to(self.device)
+                    try:
+                        print(f"💾 チェックポイントをロード: {checkpoint_path}")
+                        checkpoint = torch.load(checkpoint_path, map_location=self.device)
+                        
+                        # チェックポイントから設定を取得（オーバーライド）
+                        saved_config = checkpoint.get('config', {})
+                        tokenizer_info = checkpoint.get('tokenizer', {})
+                        
+                        # 語彙サイズをチェックポイントから取得
+                        # 注意: 古いチェックポイントは 'max_vocab' キー、新しいチェックポイントは 'vocab_size' キーを使用
+                        vocab_size = saved_config.get('vocab_size') or saved_config.get('max_vocab') or config['vocab_size']
+                        
+                        nq_config = self.NeuroQuantumConfig()
+                        nq_config.vocab_size = vocab_size
+                        nq_config.embed_dim = saved_config.get('embed_dim', config['embed_dim'])
+                        nq_config.num_heads = saved_config.get('num_heads', config['num_heads'])
+                        nq_config.num_layers = saved_config.get('num_layers', config['num_layers'])
+                        nq_config.max_seq_len = saved_config.get('max_seq_len', config.get('max_seq_len', 512))
+                        nq_config.dropout = saved_config.get('dropout', config.get('dropout', 0.1))
+                        
+                        print(f"   vocab_size: {nq_config.vocab_size:,}")
+                        print(f"   embed_dim: {nq_config.embed_dim}")
+                        
+                        self.model = self.NeuroQuantum(nq_config).to(self.device)
 
-                    # 重みをロード（キー名の互換性を保証）
-                    if isinstance(checkpoint, dict) and 'model_state_dict' in checkpoint:
-                        state_dict = self._remap_state_dict_keys(checkpoint['model_state_dict'], self.model.state_dict())
-                        self.model.load_state_dict(state_dict)
-                    else:
-                        state_dict = self._remap_state_dict_keys(checkpoint, self.model.state_dict())
-                        self.model.load_state_dict(state_dict, strict=False)
+                        # 重みをロード（キー名の互換性を保証）
+                        if isinstance(checkpoint, dict) and 'model_state_dict' in checkpoint:
+                            state_dict = self._remap_state_dict_keys(checkpoint['model_state_dict'], self.model.state_dict())
+                            self.model.load_state_dict(state_dict)
+                        else:
+                            state_dict = self._remap_state_dict_keys(checkpoint, self.model.state_dict())
+                            self.model.load_state_dict(state_dict, strict=False)
 
-                    self.model.eval()
-                    
-                    # トークナイザーを初期化（SentencePiece優先）
-                    tokenizer_path = "/root/neuroq/neuroq_tokenizer.model"
-                    if os.path.exists(tokenizer_path):
-                        self.tokenizer = self.NeuroQuantumTokenizer(
-                            vocab_size=vocab_size,
-                            model_file=tokenizer_path
-                        )
-                        print(f"   ✅ SentencePieceトークナイザー (vocab_size={vocab_size}) をロード")
-                    else:
-                        print(f"   ⚠️ トークナイザーモデルが見つかりません: {tokenizer_path}")
-                    
-                    total_params = sum(p.numel() for p in self.model.parameters())
-                    print(f"✅ {config['name']} ロード完了 ({total_params:,}パラメータ)")
+                        self.model.eval()
+                        
+                        # トークナイザーを初期化
+                        if tokenizer_info.get('type') == 'tiktoken':
+                            try:
+                                from tiktoken_tokenizer import TikTokenTokenizer
+                                encoding_name = tokenizer_info.get('encoding', 'o200k_base')
+                                self.tokenizer = TikTokenTokenizer(encoding_name=encoding_name)
+                                print(f"   ✅ TikTokenトークナイザー ({encoding_name}) をロード")
+                            except ImportError as e:
+                                print(f"   ⚠️ TikTokenTokenizerインポートエラー: {e}")
+                        else:
+                            # SentencePieceトークナイザー (デフォルト/フォールバック)
+                            tokenizer_path = "/root/neuroq/neuroq_tokenizer.model"
+                            if os.path.exists(tokenizer_path):
+                                self.tokenizer = self.NeuroQuantumTokenizer(
+                                    vocab_size=vocab_size,
+                                    model_file=tokenizer_path
+                                )
+                                print(f"   ✅ SentencePieceトークナイザー (vocab_size={vocab_size}) をロード")
+                        
+                        total_params = sum(p.numel() for p in self.model.parameters())
+                        print(f"✅ {config['name']} ロード完了 ({total_params:,}パラメータ)")
+                    except Exception as e:
+                        import traceback
+                        print(f"❌ {model_size.upper()} モデルロード失敗: {e}")
+                        traceback.print_exc()
+                        return False
                 else:
                     print(f"⚠️ チェックポイントが見つかりません: {checkpoint_path}")
                     return False
             
-            # フォールバック: NeuroQuantumが利用できない場合（通常は発生しない）
-            # 注意: このフォールバックはNeuroQuantumBrainを使用しますが、
-            # 現在のチェックポイントはNeuroQuantum (QBNNTransformerBlock)で学習されているため、
-            # アーキテクチャの不一致により正常に動作しない可能性があります。
+            # Legacy Microモデル (NeuroQuantumBrainAI)
             else:
                 print("⚠️ フォールバックモード: NeuroQuantumが利用できないため、NeuroQuantumBrainを使用します")
                 print("   ⚠️ 注意: チェックポイントとアーキテクチャが異なる可能性があります")
@@ -445,57 +456,41 @@ class NeuroQInference:
                 self.model.model.eval()
             elif hasattr(self.model, 'eval'):
                 self.model.eval()
-
-            # コンテキストを構築
-            context_parts = []
-
-            # システムプロンプトをコンテキストの先頭に追加
-            if active_system_prompt:
-                context_parts.append(f"<SYSTEM>{active_system_prompt}")
-
             # 会話履歴をコンテキストに変換（最新4ターンまで）
+            history_context = ""
+            # システムプロンプトがある場合は最初に追加
+            if active_system_prompt:
+                history_context += f"### System: {active_system_prompt}\n"
+            
             if history:
                 for turn in history[-4:]:
-                    if turn.get("role") == "user":
-                        context_parts.append(f"<USER>{turn.get('content', '')}")
-                    elif turn.get("role") == "assistant":
-                        context_parts.append(f"<ASSISTANT>{turn.get('content', '')}")
-
-            history_context = "".join(context_parts)
-            full_prompt = history_context + prompt if history_context else prompt
+                    role = turn.get("role")
+                    content = turn.get("content", "")
+                    if role == "user":
+                        history_context += f"### Human: {content}\n"
+                    elif role == "assistant":
+                        history_context += f"### Assistant: {content}\n"
+            
+            full_prompt = history_context + f"### Human: {prompt}\n### Assistant:"
             
             # 生成
             with torch.no_grad():
-                # NeuroQuantumBrainAI (micro) の場合
-                if hasattr(self.model, 'generate'):
-                    result = self.model.generate(
-                        prompt=full_prompt,
-                        max_length=max_length,
-                        temperature_min=temp_min,
-                        temperature_max=temp_max,
-                        top_k=40,
-                        top_p=0.9,
-                    )
-                # NeuroQuantum (small/large) の場合
-                else:
-                    # 会話形式のプロンプトを構築
-                    formatted_prompt = f"<USER>{full_prompt}<ASSISTANT>"
-                    result = self._generate_neuroq(
-                        prompt=formatted_prompt,
-                        max_length=max_length,
-                        temperature=temperature or 0.5,
-                    )
-            
-            # 結果をクリーンアップ（<USER>タグ以降を除去）
-            if '<USER>' in result:
-                result = result.split('<USER>')[0].strip()
+                # 現時点のモデルは会話タグ（<USER>等）を学習していないため、シンプルに渡す
+                formatted_prompt = full_prompt
+                
+                result = self._generate_neuroq(
+                    prompt=formatted_prompt,
+                    max_length=max_length,
+                    temperature=temperature or 0.5
+                )
             
             return result
         
         except Exception as e:
             import traceback
-            traceback.print_exc()
-            return f"Error: {str(e)}"
+            error_details = traceback.format_exc()
+            print(f"❌ 生成エラー詳細:\n{error_details}")
+            return f"Error: {str(e)}\nTraceback: {error_details}"
     
     def _generate_neuroq(self, prompt: str, max_length: int = 50, temperature: float = 0.5) -> str:
         """NeuroQuantum モデル用のテキスト生成（繰り返しペナルティ付き）"""
@@ -572,16 +567,24 @@ class NeuroQInference:
             if next_token == self.tokenizer.eos_id:
                 break
             
-            # <USER>トークンの開始なら終了
-            if user_token_ids and next_token == user_token_ids[0]:
-                break
-            
             generated.append(next_token)
             
-            # 生成中のテキストに<USER>が含まれていたら終了
+            # 生成中のテキストに<USER>が含まれていたら終了（より確実な方法に変更）
             if step % 5 == 0:  # 5ステップごとにチェック
-                partial_text = self.tokenizer.decode(generated[-15:], skip_special=True)
+                # プロンプト以降の新規生成分のみを対象にチェック
+                new_tokens = generated[len(input_ids):]
+                if not new_tokens:
+                    continue
+                    
+                partial_text = self.tokenizer.decode(new_tokens)
+                
+                # <USER> もしくは <ASSISTANT> が新しく生成されたら終了
                 if '<USER>' in partial_text:
+                    print(f"   🛑 Stop generation: <USER> tag detected in step {step}")
+                    break
+                
+                if step > 10 and '<ASSISTANT>' in partial_text:
+                    print(f"   🛑 Stop generation: Unexpected <ASSISTANT> tag detected in step {step}")
                     break
                 
                 # 同じフレーズの繰り返しを検出
@@ -590,18 +593,19 @@ class NeuroQInference:
                     if partial_text[:half] == partial_text[half:half*2]:
                         break
         
-        # デコード
-        result = self.tokenizer.decode(generated, skip_special=True)
+        # 新規生成分のみを取得
+        new_ids = generated[len(input_ids):]
+        if not new_ids:
+            return ""
+            
+        result = self.tokenizer.decode(new_ids)
         
-        # <ASSISTANT>以降を抽出
-        if '<ASSISTANT>' in result:
-            result = result.split('<ASSISTANT>')[-1].strip()
+        # クリーンアップ（念のため）
+        for tag in ['<USER>', '<ASSISTANT>', '<|endoftext|>']:
+            if tag in result:
+                result = result.split(tag)[0]
         
-        # <USER>以降を除去
-        if '<USER>' in result:
-            result = result.split('<USER>')[0].strip()
-        
-        return result
+        return result.strip()
     
     @modal.method()
     def health(self) -> Dict[str, Any]:
@@ -908,305 +912,10 @@ class NeuroQInference:
             }
     
     @modal.method()
-    def train(
-        self,
-        model_size: str = "micro",
-        epochs: int = 10,
-        batch_size: int = None,
-        lr: float = None,
-        dataset_ids: List[str] = None,
-        text_column: str = "text",
-        split: str = "train",
-        max_samples: int = None
-    ) -> Dict[str, Any]:
-        """
-        モデルを学習
-        
-        Args:
-            model_size: 'micro', 'small', 'large'
-            epochs: 学習エポック数
-            batch_size: バッチサイズ
-            lr: 学習率
-            dataset_ids: Hugging FaceデータセットIDのリスト
-            text_column: テキストカラム名
-            split: データ分割
-            max_samples: 各データセットの最大サンプル数
-        """
-        import torch
-        import random
-        import os
-        
-        print("=" * 70)
-        print(f"🚀 NeuroQ {model_size.upper()} モデル学習")
-        print("=" * 70)
-        
-        # 学習設定（T4 GPU 15GBメモリ対応）
-        if batch_size is None:
-            batch_size = 4 if model_size == 'micro' else (2 if model_size == 'small' else 1)
-        if lr is None:
-            lr = 0.0005 if model_size == 'micro' else 0.0003
-        seq_length = 64
-        
-        print(f"\n📋 学習設定:")
-        print(f"   model_size: {model_size}")
-        print(f"   epochs: {epochs}")
-        print(f"   batch_size: {batch_size}")
-        print(f"   lr: {lr}")
-        print(f"   device: {self.device}")
-        if dataset_ids:
-            print(f"   dataset_ids: {dataset_ids}")
-
-        # モデル設定を先に取得（vocab_size を使うため）
-        from model_configs import get_model_config
-        config = get_model_config(model_size)
-        model_vocab_size = config['vocab_size']
-
-        # oasst1_ja がdataset_idsに含まれているかチェック
-        use_oasst1_ja = dataset_ids and "oasst1_ja" in dataset_ids
-
-        # SentencePieceトークナイザー
-        from neuroquantum_layered import NeuroQuantumTokenizer
-        if use_oasst1_ja:
-            # oasst1_ja用のトークナイザーを使用
-            tokenizer_candidates = [
-                "/root/neuroq/neuroq_tokenizer_oasst1_ja.model",
-                "neuroq_tokenizer_oasst1_ja.model",
-                "../neuroq_tokenizer_oasst1_ja.model",
-            ]
-            tokenizer_path = None
-            for path in tokenizer_candidates:
-                if os.path.exists(path):
-                    tokenizer_path = path
-                    break
-            if tokenizer_path is None:
-                tokenizer_path = "/root/neuroq/neuroq_tokenizer.model"
-                print(f"⚠️ oasst1_ja用トークナイザーが見つからないため、デフォルトを使用")
-            else:
-                print(f"🔤 oasst1_ja用トークナイザー: {tokenizer_path}")
-            # oasst1_ja用のデフォルト設定
-            seq_length = 128
-            if lr is None or lr == 0.0005:
-                lr = 0.0003
-        else:
-            tokenizer_path = "/root/neuroq/neuroq_tokenizer.model"
-        tokenizer = NeuroQuantumTokenizer(vocab_size=model_vocab_size, model_file=tokenizer_path)
-        print(f"\n📚 SentencePieceトークナイザー: 語彙サイズ {tokenizer.vocab_size:,}")
-        
-        # 学習データ準備
-        print("\n📊 学習データ準備...")
-        texts = []
-        
-        if dataset_ids and len(dataset_ids) > 0:
-            from datasets import load_dataset
-
-            for dataset_id in dataset_ids:
-                print(f"   🤗 ロード中: {dataset_id}")
-                try:
-                    # oasst1_ja の場合はローカルファイルから読み込み
-                    if dataset_id == "oasst1_ja":
-                        data_file_candidates = [
-                            "/root/neuroq/data/oasst1_ja_conversations.txt",
-                            "data/oasst1_ja_conversations.txt",
-                            "../data/oasst1_ja_conversations.txt",
-                        ]
-                        data_file = None
-                        for path in data_file_candidates:
-                            if os.path.exists(path):
-                                data_file = path
-                                break
-
-                        if data_file is None:
-                            print(f"   ❌ oasst1_ja: data file not found")
-                            print(f"      検索パス: {data_file_candidates}")
-                            continue
-
-                        print(f"   📖 oasst1_ja会話データ読み込み: {data_file}")
-                        with open(data_file, 'r', encoding='utf-8') as f:
-                            content = f.read()
-
-                        # 空行で区切られた会話ブロックに分割
-                        blocks = content.split('\n\n')
-                        oasst1_ja_count = 0
-                        for block in blocks:
-                            block = block.strip()
-                            if block and 'User:' in block and 'Assistant:' in block:
-                                texts.append(block)
-                                oasst1_ja_count += 1
-
-                        print(f"   ✅ oasst1_ja: {oasst1_ja_count} 会話サンプル")
-                        continue
-
-                    if "/" in dataset_id and dataset_id.count("/") >= 2:
-                        parts = dataset_id.split("/")
-                        ds_name = "/".join(parts[:-1])
-                        ds_subset = parts[-1]
-                        dataset = load_dataset(ds_name, ds_subset, split=split)
-                    else:
-                        try:
-                            dataset = load_dataset(dataset_id, split=split)
-                        except:
-                            dataset = load_dataset(dataset_id, "default", split=split)
-                    
-                    if max_samples and len(dataset) > max_samples:
-                        dataset = dataset.shuffle(seed=42).select(range(max_samples))
-                    
-                    # テキストカラムを探す
-                    available_columns = dataset.column_names
-                    if text_column in available_columns:
-                        target_column = text_column
-                    elif "text" in available_columns:
-                        target_column = "text"
-                    elif "content" in available_columns:
-                        target_column = "content"
-                    else:
-                        target_column = available_columns[0]
-                    
-                    for item in dataset:
-                        text = item.get(target_column, "")
-                        if text and isinstance(text, str) and len(text) > 10:
-                            texts.append(text)
-                    
-                    print(f"   ✅ {dataset_id}: {len(dataset)} サンプル")
-                except Exception as e:
-                    print(f"   ❌ {dataset_id}: {e}")
-        
-        if len(texts) == 0:
-            from neuroquantum_brain import get_training_data
-            texts = get_training_data()
-            print(f"   📚 デフォルトデータ: {len(texts)} サンプル")
-        
-        # トークン化
-        all_tokens = []
-        for text in texts:
-            tokens = tokenizer.encode(text, add_special=False)
-            all_tokens.extend(tokens)
-            all_tokens.append(tokenizer.eos_id)
-        print(f"   総トークン数: {len(all_tokens):,}")
-        
-        # モデル構築
-        print("\n🧠 モデル構築...")
-        from neuroquantum_layered import NeuroQuantum, NeuroQuantumConfig
-
-        nq_config = NeuroQuantumConfig()
-        nq_config.vocab_size = config['vocab_size']
-        nq_config.embed_dim = config['embed_dim']
-        nq_config.num_heads = config['num_heads']
-        nq_config.num_layers = config['num_layers']
-        nq_config.max_seq_len = config.get('max_seq_len', 512)
-        nq_config.dropout = config.get('dropout', 0.1)
-        
-        model = NeuroQuantum(nq_config).to(self.device)
-        total_params = sum(p.numel() for p in model.parameters())
-        print(f"   {config['name']}: {total_params:,} パラメータ")
-        
-        # シーケンス作成
-        sequences = []
-        for i in range(0, len(all_tokens) - seq_length, seq_length // 2):
-            sequences.append(all_tokens[i:i + seq_length])
-        print(f"   シーケンス数: {len(sequences):,}")
-        
-        # 学習ループ
-        print("\n🎓 学習開始...")
-        optimizer = torch.optim.AdamW(model.parameters(), lr=lr)
-        criterion = torch.nn.CrossEntropyLoss()
-        
-        # 勾配累積設定（メモリ節約）
-        accumulation_steps = 4
-        effective_batch_size = batch_size * accumulation_steps
-        print(f"   実効バッチサイズ: {effective_batch_size} (batch={batch_size} x accum={accumulation_steps})")
-        
-        best_loss = float('inf')
-        
-        for epoch in range(epochs):
-            model.train()
-            total_loss = 0
-            batch_count = 0
-            
-            random.shuffle(sequences)
-            optimizer.zero_grad()
-            
-            for i in range(0, len(sequences) - batch_size, batch_size):
-                batch = sequences[i:i + batch_size]
-                batch_tensor = torch.tensor(batch, device=self.device)
-                
-                input_ids = batch_tensor[:, :-1]
-                target_ids = batch_tensor[:, 1:]
-                
-                logits = model(input_ids)
-                
-                loss = criterion(
-                    logits.reshape(-1, config['vocab_size']),
-                    target_ids.reshape(-1)
-                )
-                
-                # 勾配累積
-                loss = loss / accumulation_steps
-                loss.backward()
-                
-                total_loss += loss.item() * accumulation_steps
-                batch_count += 1
-                
-                # 勾配累積ステップでオプティマイザ更新
-                if batch_count % accumulation_steps == 0:
-                    torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
-                    optimizer.step()
-                    optimizer.zero_grad()
-                
-                # 定期的にキャッシュクリア（メモリ節約）
-                if batch_count % 50 == 0:
-                    torch.cuda.empty_cache()
-                
-                # 進捗表示
-                if batch_count % 100 == 0:
-                    print(f"      Batch {batch_count}: Loss={loss.item() * accumulation_steps:.4f}")
-            
-            # 残りの勾配を適用
-            if batch_count % accumulation_steps != 0:
-                torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
-                optimizer.step()
-                optimizer.zero_grad()
-            
-            # キャッシュクリア
-            torch.cuda.empty_cache()
-            
-            avg_loss = total_loss / max(batch_count, 1)
-            if avg_loss < best_loss:
-                best_loss = avg_loss
-            print(f"   Epoch {epoch+1}/{epochs}: Loss={avg_loss:.4f}")
-        
-        # チェックポイント保存（Modalボリュームに保存）
-        checkpoint_filename = f"neuroq_{model_size}_checkpoint.pt"
-        checkpoint_path = f"/model_checkpoints/{checkpoint_filename}"
-        os.makedirs("/model_checkpoints", exist_ok=True)
-        
-        checkpoint = {
-            'model_state_dict': model.state_dict(),
-            'config': config,
-            'tokenizer': {
-                'type': 'sentencepiece',
-                'model_path': 'neuroq_tokenizer.model',
-                'vocab_size': tokenizer.vocab_size,
-            },
-            'model_size': model_size,
-        }
-        
-        torch.save(checkpoint, checkpoint_path)
-        checkpoints_volume.commit()
-        print(f"\n💾 チェックポイント保存: {checkpoint_path}")
-
-        # モデルを更新
-        self._load_model(model_size)
-        
-        print("\n✅ 学習完了！")
-        
-        return {
-            "status": "success",
-            "model_size": model_size,
-            "parameters": total_params,
-            "best_loss": best_loss,
-            "epochs": epochs,
-            "checkpoint_path": checkpoint_path
-        }
+    def train(self, *args, **kwargs) -> Dict[str, Any]:
+        """学習ジョブを開始（スタンドアロンのtrain_modelを使用）"""
+        # A100 GPU上で非同期に学習を開始
+        return train_model.spawn(*args, **kwargs)
 
 
 # ========================================
@@ -1216,7 +925,7 @@ class NeuroQInference:
 @app.function(
     image=image,
     gpu="T4",
-    timeout=300,
+    timeout=86400,  # 24時間 (Modalの最大値)
     scaledown_window=120,
     volumes={"/model_checkpoints": checkpoints_volume},
 )
@@ -1283,7 +992,7 @@ def fastapi_app():
     web_app = FastAPI(
         title="NeuroQ API",
         description="Quantum-Bit Neural Network Language Model API",
-        version="1.0.0"
+        version="1.0.1"
     )
     
     # CORS設定（必要に応じて調整）
@@ -1307,7 +1016,7 @@ def fastapi_app():
     async def root():
         return {
             "name": "NeuroQ API",
-            "version": "1.0.0",
+            "version": "1.0.1",
             "description": "Quantum-Bit Neural Network Language Model",
             "endpoints": {
                 "health": "GET /health",
@@ -1541,12 +1250,12 @@ def test_health():
 
 @app.function(
     image=image,
-    gpu="A100",  # 学習にはA100推奨（40GB/80GB VRAM）
-    timeout=7200,  # 2時間
+    gpu="A100", 
+    timeout=86400, 
     volumes={"/model_checkpoints": checkpoints_volume},
 )
 def train_model(
-    model_size: str = "small", 
+    model_size: str = "micro", 
     epochs: int = 10, 
     batch_size: int = None, 
     lr: float = None,
@@ -1555,318 +1264,214 @@ def train_model(
     split: str = "train",
     max_samples: int = None
 ):
-    """
-    Modal GPU上でNeuroQモデルを学習（A100 GPU + Mixed Precision）
-    
-    Args:
-        model_size: 'micro', 'small', 'large'
-        epochs: 学習エポック数
-        batch_size: バッチサイズ（Noneならデフォルト）
-        lr: 学習率（Noneならデフォルト）
-        dataset_ids: Hugging FaceデータセットIDのリスト (例: ["wikitext", "openai/summarize_from_feedback"])
-        text_column: テキストカラム名 (デフォルト: "text")
-        split: データ分割 (デフォルト: "train")
-        max_samples: 最大サンプル数/データセット (Noneなら全件)
-    
-    使い方:
-        modal run modal_app.py::train_model --model-size small --epochs 10
-        modal run modal_app.py::train_model --dataset-ids '["wikitext"]' --text-column text
-    """
-    import sys
     import os
+    import sys
     import torch
     import random
     from torch.cuda.amp import autocast, GradScaler
     
-    sys.path.insert(0, "/root/neuroq")
-    os.chdir("/root/neuroq")
+    # コンテナ内のパス解決
+    if os.path.exists("/root/neuroq"):
+        sys.path.insert(0, "/root/neuroq")
+        os.chdir("/root/neuroq")
+    elif os.path.exists("/root"):
+        sys.path.insert(0, "/root")
+        os.chdir("/root")
     
-    print("=" * 70)
-    print(f"🚀 NeuroQ {model_size.upper()} モデル学習（A100 GPU + FP16）")
-    print("=" * 70)
-    
-    # デバイス
     device = "cuda" if torch.cuda.is_available() else "cpu"
-    print(f"📊 Device: {device}")
-    if torch.cuda.is_available():
-        print(f"📊 GPU: {torch.cuda.get_device_name(0)}")
-        print(f"📊 VRAM: {torch.cuda.get_device_properties(0).total_memory / 1e9:.1f} GB")
-        # メモリ断片化対策
-        torch.cuda.empty_cache()
-    
-    # モジュールインポート
-    from neuroquantum_layered import NeuroQuantum, NeuroQuantumConfig, NeuroQuantumTokenizer
-    from neuroquantum_brain import get_training_data
-    from model_configs import get_model_config, get_checkpoint_path, AVAILABLE_MODELS
-    
-    # 学習設定（A100用に調整）
-    if batch_size is None:
-        batch_size = 8 if model_size == 'micro' else (4 if model_size == 'small' else 2)
-    if lr is None:
-        lr = 0.0005 if model_size == 'micro' else 0.0003
-    seq_length = 64
-    
-    print(f"\n📋 学習設定:")
-    print(f"   model_size: {model_size}")
-    print(f"   epochs: {epochs}")
-    print(f"   batch_size: {batch_size}")
-    print(f"   lr: {lr}")
-    if dataset_ids:
-        print(f"   dataset_ids: {dataset_ids}")
-        print(f"   text_column: {text_column}")
-        print(f"   split: {split}")
-        if max_samples:
-            print(f"   max_samples: {max_samples} (per dataset)")
-    
-    # モデル設定を先に取得（vocab_size を使うため）
-    print("\n📚 SentencePieceトークナイザー初期化...")
-    config = get_model_config(model_size)
-    model_vocab_size = config['vocab_size']
-    tokenizer_path = "neuroq_tokenizer.model"
-    tokenizer = NeuroQuantumTokenizer(vocab_size=model_vocab_size, model_file=tokenizer_path)
-    print(f"   語彙サイズ: {tokenizer.vocab_size:,}")
-    
-    # 学習データ
-    print("\n📊 学習データ準備...")
-    
-    texts = []
-    
-    if dataset_ids and len(dataset_ids) > 0:
-        # Hugging Faceデータセットからロード
-        from datasets import load_dataset
-
-        for dataset_id in dataset_ids:
-            print(f"\n   🤗 ロード中: {dataset_id}")
-
-            try:
-                # oasst1_ja の場合はローカルファイルから読み込み
-                if dataset_id == "oasst1_ja":
-                    data_file_candidates = [
-                        "/root/neuroq/data/oasst1_ja_conversations.txt",
-                        "data/oasst1_ja_conversations.txt",
-                        "../data/oasst1_ja_conversations.txt",
-                    ]
-                    data_file = None
-                    for path in data_file_candidates:
-                        if os.path.exists(path):
-                            data_file = path
-                            break
-
-                    if data_file is None:
-                        print(f"   ❌ oasst1_ja: data file not found")
-                        print(f"      検索パス: {data_file_candidates}")
-                        continue
-
-                    print(f"   📖 oasst1_ja会話データ読み込み: {data_file}")
-                    with open(data_file, 'r', encoding='utf-8') as f:
-                        content = f.read()
-
-                    # 空行で区切られた会話ブロックに分割
-                    blocks = content.split('\n\n')
-                    oasst1_ja_count = 0
-                    for block in blocks:
-                        block = block.strip()
-                        if block and 'User:' in block and 'Assistant:' in block:
-                            texts.append(block)
-                            oasst1_ja_count += 1
-
-                    print(f"   ✅ oasst1_ja: {oasst1_ja_count} 会話サンプル")
-                    continue
-
-                # データセット名にサブセットが含まれる場合（例: "wikitext/wikitext-2-raw-v1"）
-                if "/" in dataset_id and dataset_id.count("/") >= 2:
-                    parts = dataset_id.split("/")
-                    ds_name = "/".join(parts[:-1])
-                    ds_subset = parts[-1]
-                    dataset = load_dataset(ds_name, ds_subset, split=split)
-                else:
-                    # 標準的なデータセット
-                    try:
-                        dataset = load_dataset(dataset_id, split=split)
-                    except:
-                        # サブセット指定が必要な場合
-                        dataset = load_dataset(dataset_id, "default", split=split)
-                
-                print(f"   ✅ データセットロード完了: {len(dataset)} サンプル")
-                
-                # サンプル数制限
-                if max_samples and len(dataset) > max_samples:
-                    dataset = dataset.shuffle(seed=42).select(range(max_samples))
-                    print(f"   📉 サンプル数を {max_samples} に制限")
-                
-                # テキストを抽出
-                available_columns = dataset.column_names
-                print(f"   利用可能なカラム: {available_columns}")
-                
-                # テキストカラムを探す
-                if text_column in available_columns:
-                    target_column = text_column
-                elif "text" in available_columns:
-                    target_column = "text"
-                elif "content" in available_columns:
-                    target_column = "content"
-                elif "sentence" in available_columns:
-                    target_column = "sentence"
-                elif "prompt" in available_columns:
-                    target_column = "prompt"
-                elif "question" in available_columns:
-                    target_column = "question"
-                else:
-                    # 最初の文字列カラムを使用
-                    target_column = available_columns[0]
-                    print(f"   ⚠️ テキストカラムが見つかりません。'{target_column}' を使用します")
-                
-                print(f"   📝 テキストカラム: {target_column}")
-                
-                dataset_texts = []
-                for item in dataset:
-                    text = item.get(target_column, "")
-                    if text and isinstance(text, str) and len(text) > 10:
-                        dataset_texts.append(text)
-                
-                print(f"   有効なテキスト: {len(dataset_texts)} 件")
-                texts.extend(dataset_texts)
-                
-            except Exception as e:
-                print(f"   ❌ データセットロードエラー ({dataset_id}): {e}")
-        
-        # データセットからテキストが取得できなかった場合はデフォルトにフォールバック
-        if len(texts) == 0:
-            print("\n   📚 デフォルトデータにフォールバック...")
-            texts = get_training_data()
-    else:
-        # デフォルトの学習データを使用
-        texts = get_training_data()
-    
-    print(f"   サンプル数: {len(texts)}")
-    
-    all_tokens = []
-    for text in texts:
-        tokens = tokenizer.encode(text, add_special=False)
-        all_tokens.extend(tokens)
-        all_tokens.append(tokenizer.eos_id)
-    print(f"   総トークン数: {len(all_tokens):,}")
-    
-    # モデル構築
-    print("\n🧠 モデル構築...")
-    config = get_model_config(model_size)
-    
-    nq_config = NeuroQuantumConfig()
-    nq_config.vocab_size = config['vocab_size']
-    nq_config.embed_dim = config['embed_dim']
-    nq_config.num_heads = config['num_heads']
-    nq_config.num_layers = config['num_layers']
-    nq_config.max_seq_len = config.get('max_seq_len', 512)
-    nq_config.dropout = config.get('dropout', 0.1)
-    
-    model = NeuroQuantum(nq_config).to(device)
-    total_params = sum(p.numel() for p in model.parameters())
-    print(f"   {config['name']}: {total_params:,} パラメータ ({total_params/1e6:.1f}M)")
-    print(f"   embed_dim: {config['embed_dim']}")
-    print(f"   num_heads: {config['num_heads']}")
-    print(f"   num_layers: {config['num_layers']}")
-    
-    # シーケンス作成
-    sequences = []
-    for i in range(0, len(all_tokens) - seq_length, seq_length // 2):
-        sequences.append(all_tokens[i:i + seq_length])
-    print(f"\n   シーケンス数: {len(sequences):,}")
-    
-    # 学習ループ (Mixed Precision FP16)
-    print("\n🎓 学習開始（Mixed Precision FP16）...")
-    optimizer = torch.optim.AdamW(model.parameters(), lr=lr)
-    criterion = torch.nn.CrossEntropyLoss()
-    scaler = GradScaler()  # FP16用スケーラー
-    
-    total_batches = (len(sequences) - batch_size) // batch_size
-    print(f"   バッチ数/エポック: {total_batches:,}")
-    
-    best_loss = float('inf')
-    
-    for epoch in range(epochs):
-        model.train()
-        total_loss = 0
-        batch_count = 0
-        
-        random.shuffle(sequences)
-        
-        for i in range(0, len(sequences) - batch_size, batch_size):
-            batch = sequences[i:i + batch_size]
-            batch_tensor = torch.tensor(batch, device=device)
-            
-            input_ids = batch_tensor[:, :-1]
-            target_ids = batch_tensor[:, 1:]
-            
-            optimizer.zero_grad()
-            
-            # Mixed Precision Forward
-            with autocast():
-                logits = model(input_ids)
-                loss = criterion(
-                    logits.reshape(-1, config['vocab_size']),
-                    target_ids.reshape(-1)
-                )
-            
-            # Mixed Precision Backward
-            scaler.scale(loss).backward()
-            scaler.unscale_(optimizer)
-            torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
-            scaler.step(optimizer)
-            scaler.update()
-            
-            total_loss += loss.item()
-            batch_count += 1
-            
-            # 進捗表示（10%ごと）
-            if batch_count % max(1, total_batches // 10) == 0:
-                progress = batch_count / total_batches * 100
-                print(f"   Epoch {epoch+1}/{epochs} - {progress:.0f}% - Loss: {total_loss/batch_count:.4f}")
-        
-        avg_loss = total_loss / max(batch_count, 1)
-        if avg_loss < best_loss:
-            best_loss = avg_loss
-        print(f"   ✅ Epoch {epoch+1}/{epochs} 完了: Loss={avg_loss:.4f}")
-    
-    print(f"\n✅ 学習完了！ ベストLoss: {best_loss:.4f}")
-    
-    # チェックポイント保存
-    checkpoint_filename = f"neuroq_{model_size}_checkpoint.pt"
-    checkpoint_path = f"/model_checkpoints/{checkpoint_filename}"
-    local_path = f"checkpoints/{checkpoint_filename}"
-    
-    checkpoint = {
-        'model_state_dict': model.state_dict(),
-        'config': config,
-        'tokenizer': {
-            'type': 'sentencepiece',
-            'model_path': 'neuroq_tokenizer.model',
-            'vocab_size': tokenizer.vocab_size,
-        },
-        'model_size': model_size,
-    }
-
-    # ボリュームに保存
-    torch.save(checkpoint, checkpoint_path)
-    checkpoints_volume.commit()
-    print(f"💾 チェックポイント保存: {checkpoint_path}")
-    
-    # ローカルにも保存（ダウンロード用）
-    os.makedirs("checkpoints", exist_ok=True)
-    torch.save(checkpoint, local_path)
-    print(f"💾 ローカルにもコピー: {local_path}")
+    os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
     
     print("\n" + "=" * 70)
-    print("✅ 学習完了！")
+    print(f"🚀 NeuroQ {model_size.upper()} クラウド学習")
     print("=" * 70)
+
+    # モジュール読込
+    from neuroquantum_layered import NeuroQuantum, NeuroQuantumConfig
+    from tiktoken_tokenizer import TikTokenTokenizer
+    from model_configs import get_model_config
     
-    return {
-        "status": "success",
-        "model_size": model_size,
-        "parameters": total_params,
-        "best_loss": best_loss,
-        "checkpoint_path": checkpoint_path,
-        "epochs": epochs,
+    config = get_model_config(model_size)
+    # LR初期値をより安全に設定 (micro: 1e-4, small/large: 5e-5)
+    lr = lr or (1e-4 if model_size == "micro" else 5e-5)
+    batch_size = batch_size or (4 if model_size == "micro" else 2)
+    seq_length = config.get('max_seq_len', 512)
+    
+    tokenizer = TikTokenTokenizer(encoding_name="o200k_base")
+    
+    # データ準備
+    print("\n📥 データロード中...")
+    from datasets import load_dataset, concatenate_datasets
+    ds_list = []
+    ids = dataset_ids or ["OpenAssistant/oasst1", "OpenAssistant/oasst2"]
+    
+    for ds_id in ids:
+        try:
+            print(f"   - {ds_id} をロード...")
+            ds = load_dataset(ds_id, split=split)
+            if max_samples:
+                ds = ds.shuffle(seed=42).select(range(min(len(ds), max_samples)))
+            ds_list.append(ds)
+        except Exception as e:
+            print(f"   ⚠️ {ds_id} 失敗: {e}")
+            
+    all_tokens = []
+    if ds_list:
+        combined = concatenate_datasets(ds_list)
+        for i, ex in enumerate(combined):
+            txt = ex.get(text_column, "")
+            if txt:
+                all_tokens.extend(tokenizer.encode(txt, add_special=False) + [tokenizer.eos_id])
+            if i % 10000 == 0 and i > 0: print(f"      {i}件トークン化完了...")
+    
+    print(f"📊 総トークン数: {len(all_tokens):,}")
+    
+    # 3. シーケンス分割 & 検証用切り出し
+    all_seqs = [all_tokens[i:i + seq_length] for i in range(0, len(all_tokens) - seq_length, seq_length // 2)]
+    random.shuffle(all_seqs)
+    val_sz = max(1, int(len(all_seqs) * 0.05))
+    train_seqs = all_seqs[:-val_sz]
+    val_seqs = all_seqs[-val_sz:]
+    print(f"✅ 学習用: {len(train_seqs):,}, 検証用: {len(val_seqs):,}")
+
+    # 4. モデル構築
+    nq_config = NeuroQuantumConfig()
+    for k, v in config.items():
+        if hasattr(nq_config, k): setattr(nq_config, k, v)
+    nq_config.max_seq_len = seq_length
+    model = NeuroQuantum(nq_config).to(device)
+    
+    # 5. 学習ループ準備
+    optimizer = torch.optim.AdamW(model.parameters(), lr=lr, eps=1e-8)
+    criterion = torch.nn.CrossEntropyLoss()
+    scaler = GradScaler()
+    accumulation_steps = 4
+    
+    best_val_loss = float('inf')
+    patience, patience_counter = 3, 0
+    best_state = None
+
+    for epoch in range(epochs):
+        model.train()
+        total_train_loss, batch_count = 0, 0
+        random.shuffle(train_seqs)
+        optimizer.zero_grad()
+        
+        for i in range(0, len(train_seqs) - batch_size, batch_size):
+            batch = torch.tensor(train_seqs[i:i+batch_size], device=device)
+            inp, tar = batch[:, :-1], batch[:, 1:]
+            
+            with autocast():
+                lgt = model(inp)
+                loss = criterion(lgt.reshape(-1, config['vocab_size']), tar.reshape(-1))
+                loss = loss / accumulation_steps
+            
+            if torch.isnan(loss):
+                continue
+                
+            scaler.scale(loss).backward()
+            
+            if (batch_count + 1) % accumulation_steps == 0:
+                scaler.unscale_(optimizer)
+                torch.nn.utils.clip_grad_norm_(model.parameters(), 0.5)
+                scaler.step(optimizer)
+                scaler.update()
+                optimizer.zero_grad()
+            
+            total_train_loss += loss.item() * accumulation_steps
+            batch_count += 1
+            if batch_count % 500 == 0:
+                print(f"   Epoch {epoch+1}/{epochs} | Batch {batch_count} | Loss: {loss.item()*accumulation_steps:.4f}")
+
+        # Validation & Test Prompts
+        model.eval()
+        v_loss = 0
+        with torch.no_grad():
+            for k in range(0, len(val_seqs) - batch_size, batch_size):
+                v_batch = torch.tensor(val_seqs[k:k+batch_size], device=device)
+                v_lgt = model(v_batch[:, :-1])
+                v_loss += criterion(v_lgt.reshape(-1, config['vocab_size']), v_batch[:, 1:].reshape(-1)).item()
+        
+        avg_train = total_train_loss / max(1, batch_count)
+        avg_val = v_loss / max(1, (len(val_seqs) // batch_size))
+        print(f"\n⭐ Epoch {epoch+1} 終了 | Train: {avg_train:.4f} | Val: {avg_val:.4f}")
+        
+        # 保存用データの作成
+        save_data = {
+            'model_state_dict': model.state_dict(),
+            'config': config,
+            'model_size': model_size,
+            'tokenizer': {
+                'type': 'tiktoken',
+                'encoding': 'o200k_base'
+            }
+        }
+        
+        # 定点テスト
+        print("📝 定点テスト生成 (Sampling Temp=0.7):")
+        # OASST形式のプロンプトでモデルを誘導
+        test_prompts = [
+            "### Human: こんにちは、元気ですか？\n### Assistant:",
+            "### Human: What is AI?\n### Assistant:",
+            "### Human: Python code for a simple for loop:\n### Assistant:"
+        ]
+        for prompt in test_prompts:
+            ids = tokenizer.encode(prompt, add_special=False)
+            gen = ids.copy()
+            for _ in range(60): # 生成トークン数を少し増やす
+                with torch.no_grad():
+                    lgt = model(torch.tensor([gen[-seq_length:]], device=device))
+                    # argmaxではなくサンプリングを使用して表現力を高める
+                    probs = torch.softmax(lgt[0, -1, :] / 0.7, dim=-1)
+                    nxt = torch.multinomial(probs, num_samples=1).item()
+                    
+                if nxt == tokenizer.eos_id: break
+                gen.append(nxt)
+            
+            resp_tokens = gen[len(ids):]
+            resp_text = tokenizer.decode(resp_tokens, skip_special=True).strip()
+            
+            # 視認性向上のため、空文字や制御文字のみの場合は情報を出す
+            display_prompt = prompt.replace("### Human: ", "").replace("\n### Assistant:", "")
+            if not resp_text:
+                if len(resp_tokens) > 0:
+                    resp_text = f"(Non-printable or spaces. Tokens: {resp_tokens[:5]}...)"
+                else:
+                    resp_text = "(No tokens generated / Immediate EOS)"
+                    
+            print(f"   Q: {display_prompt} | A: {resp_text[:120]}")
+
+        # Early Stopping
+        if avg_val < best_val_loss - 0.01:
+            best_val_loss = avg_val
+            patience_counter = 0
+            best_state = {k: v.cpu().clone() for k, v in model.state_dict().items()}
+            # 毎エポックのBestを即座に保存
+            torch.save(save_data, f"/model_checkpoints/neuroq_{model_size}_best.pt")
+            print(f"   ✨ Best更新 & 保存完了")
+        else:
+            patience_counter += 1
+            print(f"   ⏳ 改善なし ({patience_counter}/{patience})")
+            if patience_counter >= patience:
+                print("🛑 早期終了")
+                break
+    
+    # 最終保存
+    if best_state: model.load_state_dict({k: v.to(device) for k, v in best_state.items()})
+    final_path = f"/model_checkpoints/neuroq_{model_size}_checkpoint.pt"
+    
+    # 最終保存用のデータ（best_stateを反映）
+    final_save_data = {
+        'model_state_dict': model.state_dict(),
+        'config': config,
+        'model_size': model_size,
+        'tokenizer': {
+            'type': 'tiktoken',
+            'encoding': 'o200k_base'
+        }
     }
+    torch.save(final_save_data, final_path)
+    checkpoints_volume.commit()
+    return {"status": "success", "best_val_loss": best_val_loss}
 
 
 @app.function(
