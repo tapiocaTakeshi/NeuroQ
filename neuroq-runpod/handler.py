@@ -101,7 +101,13 @@ VOCAB_SIZE = 8000
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 
 # デフォルトシステムプロンプト（会話指示）
-DEFAULT_SYSTEM_PROMPT = """あなたは親切で正確なアシスタントです。
+DEFAULT_SYSTEM_PROMPT = """You are an AI assistant.
+The user is a human.
+Answer clearly and concisely.
+Do not output random text.
+Always reply in Japanese.
+
+あなたは親切で正確なアシスタントです。
 Userはあなたを使っている人で、Assistantはあなた自身です。
 以下のルールに従ってください：
 1. Userの質問に短く正確に答える
