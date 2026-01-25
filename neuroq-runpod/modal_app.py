@@ -73,14 +73,21 @@ image = (
 # チェックポイント保存用ボリューム（推論時も使用）
 checkpoints_volume = modal.Volume.from_name("neuroq-checkpoints", create_if_missing=True)
 
-# デフォルトシステムプロンプト
-DEFAULT_SYSTEM_PROMPT = """あなたは親切で正確なアシスタントです。
-Userはあなたを使っている人で、Assistantはあなた自身です。
-以下のルールに従ってください：
-1. Userの質問に短く正確に答える
-2. わからないことは質問する
-3. 聞かれたことだけに答える（余計な情報を追加しない）
-4. 前の文脈を踏まえて返答する"""
+# デフォルトシステムプロンプト（英語で生成→日本語に翻訳）
+DEFAULT_SYSTEM_PROMPT = """You are an AI assistant.
+The user is a human.
+Answer clearly and concisely.
+Do not output random text.
+Always reply in English.
+You must respond in English only.
+
+You are a helpful and accurate assistant.
+User is the person using you, and Assistant is yourself.
+Follow these rules:
+1. Answer the user's questions briefly and accurately
+2. Ask questions if you don't understand something
+3. Only answer what is asked (don't add unnecessary information)
+4. Respond based on the previous context"""
 
 @app.cls(
     image=image,
@@ -130,7 +137,11 @@ class NeuroQInference:
         self.session_system_prompts = {}  # セッションごとのシステムプロンプト
         self.vocab_size = 8000
         self.tokenizer = None  # Small/Large用
-        
+
+        # 翻訳パイプライン
+        self.translation_pipeline = None
+        self.translation_initialized = False
+
         # チェックポイントパス
         # 全てのモデルサイズでModalボリュームを参照（train_modelで保存された最新版を使用）
         self.checkpoint_paths = {
@@ -166,7 +177,18 @@ class NeuroQInference:
             print("✅ model_configs.py をインポートしました")
         except ImportError:
             self.model_configs_available = False
-        
+
+        # 翻訳パイプラインをインポート
+        try:
+            from translation_pipeline import TranslationPipeline
+            self.TranslationPipeline = TranslationPipeline
+            self.translation_available = True
+            print("✅ translation_pipeline.py をインポートしました")
+        except ImportError as e:
+            print(f"⚠️ translation_pipeline.py のインポートに失敗: {e}")
+            self.TranslationPipeline = None
+            self.translation_available = False
+
         # デフォルトでmicroモデルを事前ロード（高速化のため）
         self._load_model('micro')
         
@@ -399,18 +421,44 @@ class NeuroQInference:
             self.current_model_size = model_size
             self.is_initialized = True
             return True
-        
+
         except Exception as e:
             import traceback
             print(f"❌ モデルロードエラー: {e}")
             traceback.print_exc()
             return False
-    
+
+    def _initialize_translation_pipeline(self) -> bool:
+        """翻訳パイプラインを初期化（Lazy Loading）"""
+        if self.translation_initialized:
+            return True
+
+        if not self.translation_available or self.TranslationPipeline is None:
+            print("⚠️ 翻訳パイプラインは利用できません")
+            return False
+
+        try:
+            print("🔄 翻訳パイプライン初期化中...")
+            self.translation_pipeline = self.TranslationPipeline(
+                model_name="facebook/nllb-200-distilled-600M",
+                device=self.device,
+                use_tiktoken=True,
+            )
+            self.translation_initialized = True
+            print("✅ 翻訳パイプライン初期化完了")
+            return True
+        except Exception as e:
+            import traceback
+            print(f"❌ 翻訳パイプライン初期化エラー: {e}")
+            traceback.print_exc()
+            return False
+
     def _generate_text(self, prompt: str, max_length: int = 50,
                        temp_min: float = None, temp_max: float = None,
                        temperature: float = None, history: List[Dict] = None,
-                       system_prompt: str = None, session_id: str = None) -> str:
-        """テキスト生成（ヒストリー方式）
+                       system_prompt: str = None, session_id: str = None,
+                       use_translation: bool = True) -> dict:
+        """テキスト生成（ヒストリー方式 + 翻訳パイプライン対応）
 
         Args:
             prompt: ユーザーの入力
@@ -421,11 +469,44 @@ class NeuroQInference:
             history: 会話履歴 [{"role": "user", "content": "..."}, {"role": "assistant", "content": "..."}, ...]
             system_prompt: カスタムシステムプロンプト（Noneの場合はセッションの既存設定またはデフォルトを使用）
             session_id: セッションID（システムプロンプトの保存用）
+            use_translation: 翻訳パイプラインを使用するか（日本語入力→英語生成→日本語出力）
+
+        Returns:
+            dict: {
+                "generated": 生成されたテキスト,
+                "translated_prompt": 翻訳された入力（翻訳使用時のみ）,
+                "english_response": 英語の生成結果（翻訳使用時のみ）,
+                "translation_used": 翻訳が使用されたか
+            }
         """
         import torch
 
         if self.model is None or not self.is_initialized:
-            return "Error: Model not initialized"
+            return {"generated": "Error: Model not initialized", "translation_used": False}
+
+        # 翻訳パイプラインの初期化（必要な場合）
+        translated_prompt = None
+        english_response = None
+        actual_prompt = prompt
+
+        if use_translation:
+            if not self.translation_available:
+                print("⚠️ 翻訳機能は利用できません")
+                use_translation = False
+            elif not self.translation_initialized:
+                if not self._initialize_translation_pipeline():
+                    print("⚠️ 翻訳パイプラインの初期化に失敗しました")
+                    use_translation = False
+
+        # 入力を日本語→英語に翻訳
+        if use_translation and self.translation_pipeline is not None:
+            try:
+                translated_prompt = self.translation_pipeline.ja_to_en(prompt)
+                actual_prompt = translated_prompt
+                print(f"🌐 翻訳(JA→EN): {prompt[:30]}... → {translated_prompt[:30]}...")
+            except Exception as e:
+                print(f"⚠️ 入力翻訳エラー: {e}")
+                use_translation = False
 
         try:
             # システムプロンプトの処理
@@ -471,8 +552,9 @@ class NeuroQInference:
                         history_context += f"### Human: {content}\n"
                     elif role == "assistant":
                         history_context += f"### Assistant: {content}\n"
-            
-            full_prompt = history_context + f"### Human: {prompt}\n### Assistant:"
+
+            # 翻訳使用時は翻訳済みプロンプトを使用
+            full_prompt = history_context + f"### Human: {actual_prompt}\n### Assistant:"
             
             # 生成
             with torch.no_grad():
@@ -484,14 +566,35 @@ class NeuroQInference:
                     max_length=max_length,
                     temperature=temperature or 0.5
                 )
-            
-            return result
-        
+
+            # 英語の生成結果を保存（翻訳使用時）
+            if use_translation:
+                english_response = result
+
+            # 出力を英語→日本語に翻訳
+            if use_translation and self.translation_pipeline is not None:
+                try:
+                    result = self.translation_pipeline.en_to_ja(result)
+                    print(f"🌐 翻訳(EN→JA): {english_response[:30]}... → {result[:30]}...")
+                except Exception as e:
+                    print(f"⚠️ 出力翻訳エラー: {e}")
+                    # エラー時は英語の結果をそのまま返す
+
+            return {
+                "generated": result,
+                "translated_prompt": translated_prompt,
+                "english_response": english_response,
+                "translation_used": use_translation and self.translation_pipeline is not None
+            }
+
         except Exception as e:
             import traceback
             error_details = traceback.format_exc()
             print(f"❌ 生成エラー詳細:\n{error_details}")
-            return f"Error: {str(e)}\nTraceback: {error_details}"
+            return {
+                "generated": f"Error: {str(e)}\nTraceback: {error_details}",
+                "translation_used": False
+            }
     
     def _generate_neuroq(self, prompt: str, max_length: int = 50, temperature: float = 0.5) -> str:
         """NeuroQuantum モデル用のテキスト生成（繰り返しペナルティ付き）"""
@@ -628,7 +731,9 @@ class NeuroQInference:
             "device": self.device,
             "vocab_size": self.vocab_size,
             "current_model_size": self.current_model_size or "none",
-            "available_model_sizes": ["micro", "small", "large"]
+            "available_model_sizes": ["micro", "small", "large"],
+            "translation_available": self.translation_available,
+            "translation_initialized": self.translation_initialized
         }
     
     @modal.method()
@@ -839,8 +944,8 @@ class NeuroQInference:
                  temperature: float = 0.5, temp_min: float = None,
                  temp_max: float = None, history: List[Dict] = None,
                  model_size: str = "micro", system_prompt: str = None,
-                 session_id: str = None) -> Dict[str, Any]:
-        """テキスト生成（ヒストリー方式）
+                 session_id: str = None, use_translation: bool = True) -> Dict[str, Any]:
+        """テキスト生成（ヒストリー方式 + 翻訳パイプライン対応）
 
         Args:
             prompt: ユーザーの入力
@@ -852,6 +957,7 @@ class NeuroQInference:
             model_size: モデルサイズ（micro, small, large）
             system_prompt: カスタムシステムプロンプト（Noneの場合はデフォルトを使用）
             session_id: セッションID（システムプロンプトの永続化用）
+            use_translation: 翻訳パイプラインを使用するか（日本語入力→英語生成→日本語出力）
         """
 
         # モデルサイズが変更された場合はリロード
@@ -871,14 +977,16 @@ class NeuroQInference:
                 temperature=temperature,
                 history=history,
                 system_prompt=system_prompt,
-                session_id=session_id
+                session_id=session_id,
+                use_translation=use_translation
             )
 
             # エラーチェック
-            if result.startswith("Error:"):
+            generated_text = result.get("generated", "")
+            if generated_text.startswith("Error:"):
                 return {
                     "status": "error",
-                    "error": result,
+                    "error": generated_text,
                     "prompt": prompt,
                     "model_size": self.current_model_size
                 }
@@ -891,14 +999,22 @@ class NeuroQInference:
             else:
                 used_system_prompt = DEFAULT_SYSTEM_PROMPT
 
-            return {
+            response = {
                 "status": "success",
                 "prompt": prompt,
-                "generated": result,
+                "generated": generated_text,
                 "model_size": self.current_model_size,
                 "system_prompt": used_system_prompt,
-                "session_id": session_id
+                "session_id": session_id,
+                "translation_used": result.get("translation_used", False)
             }
+
+            # 翻訳が使用された場合、追加情報を含める
+            if result.get("translation_used"):
+                response["translated_prompt"] = result.get("translated_prompt")
+                response["english_response"] = result.get("english_response")
+
+            return response
         except Exception as e:
             import traceback
             error_detail = traceback.format_exc()
@@ -967,6 +1083,7 @@ def fastapi_app():
         model_size: str = "micro"
         system_prompt: Optional[str] = None  # カスタムシステムプロンプト
         session_id: Optional[str] = None  # セッションID（システムプロンプトの永続化用）
+        use_translation: bool = True  # 翻訳パイプラインを使用するか（日本語入力→英語生成→日本語出力）
     
     class GenerateResponse(BaseModel):
         status: str
@@ -975,6 +1092,9 @@ def fastapi_app():
         model_size: str
         system_prompt: Optional[str] = None
         session_id: Optional[str] = None
+        translation_used: Optional[bool] = None
+        translated_prompt: Optional[str] = None
+        english_response: Optional[str] = None
     
     class HealthResponse(BaseModel):
         status: str
@@ -1035,8 +1155,10 @@ def fastapi_app():
                 "history": "会話履歴 [{role, content}, ...]",
                 "model_size": "micro, small, large（デフォルト: micro）",
                 "system_prompt": "カスタムシステムプロンプト（省略時はデフォルト）",
-                "session_id": "セッションID（システムプロンプトの永続化用）"
-            }
+                "session_id": "セッションID（システムプロンプトの永続化用）",
+                "use_translation": "翻訳パイプラインを使用（デフォルト: true、日本語入力→英語生成→日本語出力）"
+            },
+            "translation_note": "use_translation=true を指定すると、日本語入力→英語生成→日本語出力の翻訳パイプラインを使用できます"
         }
     
     @web_app.get("/health", response_model=HealthResponse)
@@ -1067,7 +1189,8 @@ def fastapi_app():
                 history=history_list,
                 model_size=request.model_size,
                 system_prompt=request.system_prompt,
-                session_id=request.session_id
+                session_id=request.session_id,
+                use_translation=request.use_translation
             )
 
             if result.get("status") == "error":
