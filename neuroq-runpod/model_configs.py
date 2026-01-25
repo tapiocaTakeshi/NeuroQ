@@ -75,9 +75,9 @@ AVAILABLE_MODELS = {
 
 # チェックポイントパス
 CHECKPOINT_PATHS = {
-    'micro': '/model_checkpoints/neuroq_micro_checkpoint.pt',
-    'small': '/model_checkpoints/neuroq_small_checkpoint.pt',
-    'large': '/model_checkpoints/neuroq_large_checkpoint.pt',
+    'micro': '/model_checkpoints/neuroq_micro_best.pt',
+    'small': '/model_checkpoints/neuroq_small_best.pt',
+    'large': '/model_checkpoints/neuroq_large_best.pt',
 }
 
 

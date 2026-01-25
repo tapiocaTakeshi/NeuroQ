@@ -145,9 +145,9 @@ class NeuroQInference:
         # チェックポイントパス
         # 全てのモデルサイズでModalボリュームを参照（train_modelで保存された最新版を使用）
         self.checkpoint_paths = {
-            'micro': "/model_checkpoints/neuroq_micro_checkpoint.pt",
-            'small': "/model_checkpoints/neuroq_small_checkpoint.pt",
-            'large': "/model_checkpoints/neuroq_large_checkpoint.pt",
+            'micro': "/model_checkpoints/neuroq_micro_best.pt",
+            'small': "/model_checkpoints/neuroq_small_best.pt",
+            'large': "/model_checkpoints/neuroq_large_best.pt",
         }
         
         # モジュールをインポート
