@@ -42,25 +42,25 @@ NEUROQ_MICRO = {
     'dropout': 0.1,
 }
 
-# OpenAI text-embedding-3-small 
+# NeuroQ-Small
 NEUROQ_SMALL = {
     'name': 'NeuroQ-Small',
-    'description': 'OpenAI text-embedding-3-small (1536次元) 対応',
+    'description': '軽量モデル (256次元)',
     'vocab_size': 200019,      # o200k_base
-    'embed_dim': 1536,         # text-embedding-3-small と同じ
-    'num_heads': 12,
+    'embed_dim': 256,
+    'num_heads': 8,
     'num_layers': 12,
     'max_seq_len': 512,
     'dropout': 0.1,
 }
 
-# OpenAI text-embedding-3-large
+# NeuroQ-Large
 NEUROQ_LARGE = {
     'name': 'NeuroQ-Large',
-    'description': 'OpenAI text-embedding-3-large (3072次元) 対応',
+    'description': '標準モデル (384次元)',
     'vocab_size': 200019,      # o200k_base
-    'embed_dim': 3072,         # text-embedding-3-large と同じ
-    'num_heads': 16,
+    'embed_dim': 384,
+    'num_heads': 8,
     'num_layers': 18,
     'max_seq_len': 512,
     'dropout': 0.1,
