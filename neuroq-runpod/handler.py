@@ -537,7 +537,7 @@ def generate_text(prompt: str, max_length: int = 50,
                   temp_min: float = None, temp_max: float = None,
                   temperature: float = None, session_id: str = "default",
                   system_prompt: str = None,
-                  use_translation: bool = False) -> dict:
+                  use_translation: bool = True) -> dict:
     """
     テキスト生成（会話対応版 - NeuroQuantumBrainAI使用）
 
@@ -751,7 +751,8 @@ def handler(job):
         system_prompt = job_input.get("system_prompt")
 
         # 翻訳パラメータ（日本語入力→英語生成→日本語出力）
-        use_translation = job_input.get("use_translation", False)
+        # デフォルトでTrue: 日本語→英語→日本語の双方向翻訳を有効化
+        use_translation = job_input.get("use_translation", True)
 
         print(f"📝 Generate: model={model_size}, session='{session_id}', prompt='{prompt[:30]}...', translation={use_translation}")
         if system_prompt:
