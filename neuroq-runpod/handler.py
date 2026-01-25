@@ -60,6 +60,16 @@ except ImportError as e:
     BPE_TRAINER_AVAILABLE = False
     print(f"⚠️ bpe_tokenizer_trainer.py のインポートに失敗: {e}")
 
+# 翻訳パイプラインをインポート
+try:
+    from translation_pipeline import TranslationPipeline
+    TRANSLATION_AVAILABLE = True
+    print("✅ translation_pipeline.py をインポートしました")
+except ImportError as e:
+    TRANSLATION_AVAILABLE = False
+    TranslationPipeline = None
+    print(f"⚠️ translation_pipeline.py のインポートに失敗: {e}")
+
 # トークナイザーモデルのパス
 TOKENIZER_MODEL_PATH = "neuroq_tokenizer.model"
 
@@ -87,6 +97,10 @@ model = None  # NeuroQuantum または NeuroQuantumBrainAI インスタンス
 model_config = None  # 現在のモデル設定
 current_model_size = 'micro'  # 現在のモデルサイズ
 is_initialized = False
+
+# 翻訳パイプライン（lazy loading）
+translation_pipeline = None
+translation_initialized = False
 
 # 学習状態管理
 pretrain_process = None
@@ -449,6 +463,40 @@ def initialize_model(model_size: str = 'micro'):
         return False
 
 
+# ========================================
+# 翻訳パイプライン初期化（Lazy Loading）
+# ========================================
+def initialize_translation_pipeline():
+    """
+    翻訳パイプラインを初期化（初回リクエスト時のみ呼ばれる）
+
+    NLLB-200を使用した日本語↔英語の翻訳機能を提供
+    """
+    global translation_pipeline, translation_initialized
+
+    if translation_initialized:
+        return True
+
+    if not TRANSLATION_AVAILABLE:
+        print("⚠️ 翻訳パイプラインは利用できません（translation_pipeline.pyが見つかりません）")
+        return False
+
+    try:
+        print("🔄 翻訳パイプライン初期化中...")
+        translation_pipeline = TranslationPipeline(
+            model_name="facebook/nllb-200-distilled-600M",
+            device=DEVICE,
+            use_tiktoken=True,
+        )
+        translation_initialized = True
+        print("✅ 翻訳パイプライン初期化完了")
+        return True
+    except Exception as e:
+        print(f"❌ 翻訳パイプライン初期化エラー: {e}")
+        import traceback
+        traceback.print_exc()
+        return False
+
 
 # ========================================
 # 会話履歴管理
@@ -488,7 +536,8 @@ def save_conversation_turn(session_id: str, user_message: str, assistant_respons
 def generate_text(prompt: str, max_length: int = 50,
                   temp_min: float = None, temp_max: float = None,
                   temperature: float = None, session_id: str = "default",
-                  system_prompt: str = None) -> str:
+                  system_prompt: str = None,
+                  use_translation: bool = False) -> dict:
     """
     テキスト生成（会話対応版 - NeuroQuantumBrainAI使用）
 
@@ -502,18 +551,48 @@ def generate_text(prompt: str, max_length: int = 50,
         temperature: 互換性のための単一温度（指定された場合は自動的にtemp_min/temp_maxに変換）
         session_id: 会話セッションID（会話履歴管理用）
         system_prompt: カスタムシステムプロンプト（Noneの場合はセッションの既存設定またはデフォルトを使用）
+        use_translation: 翻訳パイプラインを使用するか（日本語入力→英語生成→日本語出力）
 
     Returns:
-        生成されたテキスト
+        dict: {
+            "generated": 生成されたテキスト,
+            "translated_prompt": 翻訳された入力（翻訳使用時のみ）,
+            "english_response": 英語の生成結果（翻訳使用時のみ）,
+            "translation_used": 翻訳が使用されたか
+        }
     """
-    global model, session_system_prompts
+    global model, session_system_prompts, translation_pipeline
 
     if model is None:
-        return "Error: Model not initialized"
+        return {"generated": "Error: Model not initialized", "translation_used": False}
 
     # モデルが未学習の場合（model.model が None または学習済みの NeuroQuantumBrain がない場合）
     if model.model is None:
-        return "Error: Model not trained. Please run action='train' or action='pretrain_openai' first to train the model before generating text."
+        return {"generated": "Error: Model not trained. Please run action='train' or action='pretrain_openai' first to train the model before generating text.", "translation_used": False}
+
+    # 翻訳パイプラインの初期化（必要な場合）
+    translated_prompt = None
+    english_response = None
+    actual_prompt = prompt
+
+    if use_translation:
+        if not TRANSLATION_AVAILABLE:
+            print("⚠️ 翻訳機能は利用できません")
+            use_translation = False
+        elif not translation_initialized:
+            if not initialize_translation_pipeline():
+                print("⚠️ 翻訳パイプラインの初期化に失敗しました")
+                use_translation = False
+
+    # 入力を日本語→英語に翻訳
+    if use_translation and translation_pipeline is not None:
+        try:
+            translated_prompt = translation_pipeline.ja_to_en(prompt)
+            actual_prompt = translated_prompt
+            print(f"🌐 翻訳(JA→EN): {prompt[:30]}... → {translated_prompt[:30]}...")
+        except Exception as e:
+            print(f"⚠️ 入力翻訳エラー: {e}")
+            use_translation = False
 
     try:
         # 推論モードに設定（重要：学習を防ぐ）
@@ -557,9 +636,9 @@ def generate_text(prompt: str, max_length: int = 50,
             elif turn["role"] == "assistant":
                 context_parts.append(f"<ASSISTANT>{turn['content']}")
 
-        # 履歴を含む完全なプロンプト
+        # 履歴を含む完全なプロンプト（翻訳使用時は翻訳済みプロンプトを使用）
         history_context = "".join(context_parts)
-        full_prompt = history_context + prompt if history_context else prompt
+        full_prompt = history_context + actual_prompt if history_context else actual_prompt
 
         # 推論実行（torch.no_grad()で勾配計算を無効化）
         with torch.no_grad():
@@ -572,14 +651,32 @@ def generate_text(prompt: str, max_length: int = 50,
                 top_p=0.9,
             )
 
-        # 会話履歴に保存
+        # 英語の生成結果を保存（翻訳使用時）
+        if use_translation:
+            english_response = result
+
+        # 出力を英語→日本語に翻訳
+        if use_translation and translation_pipeline is not None:
+            try:
+                result = translation_pipeline.en_to_ja(result)
+                print(f"🌐 翻訳(EN→JA): {english_response[:30]}... → {result[:30]}...")
+            except Exception as e:
+                print(f"⚠️ 出力翻訳エラー: {e}")
+                # エラー時は英語の結果をそのまま返す
+
+        # 会話履歴に保存（元のプロンプトと最終結果）
         save_conversation_turn(session_id, prompt, result)
 
-        return result
+        return {
+            "generated": result,
+            "translated_prompt": translated_prompt,
+            "english_response": english_response,
+            "translation_used": use_translation and translation_pipeline is not None
+        }
     except Exception as e:
         import traceback
         traceback.print_exc()
-        return f"Error: {str(e)}"
+        return {"generated": f"Error: {str(e)}", "translation_used": False}
 
 
 # ========================================
@@ -620,7 +717,9 @@ def handler(job):
             "vocab_size": VOCAB_SIZE,
             "current_model_size": current_model_size,
             "available_model_sizes": ["micro", "small", "large"],
-            "model_configs_available": MODEL_CONFIGS_AVAILABLE
+            "model_configs_available": MODEL_CONFIGS_AVAILABLE,
+            "translation_available": TRANSLATION_AVAILABLE,
+            "translation_initialized": translation_initialized
         }
     
     # ========================================
@@ -651,7 +750,10 @@ def handler(job):
         # システムプロンプト（カスタム設定可能）
         system_prompt = job_input.get("system_prompt")
 
-        print(f"📝 Generate: model={model_size}, session='{session_id}', prompt='{prompt[:30]}...'")
+        # 翻訳パラメータ（日本語入力→英語生成→日本語出力）
+        use_translation = job_input.get("use_translation", False)
+
+        print(f"📝 Generate: model={model_size}, session='{session_id}', prompt='{prompt[:30]}...', translation={use_translation}")
         if system_prompt:
             print(f"📝 System prompt: '{system_prompt[:50]}...'")
 
@@ -662,17 +764,26 @@ def handler(job):
             temp_max=temp_max,
             temperature=temperature,
             session_id=session_id,
-            system_prompt=system_prompt
+            system_prompt=system_prompt,
+            use_translation=use_translation
         )
 
-        return {
+        response = {
             "status": "success",
             "prompt": prompt,
-            "generated": result,
+            "generated": result.get("generated", ""),
             "session_id": session_id,
             "model_size": current_model_size,
-            "system_prompt": session_system_prompts.get(session_id, DEFAULT_SYSTEM_PROMPT)
+            "system_prompt": session_system_prompts.get(session_id, DEFAULT_SYSTEM_PROMPT),
+            "translation_used": result.get("translation_used", False)
         }
+
+        # 翻訳が使用された場合、追加情報を含める
+        if result.get("translation_used"):
+            response["translated_prompt"] = result.get("translated_prompt")
+            response["english_response"] = result.get("english_response")
+
+        return response
     
     # ========================================
     # PRETRAIN_OPENAI（OpenAIデータセット事前学習）
@@ -1347,13 +1458,14 @@ def handler(job):
             "health",             # ヘルスチェック
             "status",             # ステータス確認
             "train",              # 学習（dataset_id='oasst1_ja'で日本語会話データ）
-            "generate",           # 推論（チェックポイントロード）
+            "generate",           # 推論（use_translation=trueで翻訳パイプライン使用）
             "pretrain_openai",    # OpenAIデータセット事前学習
             "pretrain_status",    # 事前学習ステータス
             "clear_session",      # 会話履歴クリア
             "set_system_prompt",  # システムプロンプト設定
             "get_system_prompt"   # システムプロンプト取得
-        ]
+        ],
+        "translation_note": "generate アクションで use_translation=true を指定すると、日本語入力→英語生成→日本語出力の翻訳パイプラインを使用できます"
     }
 
 
