@@ -114,20 +114,21 @@ conversation_sessions = {}  # session_id -> list of {role, content}
 VOCAB_SIZE = 8000
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 
-# デフォルトシステムプロンプト（会話指示）
+# デフォルトシステムプロンプト（会話指示 - 英語で生成→日本語に翻訳）
 DEFAULT_SYSTEM_PROMPT = """You are an AI assistant.
 The user is a human.
 Answer clearly and concisely.
 Do not output random text.
-Always reply in Japanese.
+Always reply in English.
+You must respond in English only.
 
-あなたは親切で正確なアシスタントです。
-Userはあなたを使っている人で、Assistantはあなた自身です。
-以下のルールに従ってください：
-1. Userの質問に短く正確に答える
-2. わからないことは質問する
-3. 聞かれたことだけに答える（余計な情報を追加しない）
-4. 前の文脈を踏まえて返答する"""
+You are a helpful and accurate assistant.
+User is the person using you, and Assistant is yourself.
+Follow these rules:
+1. Answer the user's questions briefly and accurately
+2. Ask questions if you don't understand something
+3. Only answer what is asked (don't add unnecessary information)
+4. Respond based on the previous context"""
 
 # セッションごとのシステムプロンプト
 session_system_prompts = {}  # session_id -> system_prompt
