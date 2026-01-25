@@ -7,6 +7,7 @@ OpenAIの公開データセットを使用して学習を行います。
 使用データセット:
 - OpenAssistant/oasst1 (高品質な会話データセット)
 - openai/openai_humaneval (HumanEval - コード生成評価)
+- openai/gsm8k (GSM8K - 小学校レベルの数学文章問題 8.5K)
 
 使い方:
     pip install datasets
@@ -36,6 +37,69 @@ except ImportError:
 
 # neuroquantum_layered.py をインポート
 from neuroquantum_layered import NeuroQuantumAI
+
+
+def load_gsm8k_data(max_samples: int = 5000) -> List[str]:
+    """
+    openai/gsm8k データセットをロード
+    GSM8K - 小学校レベルの数学文章問題データセット (8.5K問題)
+
+    Args:
+        max_samples: 最大サンプル数
+
+    Returns:
+        List[str]: <USER>問題<ASSISTANT>解答 形式のテキストリスト
+    """
+    print("\n📥 openai/gsm8k データセットをロード中...")
+    texts = []
+
+    try:
+        dataset = load_dataset("openai/gsm8k", "main", split="train")
+        print(f"   ✅ {len(dataset)} 問題をロードしました")
+
+        count = 0
+        for item in dataset:
+            if count >= max_samples:
+                break
+
+            question = item.get("question", "").strip()
+            answer = item.get("answer", "").strip()
+
+            if not question or not answer:
+                continue
+
+            # 長すぎる問題はスキップ
+            if len(question) > 500 or len(answer) > 1500:
+                continue
+
+            # 最終回答を抽出 (#### の後の数値)
+            final_answer = ""
+            if "####" in answer:
+                final_answer = answer.split("####")[-1].strip()
+
+            # <USER><ASSISTANT> 形式で追加（完全な解答付き）
+            conversation_text = f"<USER>{question}<ASSISTANT>{answer}"
+            texts.append(conversation_text)
+
+            # 簡略版も追加（最終回答のみ）
+            if final_answer:
+                short_text = f"<USER>{question}<ASSISTANT>答えは {final_answer} です。"
+                texts.append(short_text)
+
+            # Q&A形式でも追加（日本語スタイル）
+            qa_text = f"問題: {question}\n解答: {answer}"
+            texts.append(qa_text)
+
+            count += 1
+
+        print(f"   ✅ gsm8k から {len(texts)} テキストを抽出 ({count} 問題)")
+
+    except Exception as e:
+        print(f"   ⚠️ gsm8k ロードエラー: {e}")
+        import traceback
+        traceback.print_exc()
+
+    return texts
 
 
 def load_humaneval_data() -> List[str]:
@@ -298,13 +362,19 @@ def main():
     # 2. openai/openai_humaneval
     humaneval_texts = load_humaneval_data()
     all_texts.extend(humaneval_texts)
+    print(f"✅ openai/openai_humaneval: {len(humaneval_texts)} テキスト追加")
 
-    # 3. 日本語指示データ（最優先・大量に追加）
+    # 3. openai/gsm8k - 数学文章問題（重要：数学的推論能力向上）
+    gsm8k_texts = load_gsm8k_data(max_samples=3000)
+    all_texts.extend(gsm8k_texts * 2)  # 2倍に増やす（数学能力を強化）
+    print(f"✅ openai/gsm8k: {len(gsm8k_texts)} テキスト × 2 = {len(gsm8k_texts) * 2} テキスト追加")
+
+    # 4. 日本語指示データ（最優先・大量に追加）
     print("\n📚 日本語指示データを追加中...")
     instruction_texts = generate_japanese_instruction_data()
     all_texts.extend(instruction_texts * 500)  # 500倍に増やす（最重要）
 
-    # 4. 一般知識データ（増量）
+    # 5. 一般知識データ（増量）
     print("📚 一般知識データを追加中...")
     knowledge_texts = generate_knowledge_data()
     all_texts.extend(knowledge_texts * 10)  # 10倍に増やす

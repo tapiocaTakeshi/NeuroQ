@@ -1821,12 +1821,43 @@ def load_huggingface_data(max_samples: int = 500) -> List[str]:
                 count += 1
         
         print(f"   ✅ dolly-en: {count} ペア取得")
-        
+
     except Exception as e:
         print(f"   ⚠️ dolly-en読み込みエラー: {e}")
-    
+
+    # 4. openai/gsm8k - 数学文章問題
+    try:
+        print("   📚 openai/gsm8k を読み込み中...")
+        dataset = load_dataset("openai/gsm8k", "main", split="train", trust_remote_code=True)
+
+        count = 0
+        for item in dataset:
+            if count >= max_samples // 4:
+                break
+
+            question = item.get('question', '')
+            answer = item.get('answer', '')
+
+            if question and answer and len(question) < 400 and len(answer) < 800:
+                # 完全な解答付き
+                formatted = f"<USER>{question}<ASSISTANT>{answer}"
+                formatted_texts.append(formatted)
+
+                # 最終回答のみ（#### の後）
+                if "####" in answer:
+                    final_answer = answer.split("####")[-1].strip()
+                    short = f"<USER>{question}<ASSISTANT>答えは {final_answer} です。"
+                    formatted_texts.append(short)
+
+                count += 1
+
+        print(f"   ✅ gsm8k: {count} 問題取得")
+
+    except Exception as e:
+        print(f"   ⚠️ gsm8k読み込みエラー: {e}")
+
     print(f"\n📊 合計: {len(formatted_texts)} 対話ペア取得完了")
-    
+
     return formatted_texts
 
 
