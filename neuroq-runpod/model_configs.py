@@ -49,19 +49,19 @@ NEUROQ_SMALL = {
     'vocab_size': 200019,      # o200k_base
     'embed_dim': 1536,         # text-embedding-3-small と同じ
     'num_heads': 12,
-    'num_layers': 10,
+    'num_layers': 12,
     'max_seq_len': 512,
     'dropout': 0.1,
 }
 
-# OpenAI text-embedding-3-large 
+# OpenAI text-embedding-3-large
 NEUROQ_LARGE = {
     'name': 'NeuroQ-Large',
     'description': 'OpenAI text-embedding-3-large (3072次元) 対応',
     'vocab_size': 200019,      # o200k_base
     'embed_dim': 3072,         # text-embedding-3-large と同じ
     'num_heads': 16,
-    'num_layers': 10,
+    'num_layers': 18,
     'max_seq_len': 512,
     'dropout': 0.1,
 }
