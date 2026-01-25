@@ -1395,6 +1395,148 @@ def test_health():
 
 # checkpoints_volumeはファイル上部で既に定義済み
 
+
+def load_gsm8k_data(max_samples: int = 5000) -> list:
+    """
+    openai/gsm8k データセットをロード
+    GSM8K - 小学校レベルの数学文章問題データセット (8.5K問題)
+    """
+    from datasets import load_dataset
+
+    print("\n📥 openai/gsm8k データセットをロード中...")
+    texts = []
+
+    try:
+        dataset = load_dataset("openai/gsm8k", "main", split="train")
+        print(f"   ✅ {len(dataset)} 問題をロードしました")
+
+        count = 0
+        for item in dataset:
+            if count >= max_samples:
+                break
+
+            question = item.get("question", "").strip()
+            answer = item.get("answer", "").strip()
+
+            if not question or not answer:
+                continue
+
+            if len(question) > 500 or len(answer) > 1500:
+                continue
+
+            # 最終回答を抽出 (#### の後の数値)
+            final_answer = ""
+            if "####" in answer:
+                final_answer = answer.split("####")[-1].strip()
+
+            # <USER><ASSISTANT> 形式で追加（完全な解答付き）
+            texts.append(f"<USER>{question}<ASSISTANT>{answer}")
+
+            # 簡略版も追加（最終回答のみ）
+            if final_answer:
+                texts.append(f"<USER>{question}<ASSISTANT>答えは {final_answer} です。")
+
+            count += 1
+
+        print(f"   ✅ gsm8k から {len(texts)} テキストを抽出 ({count} 問題)")
+
+    except Exception as e:
+        print(f"   ⚠️ gsm8k ロードエラー: {e}")
+
+    return texts
+
+
+def load_oasst1_data(max_samples: int = 5000) -> list:
+    """
+    OpenAssistant/oasst1 データセットをロード
+    高品質な人間のフィードバックで評価された会話データセット
+    """
+    from datasets import load_dataset
+
+    print("\n📥 OpenAssistant/oasst1 データセットをロード中...")
+    texts = []
+
+    try:
+        dataset = load_dataset("OpenAssistant/oasst1", split="train")
+        print(f"   ✅ oasst1: {len(dataset)} サンプルをロードしました")
+
+        # メッセージをツリー構造から会話ペアに変換
+        messages_by_id = {}
+
+        for item in dataset:
+            msg_id = item.get("message_id", "")
+            parent_id = item.get("parent_id")
+            text = item.get("text", "")
+            role = item.get("role", "")
+            lang = item.get("lang", "")
+
+            if msg_id and text:
+                messages_by_id[msg_id] = {
+                    "text": text,
+                    "role": role,
+                    "parent_id": parent_id,
+                    "lang": lang
+                }
+
+        print(f"   📊 {len(messages_by_id)} メッセージを解析中...")
+
+        # 会話ペアを構築
+        count = 0
+        for msg_id, msg_data in messages_by_id.items():
+            if count >= max_samples:
+                break
+
+            if msg_data["role"] == "assistant" and msg_data["parent_id"]:
+                parent = messages_by_id.get(msg_data["parent_id"])
+                if parent and parent["role"] == "prompter":
+                    user_text = parent["text"].strip()
+                    assistant_text = msg_data["text"].strip()
+
+                    if len(user_text) > 500 or len(assistant_text) > 1000:
+                        continue
+
+                    texts.append(f"<USER>{user_text}<ASSISTANT>{assistant_text}")
+                    count += 1
+
+        print(f"   ✅ oasst1 から {len(texts)} 会話ペアを抽出")
+
+    except Exception as e:
+        print(f"   ⚠️ oasst1 ロードエラー: {e}")
+
+    return texts
+
+
+def load_humaneval_data() -> list:
+    """
+    openai/openai_humaneval データセットをロード
+    HumanEval - コード生成評価データセット
+    """
+    from datasets import load_dataset
+
+    print("\n📥 openai/openai_humaneval データセットをロード中...")
+    texts = []
+
+    try:
+        dataset = load_dataset("openai/openai_humaneval", split="test")
+        print(f"   ✅ {len(dataset)} サンプルをロードしました")
+
+        for item in dataset:
+            if "prompt" in item and item["prompt"]:
+                prompt = item["prompt"]
+                texts.append(f"プログラミング課題:\n{prompt}")
+
+            if "canonical_solution" in item and item["canonical_solution"]:
+                solution = item["canonical_solution"]
+                texts.append(f"解答コード:\n{solution}")
+
+        print(f"   ✅ humaneval から {len(texts)} テキストを抽出")
+
+    except Exception as e:
+        print(f"   ⚠️ humaneval ロードエラー: {e}")
+
+    return texts
+
+
 @app.function(
     image=image,
     gpu="A100",  # 学習にはA100推奨（40GB/80GB VRAM）
@@ -1557,8 +1699,27 @@ def train_model(
             print("\n   📚 デフォルトデータにフォールバック...")
             texts = get_training_data()
     else:
-        # デフォルトの学習データを使用
-        texts = get_training_data()
+        # デフォルトの学習データを使用（OpenAIデータセット + OASST1）
+        print("\n   📚 OpenAIデータセットをロード中...")
+
+        # 1. OpenAssistant/oasst1 - 高品質な会話データ（最優先）
+        oasst1_texts = load_oasst1_data(max_samples=max_samples or 5000)
+        texts.extend(oasst1_texts * 3)  # 3倍に増やす
+        print(f"   ✅ oasst1: {len(oasst1_texts)} × 3 = {len(oasst1_texts) * 3} テキスト")
+
+        # 2. openai/openai_humaneval - コード生成
+        humaneval_texts = load_humaneval_data()
+        texts.extend(humaneval_texts)
+        print(f"   ✅ humaneval: {len(humaneval_texts)} テキスト")
+
+        # 3. openai/gsm8k - 数学文章問題
+        gsm8k_texts = load_gsm8k_data(max_samples=max_samples or 3000)
+        texts.extend(gsm8k_texts * 2)  # 2倍に増やす
+        print(f"   ✅ gsm8k: {len(gsm8k_texts)} × 2 = {len(gsm8k_texts) * 2} テキスト")
+
+        # フォールバック（何もロードできなかった場合）
+        if len(texts) == 0:
+            texts = get_training_data()
     
     print(f"   サンプル数: {len(texts)}")
     
