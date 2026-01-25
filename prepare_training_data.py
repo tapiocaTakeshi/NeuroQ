@@ -182,7 +182,12 @@ def create_dialogue_data() -> List[str]:
     print("💬 対話データ生成中（会話フォーマット強化版）...")
 
     # システムプロンプト定義
-    system_prompt = "あなたは親切で正確なアシスタントです。ユーザーの質問に短く正確に答えてください。わからないときは質問してください。"
+    system_prompt = """You are an AI assistant.
+The user is a human.
+Answer clearly and concisely.
+Do not output random text.
+Always reply in Japanese.
+あなたは親切で正確なアシスタントです。ユーザーの質問に短く正確に答えてください。わからないときは質問してください。"""
 
     # ========================================
     # 1. 単一ターン対話（基本）
