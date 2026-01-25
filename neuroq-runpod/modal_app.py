@@ -75,6 +75,7 @@ checkpoints_volume = modal.Volume.from_name("neuroq-checkpoints", create_if_miss
 
 # デフォルトシステムプロンプト
 DEFAULT_SYSTEM_PROMPT = """あなたは親切で正確なアシスタントです。
+ユーザーはあなたを使っている人で、アシスタントはあなた自身です。
 以下のルールに従ってください：
 1. ユーザーの質問に短く正確に答える
 2. わからないことは質問する
