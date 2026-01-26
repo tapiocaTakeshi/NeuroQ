@@ -1276,14 +1276,16 @@ def fastapi_app():
     @web_app.post("/train")
     async def train(request: TrainRequest):
         """
-        モデルの学習を開始（バックグラウンドで実行）
-        
+        モデルの学習を同期実行（.remote() API を使用）
+
         dataset_ids に Hugging Face データセットIDのリストを指定すると、それらのデータセットで学習します。
         例: ["wikitext", "openai/summarize_from_feedback", "databricks/dolly-15k"]
+
+        注意: .remote() を使用するため、学習完了まで応答を待機します
         """
         try:
-            # train_model関数を呼び出し（A10G GPUで実行）
-            call = train_model.spawn(
+            # train_model関数を .remote() で同期実行（A100 GPUで実行）
+            result = train_model.remote(
                 model_size=request.model_size,
                 epochs=request.epochs,
                 batch_size=request.batch_size,
@@ -1293,10 +1295,10 @@ def fastapi_app():
                 split=request.split,
                 max_samples=request.max_samples
             )
-            
+
             return {
-                "status": "started",
-                "message": f"Training {request.model_size.upper()} model started",
+                "status": "completed",
+                "message": f"Training {request.model_size.upper()} model completed",
                 "model_size": request.model_size,
                 "epochs": request.epochs,
                 "batch_size": request.batch_size or "auto",
@@ -1305,7 +1307,7 @@ def fastapi_app():
                 "text_column": request.text_column,
                 "split": request.split,
                 "max_samples": request.max_samples or "all",
-                "call_id": call.object_id
+                "result": result
             }
         except Exception as e:
             raise HTTPException(status_code=500, detail=str(e))
@@ -1801,11 +1803,11 @@ def load_lima_data(max_samples: int = 1000) -> list:
     volumes={"/model_checkpoints": checkpoints_volume},
 )
 def train_model(
-    model_size: str = "small", 
-    epochs: int = 10, 
-    batch_size: int = None, 
+    model_size: str = "small",
+    epochs: int = 10,
+    batch_size: int = None,
     lr: float = None,
-    dataset_ids: list = None,
+    dataset_ids: str = None,  # JSON文字列 例: '["tatsu-lab/alpaca"]'
     text_column: str = "text",
     split: str = "train",
     max_samples: int = None
@@ -1885,12 +1887,25 @@ def train_model(
     print("\n📊 学習データ準備...")
     
     texts = []
-    
-    if dataset_ids and len(dataset_ids) > 0:
+
+    # dataset_idsがJSON文字列の場合はパース
+    dataset_ids_list = None
+    if dataset_ids:
+        import json
+        try:
+            if isinstance(dataset_ids, str):
+                dataset_ids_list = json.loads(dataset_ids)
+            else:
+                dataset_ids_list = dataset_ids
+        except json.JSONDecodeError:
+            print(f"   ⚠️ dataset_idsのパースに失敗: {dataset_ids}")
+            dataset_ids_list = None
+
+    if dataset_ids_list and len(dataset_ids_list) > 0:
         # Hugging Faceデータセットからロード
         from datasets import load_dataset
-        
-        for dataset_id in dataset_ids:
+
+        for dataset_id in dataset_ids_list:
             print(f"\n   🤗 Hugging Faceからデータセットをロード: {dataset_id}")
             
             try:
