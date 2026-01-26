@@ -1643,6 +1643,157 @@ def load_openchat_sharegpt_data(max_samples: int = 10000) -> list:
     return texts
 
 
+def load_ultrachat_data(max_samples: int = 10000) -> list:
+    """
+    HuggingFaceH4/ultrachat_200k データセットをロード
+    UltraChat - 大規模高品質マルチターン会話データセット
+    """
+    from datasets import load_dataset
+
+    print("\n📥 HuggingFaceH4/ultrachat_200k データセットをロード中...")
+    texts = []
+
+    try:
+        dataset = load_dataset("HuggingFaceH4/ultrachat_200k", split="train_sft")
+        print(f"   ✅ {len(dataset)} サンプルをロードしました")
+
+        count = 0
+        for item in dataset:
+            if count >= max_samples:
+                break
+
+            # UltraChat形式の会話を処理
+            messages = item.get("messages", [])
+            if not messages or len(messages) < 2:
+                continue
+
+            # 連続するuser-assistant ペアを抽出
+            for i in range(0, len(messages) - 1, 2):
+                if i + 1 >= len(messages):
+                    break
+
+                user_msg = messages[i]
+                assistant_msg = messages[i + 1]
+
+                if user_msg.get("role") == "user" and assistant_msg.get("role") == "assistant":
+                    user_text = user_msg.get("content", "").strip()
+                    assistant_text = assistant_msg.get("content", "").strip()
+
+                    if not user_text or not assistant_text:
+                        continue
+
+                    # 長すぎるものはスキップ
+                    if len(user_text) > 800 or len(assistant_text) > 2000:
+                        continue
+
+                    texts.append(f"<USER>{user_text}<ASSISTANT>{assistant_text}")
+                    count += 1
+
+                    if count >= max_samples:
+                        break
+
+        print(f"   ✅ ultrachat から {len(texts)} テキストを抽出 ({count} サンプル)")
+
+    except Exception as e:
+        print(f"   ⚠️ ultrachat ロードエラー: {e}")
+
+    return texts
+
+
+def load_dolly_ja_data(max_samples: int = 10000) -> list:
+    """
+    kunishou/databricks-dolly-15k-ja データセットをロード
+    日本語のDolly指示応答データセット
+    """
+    from datasets import load_dataset
+
+    print("\n📥 kunishou/databricks-dolly-15k-ja データセットをロード中...")
+    texts = []
+
+    try:
+        dataset = load_dataset("kunishou/databricks-dolly-15k-ja", split="train")
+        print(f"   ✅ {len(dataset)} サンプルをロードしました")
+
+        count = 0
+        for item in dataset:
+            if count >= max_samples:
+                break
+
+            # Dolly形式を処理
+            instruction = item.get("instruction", "").strip()
+            context = item.get("context", "").strip()
+            response = item.get("output", "").strip()
+
+            if not instruction or not response:
+                continue
+
+            # contextがある場合は組み合わせる
+            if context:
+                user_prompt = f"{instruction}\n\n参考情報: {context}"
+            else:
+                user_prompt = instruction
+
+            # 長すぎるものはスキップ
+            if len(user_prompt) > 1000 or len(response) > 2000:
+                continue
+
+            texts.append(f"<USER>{user_prompt}<ASSISTANT>{response}")
+            count += 1
+
+        print(f"   ✅ dolly-ja から {len(texts)} テキストを抽出 ({count} サンプル)")
+
+    except Exception as e:
+        print(f"   ⚠️ dolly-ja ロードエラー: {e}")
+
+    return texts
+
+
+def load_lima_data(max_samples: int = 1000) -> list:
+    """
+    GAIR/lima データセットをロード
+    LIMA - 厳選された高品質会話データセット（1000サンプル）
+    """
+    from datasets import load_dataset
+
+    print("\n📥 GAIR/lima データセットをロード中...")
+    texts = []
+
+    try:
+        dataset = load_dataset("GAIR/lima", split="train")
+        print(f"   ✅ {len(dataset)} サンプルをロードしました")
+
+        count = 0
+        for item in dataset:
+            if count >= max_samples:
+                break
+
+            # LIMA形式を処理（conversations リスト）
+            conversations = item.get("conversations", [])
+            if not conversations or len(conversations) < 2:
+                continue
+
+            # 最初のuser-assistantペアを抽出
+            user_text = conversations[0].strip() if conversations[0] else ""
+            assistant_text = conversations[1].strip() if len(conversations) > 1 and conversations[1] else ""
+
+            if not user_text or not assistant_text:
+                continue
+
+            # 長すぎるものはスキップ
+            if len(user_text) > 1500 or len(assistant_text) > 3000:
+                continue
+
+            texts.append(f"<USER>{user_text}<ASSISTANT>{assistant_text}")
+            count += 1
+
+        print(f"   ✅ lima から {len(texts)} テキストを抽出 ({count} サンプル)")
+
+    except Exception as e:
+        print(f"   ⚠️ lima ロードエラー: {e}")
+
+    return texts
+
+
 @app.function(
     image=image,
     gpu="A100",  # 学習にはA100推奨（40GB/80GB VRAM）
@@ -1832,6 +1983,21 @@ def train_model(
         openchat_texts = load_openchat_sharegpt_data(max_samples=max_samples or 5000)
         texts.extend(openchat_texts * 2)  # 2倍に増やす
         print(f"   ✅ openchat_sharegpt: {len(openchat_texts)} × 2 = {len(openchat_texts) * 2} テキスト")
+
+        # 6. HuggingFaceH4/ultrachat_200k - 高品質マルチターン会話データ
+        ultrachat_texts = load_ultrachat_data(max_samples=max_samples or 8000)
+        texts.extend(ultrachat_texts * 2)  # 2倍に増やす
+        print(f"   ✅ ultrachat: {len(ultrachat_texts)} × 2 = {len(ultrachat_texts) * 2} テキスト")
+
+        # 7. kunishou/databricks-dolly-15k-ja - 日本語指示応答データ
+        dolly_ja_texts = load_dolly_ja_data(max_samples=max_samples or 5000)
+        texts.extend(dolly_ja_texts * 3)  # 3倍に増やす（日本語データ強化）
+        print(f"   ✅ dolly-ja: {len(dolly_ja_texts)} × 3 = {len(dolly_ja_texts) * 3} テキスト")
+
+        # 8. GAIR/lima - 厳選高品質会話データ
+        lima_texts = load_lima_data(max_samples=max_samples or 1000)
+        texts.extend(lima_texts * 5)  # 5倍に増やす（少量だが高品質）
+        print(f"   ✅ lima: {len(lima_texts)} × 5 = {len(lima_texts) * 5} テキスト")
 
         # フォールバック（何もロードできなかった場合）
         if len(texts) == 0:
