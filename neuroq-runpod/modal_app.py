@@ -1586,6 +1586,63 @@ def load_alpaca_data(max_samples: int = 10000) -> list:
     return texts
 
 
+def load_openchat_sharegpt_data(max_samples: int = 10000) -> list:
+    """
+    openchat/openchat_sharegpt4_dataset データセットをロード
+    OpenChat ShareGPT - 高品質な会話データセット
+    """
+    from datasets import load_dataset
+
+    print("\n📥 openchat/openchat_sharegpt4_dataset データセットをロード中...")
+    texts = []
+
+    try:
+        dataset = load_dataset("openchat/openchat_sharegpt4_dataset", split="train")
+        print(f"   ✅ {len(dataset)} サンプルをロードしました")
+
+        count = 0
+        for item in dataset:
+            if count >= max_samples:
+                break
+
+            # ShareGPT形式の会話を処理
+            conversations = item.get("items", [])
+            if not conversations:
+                continue
+
+            # 会話ペアを抽出
+            for i in range(0, len(conversations) - 1, 2):
+                if i + 1 >= len(conversations):
+                    break
+
+                human_msg = conversations[i]
+                gpt_msg = conversations[i + 1]
+
+                if human_msg.get("from") == "human" and gpt_msg.get("from") == "gpt":
+                    user_text = human_msg.get("value", "").strip()
+                    assistant_text = gpt_msg.get("value", "").strip()
+
+                    if not user_text or not assistant_text:
+                        continue
+
+                    # 長すぎるものはスキップ
+                    if len(user_text) > 500 or len(assistant_text) > 1500:
+                        continue
+
+                    texts.append(f"<USER>{user_text}<ASSISTANT>{assistant_text}")
+                    count += 1
+
+                    if count >= max_samples:
+                        break
+
+        print(f"   ✅ openchat_sharegpt から {len(texts)} テキストを抽出 ({count} サンプル)")
+
+    except Exception as e:
+        print(f"   ⚠️ openchat_sharegpt ロードエラー: {e}")
+
+    return texts
+
+
 @app.function(
     image=image,
     gpu="A100",  # 学習にはA100推奨（40GB/80GB VRAM）
@@ -1770,6 +1827,11 @@ def train_model(
         gsm8k_texts = load_gsm8k_data(max_samples=max_samples or 3000)
         texts.extend(gsm8k_texts * 2)  # 2倍に増やす
         print(f"   ✅ gsm8k: {len(gsm8k_texts)} × 2 = {len(gsm8k_texts) * 2} テキスト")
+
+        # 5. openchat/openchat_sharegpt4_dataset - 高品質会話データ
+        openchat_texts = load_openchat_sharegpt_data(max_samples=max_samples or 5000)
+        texts.extend(openchat_texts * 2)  # 2倍に増やす
+        print(f"   ✅ openchat_sharegpt: {len(openchat_texts)} × 2 = {len(openchat_texts) * 2} テキスト")
 
         # フォールバック（何もロードできなかった場合）
         if len(texts) == 0:
