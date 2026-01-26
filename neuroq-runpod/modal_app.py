@@ -1537,6 +1537,55 @@ def load_humaneval_data() -> list:
     return texts
 
 
+def load_alpaca_data(max_samples: int = 10000) -> list:
+    """
+    tatsu-lab/alpaca データセットをロード
+    Alpaca - Stanford大学の指示応答データセット (52K instruction-following)
+    """
+    from datasets import load_dataset
+
+    print("\n📥 tatsu-lab/alpaca データセットをロード中...")
+    texts = []
+
+    try:
+        dataset = load_dataset("tatsu-lab/alpaca", split="train")
+        print(f"   ✅ {len(dataset)} サンプルをロードしました")
+
+        count = 0
+        for item in dataset:
+            if count >= max_samples:
+                break
+
+            instruction = item.get("instruction", "").strip()
+            input_text = item.get("input", "").strip()
+            output = item.get("output", "").strip()
+
+            if not instruction or not output:
+                continue
+
+            # 長すぎるものはスキップ
+            if len(instruction) > 500 or len(output) > 1500:
+                continue
+
+            # inputがある場合は instruction + input を結合
+            if input_text:
+                user_prompt = f"{instruction}\n\n{input_text}"
+            else:
+                user_prompt = instruction
+
+            # <USER><ASSISTANT> 形式で追加
+            texts.append(f"<USER>{user_prompt}<ASSISTANT>{output}")
+
+            count += 1
+
+        print(f"   ✅ alpaca から {len(texts)} テキストを抽出 ({count} サンプル)")
+
+    except Exception as e:
+        print(f"   ⚠️ alpaca ロードエラー: {e}")
+
+    return texts
+
+
 @app.function(
     image=image,
     gpu="A100",  # 学習にはA100推奨（40GB/80GB VRAM）
@@ -1699,20 +1748,25 @@ def train_model(
             print("\n   📚 デフォルトデータにフォールバック...")
             texts = get_training_data()
     else:
-        # デフォルトの学習データを使用（OpenAIデータセット + OASST1）
-        print("\n   📚 OpenAIデータセットをロード中...")
+        # デフォルトの学習データを使用（Alpaca + OASST1 + OpenAIデータセット）
+        print("\n   📚 学習データセットをロード中...")
 
-        # 1. OpenAssistant/oasst1 - 高品質な会話データ（最優先）
+        # 1. tatsu-lab/alpaca - Stanford Alpaca指示応答データ（最優先）
+        alpaca_texts = load_alpaca_data(max_samples=max_samples or 10000)
+        texts.extend(alpaca_texts * 2)  # 2倍に増やす
+        print(f"   ✅ alpaca: {len(alpaca_texts)} × 2 = {len(alpaca_texts) * 2} テキスト")
+
+        # 2. OpenAssistant/oasst1 - 高品質な会話データ
         oasst1_texts = load_oasst1_data(max_samples=max_samples or 5000)
         texts.extend(oasst1_texts * 3)  # 3倍に増やす
         print(f"   ✅ oasst1: {len(oasst1_texts)} × 3 = {len(oasst1_texts) * 3} テキスト")
 
-        # 2. openai/openai_humaneval - コード生成
+        # 3. openai/openai_humaneval - コード生成
         humaneval_texts = load_humaneval_data()
         texts.extend(humaneval_texts)
         print(f"   ✅ humaneval: {len(humaneval_texts)} テキスト")
 
-        # 3. openai/gsm8k - 数学文章問題
+        # 4. openai/gsm8k - 数学文章問題
         gsm8k_texts = load_gsm8k_data(max_samples=max_samples or 3000)
         texts.extend(gsm8k_texts * 2)  # 2倍に増やす
         print(f"   ✅ gsm8k: {len(gsm8k_texts)} × 2 = {len(gsm8k_texts) * 2} テキスト")
