@@ -55,7 +55,6 @@ image = (
         "tiktoken>=0.5.0",
         "fastapi[standard]",
         "pydantic>=2.0.0",
-        "transformers>=4.30.0",
         "openai>=1.0.0",
         "datasets>=2.14.0",
         "duckduckgo-search>=6.0.0",  # Web RAG用
@@ -139,10 +138,6 @@ class NeuroQInference:
         self.vocab_size = 8000
         self.tokenizer = None  # Small/Large用
 
-        # 翻訳パイプライン
-        self.translation_pipeline = None
-        self.translation_initialized = False
-
         # チェックポイントパス
         # 全てのモデルサイズでModalボリュームを参照（train_modelで保存された最新版を使用）
         self.checkpoint_paths = {
@@ -178,17 +173,6 @@ class NeuroQInference:
             print("✅ model_configs.py をインポートしました")
         except ImportError:
             self.model_configs_available = False
-
-        # 翻訳パイプラインをインポート
-        try:
-            from translation_pipeline import TranslationPipeline
-            self.TranslationPipeline = TranslationPipeline
-            self.translation_available = True
-            print("✅ translation_pipeline.py をインポートしました")
-        except ImportError as e:
-            print(f"⚠️ translation_pipeline.py のインポートに失敗: {e}")
-            self.TranslationPipeline = None
-            self.translation_available = False
 
         # Web RAGモジュールをインポート
         try:
@@ -443,31 +427,6 @@ class NeuroQInference:
             traceback.print_exc()
             return False
 
-    def _initialize_translation_pipeline(self) -> bool:
-        """翻訳パイプラインを初期化（Lazy Loading）"""
-        if self.translation_initialized:
-            return True
-
-        if not self.translation_available or self.TranslationPipeline is None:
-            print("⚠️ 翻訳パイプラインは利用できません")
-            return False
-
-        try:
-            print("🔄 翻訳パイプライン初期化中...")
-            self.translation_pipeline = self.TranslationPipeline(
-                model_name="facebook/nllb-200-distilled-600M",
-                device=self.device,
-                use_tiktoken=True,
-            )
-            self.translation_initialized = True
-            print("✅ 翻訳パイプライン初期化完了")
-            return True
-        except Exception as e:
-            import traceback
-            print(f"❌ 翻訳パイプライン初期化エラー: {e}")
-            traceback.print_exc()
-            return False
-
     def _initialize_rag_processor(self) -> bool:
         """RAGプロセッサを初期化（Lazy Loading）"""
         if self.rag_processor is not None:
@@ -496,9 +455,8 @@ class NeuroQInference:
                        temp_min: float = None, temp_max: float = None,
                        temperature: float = None, history: List[Dict] = None,
                        system_prompt: str = None, session_id: str = None,
-                       use_translation: bool = True,
                        use_rag: bool = False, force_search: bool = False) -> dict:
-        """テキスト生成（ヒストリー方式 + 翻訳パイプライン + Web RAG対応）
+        """テキスト生成（ヒストリー方式 + Web RAG対応）
 
         Args:
             prompt: ユーザーの入力
@@ -509,16 +467,12 @@ class NeuroQInference:
             history: 会話履歴 [{"role": "user", "content": "..."}, {"role": "assistant", "content": "..."}, ...]
             system_prompt: カスタムシステムプロンプト（Noneの場合はセッションの既存設定またはデフォルトを使用）
             session_id: セッションID（システムプロンプトの保存用）
-            use_translation: 翻訳パイプラインを使用するか（日本語入力→英語生成→日本語出力）
             use_rag: Web RAGを使用するか（Web検索結果をコンテキストに追加）
             force_search: 検索を強制するか（use_rag=Trueの場合のみ有効）
 
         Returns:
             dict: {
                 "generated": 生成されたテキスト,
-                "translated_prompt": 翻訳された入力（翻訳使用時のみ）,
-                "english_response": 英語の生成結果（翻訳使用時のみ）,
-                "translation_used": 翻訳が使用されたか,
                 "rag_used": RAGが使用されたか,
                 "rag_sources": 検索ソースのURL（RAG使用時のみ）,
                 "rag_query": 検索クエリ（RAG使用時のみ）
@@ -527,31 +481,7 @@ class NeuroQInference:
         import torch
 
         if self.model is None or not self.is_initialized:
-            return {"generated": "Error: Model not initialized", "translation_used": False, "rag_used": False}
-
-        # 翻訳パイプラインの初期化（必要な場合）
-        translated_prompt = None
-        english_response = None
-        actual_prompt = prompt
-
-        if use_translation:
-            if not self.translation_available:
-                print("⚠️ 翻訳機能は利用できません")
-                use_translation = False
-            elif not self.translation_initialized:
-                if not self._initialize_translation_pipeline():
-                    print("⚠️ 翻訳パイプラインの初期化に失敗しました")
-                    use_translation = False
-
-        # 入力を日本語→英語に翻訳
-        if use_translation and self.translation_pipeline is not None:
-            try:
-                translated_prompt = self.translation_pipeline.ja_to_en(prompt)
-                actual_prompt = translated_prompt
-                print(f"🌐 翻訳(JA→EN): {prompt[:30]}... → {translated_prompt[:30]}...")
-            except Exception as e:
-                print(f"⚠️ 入力翻訳エラー: {e}")
-                use_translation = False
+            return {"generated": "Error: Model not initialized", "rag_used": False}
 
         # RAG処理
         rag_context = None
@@ -587,11 +517,10 @@ class NeuroQInference:
             # 4. RAGが有効な場合はRAG用のシステムプロンプトを使用
             if rag_used and rag_context:
                 # RAG使用時は専用のシステムプロンプト + 検索結果を使用
-                base_prompt = self.RAG_SYSTEM_PROMPT_EN if use_translation else self.RAG_SYSTEM_PROMPT_JA
                 active_system_prompt = self.rag_processor.augment_system_prompt(
-                    base_prompt,
+                    self.RAG_SYSTEM_PROMPT_JA,
                     rag_context,
-                    lang='en' if use_translation else 'ja'
+                    lang='ja'
                 )
             elif system_prompt is not None and session_id:
                 self.session_system_prompts[session_id] = system_prompt
@@ -633,8 +562,7 @@ class NeuroQInference:
                     elif role == "assistant":
                         history_context += f"### Assistant: {content}\n"
 
-            # 翻訳使用時は翻訳済みプロンプトを使用
-            full_prompt = history_context + f"### Human: {actual_prompt}\n### Assistant:"
+            full_prompt = history_context + f"### Human: {prompt}\n### Assistant:"
             
             # 生成
             with torch.no_grad():
@@ -647,24 +575,8 @@ class NeuroQInference:
                     temperature=temperature or 0.5
                 )
 
-            # 英語の生成結果を保存（翻訳使用時）
-            if use_translation:
-                english_response = result
-
-            # 出力を英語→日本語に翻訳
-            if use_translation and self.translation_pipeline is not None:
-                try:
-                    result = self.translation_pipeline.en_to_ja(result)
-                    print(f"🌐 翻訳(EN→JA): {english_response[:30]}... → {result[:30]}...")
-                except Exception as e:
-                    print(f"⚠️ 出力翻訳エラー: {e}")
-                    # エラー時は英語の結果をそのまま返す
-
             return {
                 "generated": result,
-                "translated_prompt": translated_prompt,
-                "english_response": english_response,
-                "translation_used": use_translation and self.translation_pipeline is not None,
                 "rag_used": rag_used,
                 "rag_sources": rag_sources if rag_used else None,
                 "rag_query": rag_query if rag_used else None
@@ -676,7 +588,6 @@ class NeuroQInference:
             print(f"❌ 生成エラー詳細:\n{error_details}")
             return {
                 "generated": f"Error: {str(e)}\nTraceback: {error_details}",
-                "translation_used": False,
                 "rag_used": False
             }
     
@@ -816,8 +727,6 @@ class NeuroQInference:
             "vocab_size": self.vocab_size,
             "current_model_size": self.current_model_size or "none",
             "available_model_sizes": ["micro", "small", "large"],
-            "translation_available": self.translation_available,
-            "translation_initialized": self.translation_initialized,
             "rag_available": self.rag_available,
             "rag_initialized": self.rag_processor is not None
         }
@@ -1030,9 +939,9 @@ class NeuroQInference:
                  temperature: float = 0.5, temp_min: float = None,
                  temp_max: float = None, history: List[Dict] = None,
                  model_size: str = "micro", system_prompt: str = None,
-                 session_id: str = None, use_translation: bool = True,
+                 session_id: str = None,
                  use_rag: bool = False, force_search: bool = False) -> Dict[str, Any]:
-        """テキスト生成（ヒストリー方式 + 翻訳パイプライン + Web RAG対応）
+        """テキスト生成（ヒストリー方式 + Web RAG対応）
 
         Args:
             prompt: ユーザーの入力
@@ -1044,7 +953,6 @@ class NeuroQInference:
             model_size: モデルサイズ（micro, small, large）
             system_prompt: カスタムシステムプロンプト（Noneの場合はデフォルトを使用）
             session_id: セッションID（システムプロンプトの永続化用）
-            use_translation: 翻訳パイプラインを使用するか（日本語入力→英語生成→日本語出力）
             use_rag: Web RAGを使用するか（Web検索結果をコンテキストに追加）
             force_search: 検索を強制するか（use_rag=Trueの場合のみ有効）
         """
@@ -1067,7 +975,6 @@ class NeuroQInference:
                 history=history,
                 system_prompt=system_prompt,
                 session_id=session_id,
-                use_translation=use_translation,
                 use_rag=use_rag,
                 force_search=force_search
             )
@@ -1097,14 +1004,8 @@ class NeuroQInference:
                 "model_size": self.current_model_size,
                 "system_prompt": used_system_prompt,
                 "session_id": session_id,
-                "translation_used": result.get("translation_used", False),
                 "rag_used": result.get("rag_used", False)
             }
-
-            # 翻訳が使用された場合、追加情報を含める
-            if result.get("translation_used"):
-                response["translated_prompt"] = result.get("translated_prompt")
-                response["english_response"] = result.get("english_response")
 
             # RAGが使用された場合、追加情報を含める
             if result.get("rag_used"):
@@ -1180,7 +1081,6 @@ def fastapi_app():
         model_size: str = "micro"
         system_prompt: Optional[str] = None  # カスタムシステムプロンプト
         session_id: Optional[str] = None  # セッションID（システムプロンプトの永続化用）
-        use_translation: bool = True  # 翻訳パイプラインを使用するか（日本語入力→英語生成→日本語出力）
         use_rag: bool = False  # Web RAGを使用するか（Web検索結果をコンテキストに追加）
         force_search: bool = False  # 検索を強制するか（use_rag=Trueの場合のみ有効）
     
@@ -1191,9 +1091,6 @@ def fastapi_app():
         model_size: str
         system_prompt: Optional[str] = None
         session_id: Optional[str] = None
-        translation_used: Optional[bool] = None
-        translated_prompt: Optional[str] = None
-        english_response: Optional[str] = None
         rag_used: Optional[bool] = None
         rag_sources: Optional[List[str]] = None
         rag_query: Optional[str] = None
@@ -1211,8 +1108,6 @@ def fastapi_app():
         vocab_size: int
         current_model_size: str
         available_model_sizes: List[str]
-        translation_available: Optional[bool] = None
-        translation_initialized: Optional[bool] = None
         rag_available: Optional[bool] = None
         rag_initialized: Optional[bool] = None
     
@@ -1262,11 +1157,9 @@ def fastapi_app():
                 "model_size": "micro, small, large（デフォルト: micro）",
                 "system_prompt": "カスタムシステムプロンプト（省略時はデフォルト）",
                 "session_id": "セッションID（システムプロンプトの永続化用）",
-                "use_translation": "翻訳パイプラインを使用（デフォルト: true、日本語入力→英語生成→日本語出力）",
                 "use_rag": "Web RAGを使用（デフォルト: false、Web検索結果をコンテキストに追加）",
                 "force_search": "検索を強制（デフォルト: false、use_rag=trueの場合のみ有効）"
             },
-            "translation_note": "use_translation=true を指定すると、日本語入力→英語生成→日本語出力の翻訳パイプラインを使用できます",
             "rag_note": "use_rag=true を指定すると、Web検索結果をコンテキストに追加して回答を生成します。force_search=true で検索を強制できます"
         }
     
@@ -1299,7 +1192,6 @@ def fastapi_app():
                 model_size=request.model_size,
                 system_prompt=request.system_prompt,
                 session_id=request.session_id,
-                use_translation=request.use_translation,
                 use_rag=request.use_rag,
                 force_search=request.force_search
             )
