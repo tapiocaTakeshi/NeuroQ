@@ -19,6 +19,7 @@ import subprocess
 import threading
 import time
 from pathlib import Path
+from daily_time_limiter import DailyTimeLimiter
 
 # 現在のディレクトリをパスに追加（neuroq_pretrained.pyをインポートするため）
 current_dir = str(Path(__file__).parent)
@@ -97,6 +98,9 @@ model = None  # NeuroQuantum または NeuroQuantumBrainAI インスタンス
 model_config = None  # 現在のモデル設定
 current_model_size = 'micro'  # 現在のモデルサイズ
 is_initialized = False
+
+# 日次時間制限（デフォルト: 1日 = 86400秒）
+daily_limiter = DailyTimeLimiter(daily_limit_seconds=86400)
 
 # 翻訳パイプライン（lazy loading）
 translation_pipeline = None
@@ -692,10 +696,11 @@ def handler(job):
     global model, is_initialized, current_model_size, model_config
     global conversation_sessions, session_system_prompts
     global pretrain_process, pretrain_status
-    
+    global daily_limiter
+
     job_input = job.get("input", {})
     action = job_input.get("action", "generate")
-    
+
     # ========================================
     # HEALTH CHECK（最優先・即座に返す）
     # ========================================
@@ -706,11 +711,43 @@ def handler(job):
             "cuda_available": torch.cuda.is_available(),
             "model_initialized": is_initialized
         }
-    
+
+    # ========================================
+    # TIME_LIMIT_STATUS（日次時間制限ステータス確認）
+    # ========================================
+    if action == "time_limit_status":
+        return {
+            "status": "success",
+            **daily_limiter.get_status()
+        }
+
+    # ========================================
+    # SET_TIME_LIMIT（日次時間制限設定）
+    # ========================================
+    if action == "set_time_limit":
+        new_limit = job_input.get("daily_limit_seconds")
+        if new_limit is None:
+            # 時間単位でも指定可能
+            new_limit_hours = job_input.get("daily_limit_hours")
+            if new_limit_hours is not None:
+                new_limit = int(new_limit_hours * 3600)
+        if new_limit is None:
+            return {
+                "status": "error",
+                "error": "daily_limit_seconds or daily_limit_hours is required"
+            }
+        daily_limiter.set_limit(int(new_limit))
+        return {
+            "status": "success",
+            "message": f"Daily time limit set to {new_limit} seconds ({new_limit/3600:.1f} hours)",
+            **daily_limiter.get_status()
+        }
+
     # ========================================
     # STATUS CHECK
     # ========================================
     if action == "status":
+        time_status = daily_limiter.get_status()
         return {
             "status": "ok",
             "initialized": is_initialized,
@@ -720,13 +757,26 @@ def handler(job):
             "available_model_sizes": ["micro", "small", "large"],
             "model_configs_available": MODEL_CONFIGS_AVAILABLE,
             "translation_available": TRANSLATION_AVAILABLE,
-            "translation_initialized": translation_initialized
+            "translation_initialized": translation_initialized,
+            "daily_time_limit": time_status
         }
     
     # ========================================
     # GENERATE（モデルが必要な処理）
     # ========================================
     if action == "generate":
+        # 日次時間制限チェック
+        if not daily_limiter.start_request():
+            limit_info = daily_limiter.get_status()
+            return {
+                "status": "error",
+                "error": "Daily time limit exceeded",
+                "message": f"本日の使用時間が制限（{limit_info['daily_limit_hours']}時間）に達しました。明日リセットされます。",
+                "daily_time_limit": limit_info
+            }
+
+        request_start = time.time()
+
         # モデルサイズを取得
         model_size = job_input.get("model_size", "micro")
 
@@ -734,6 +784,7 @@ def handler(job):
         if not is_initialized or current_model_size != model_size:
             print(f"🔄 モデル初期化中 ({model_size.upper()})...")
             if not initialize_model(model_size):
+                daily_limiter.end_request(time.time() - request_start)
                 return {
                     "status": "error",
                     "error": f"Failed to initialize model ({model_size})"
@@ -770,6 +821,10 @@ def handler(job):
             use_translation=use_translation
         )
 
+        # 処理時間を記録
+        elapsed = time.time() - request_start
+        daily_limiter.end_request(elapsed)
+
         response = {
             "status": "success",
             "prompt": prompt,
@@ -777,7 +832,8 @@ def handler(job):
             "session_id": session_id,
             "model_size": current_model_size,
             "system_prompt": session_system_prompts.get(session_id, DEFAULT_SYSTEM_PROMPT),
-            "translation_used": result.get("translation_used", False)
+            "translation_used": result.get("translation_used", False),
+            "processing_time_seconds": round(elapsed, 2)
         }
 
         # 翻訳が使用された場合、追加情報を含める
@@ -997,6 +1053,18 @@ def handler(job):
         - 'oasst1_ja': kunishou/oasst1-89k-ja 日本語会話データセット（User/Assistant形式）
         """
 
+        # 日次時間制限チェック
+        if not daily_limiter.start_request():
+            limit_info = daily_limiter.get_status()
+            return {
+                "status": "error",
+                "error": "Daily time limit exceeded",
+                "message": f"本日の使用時間が制限（{limit_info['daily_limit_hours']}時間）に達しました。明日リセットされます。",
+                "daily_time_limit": limit_info
+            }
+
+        train_request_start = time.time()
+
         model_size = job_input.get("model_size", "micro")
         dataset_id = job_input.get("dataset_id", None)
         epochs = job_input.get("epochs", 30)
@@ -1041,6 +1109,7 @@ def handler(job):
                     break
 
             if data_file is None:
+                daily_limiter.end_request(time.time() - train_request_start)
                 return {
                     "status": "error",
                     "error": "oasst1_ja data file not found. Run convert_oasst1_ja.py first.",
@@ -1054,6 +1123,7 @@ def handler(job):
                     break
 
             if oasst1_ja_tokenizer_path is None:
+                daily_limiter.end_request(time.time() - train_request_start)
                 return {
                     "status": "error",
                     "error": "oasst1_ja tokenizer not found. Run train_japanese_tokenizer.py first.",
@@ -1201,6 +1271,7 @@ def handler(job):
                 print(f"   シーケンス数: {len(sequences):,}")
                 
                 if len(sequences) == 0:
+                    daily_limiter.end_request(time.time() - train_request_start)
                     return {"status": "error", "error": "Not enough data for training"}
                 
                 # 学習ループ
@@ -1297,11 +1368,13 @@ def handler(job):
                     result["tokenizer_path"] = custom_tokenizer_path
                     result["tokenizer_vocab_size"] = tokenizer.vocab_size
 
+                daily_limiter.end_request(time.time() - train_request_start)
                 return result
-                
+
             except Exception as e:
                 import traceback
                 traceback.print_exc()
+                daily_limiter.end_request(time.time() - train_request_start)
                 return {"status": "error", "error": str(e)}
         
         else:
@@ -1335,6 +1408,7 @@ def handler(job):
                     is_initialized = True
 
                 except Exception as e:
+                    daily_limiter.end_request(time.time() - train_request_start)
                     return {
                         "status": "error",
                         "error": f"Failed to create model: {e}"
@@ -1345,6 +1419,7 @@ def handler(job):
                 texts = get_training_data()
 
             if not texts:
+                daily_limiter.end_request(time.time() - train_request_start)
                 return {
                     "status": "error",
                     "error": "No training texts provided"
@@ -1372,8 +1447,10 @@ def handler(job):
                     }
                     if dataset_id:
                         result["dataset_id"] = dataset_id
+                    daily_limiter.end_request(time.time() - train_request_start)
                     return result
                 else:
+                    daily_limiter.end_request(time.time() - train_request_start)
                     return {
                         "status": "warning",
                         "message": "Training completed but checkpoint save failed",
@@ -1383,6 +1460,7 @@ def handler(job):
             except Exception as e:
                 import traceback
                 traceback.print_exc()
+                daily_limiter.end_request(time.time() - train_request_start)
                 return {
                     "status": "error",
                     "error": str(e)
@@ -1465,7 +1543,9 @@ def handler(job):
             "pretrain_status",    # 事前学習ステータス
             "clear_session",      # 会話履歴クリア
             "set_system_prompt",  # システムプロンプト設定
-            "get_system_prompt"   # システムプロンプト取得
+            "get_system_prompt",  # システムプロンプト取得
+            "time_limit_status",  # 日次時間制限ステータス確認
+            "set_time_limit"      # 日次時間制限設定
         ],
         "translation_note": "generate アクションで use_translation=true を指定すると、日本語入力→英語生成→日本語出力の翻訳パイプラインを使用できます"
     }
