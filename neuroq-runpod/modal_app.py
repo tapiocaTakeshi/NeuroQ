@@ -1382,14 +1382,15 @@ def test_health():
     volumes={"/model_checkpoints": checkpoints_volume},
 )
 def train_model(
-    model_size: str = "micro", 
-    epochs: int = 10, 
-    batch_size: int = None, 
+    model_size: str = "micro",
+    epochs: int = 10,
+    batch_size: int = None,
     lr: float = None,
     dataset_ids: list = None,
     text_column: str = "text",
     split: str = "train",
-    max_samples: int = None
+    max_samples: int = None,
+    epoch_mode: str = "early_stop",
 ):
     import os
     import sys
@@ -1408,8 +1409,9 @@ def train_model(
     device = "cuda" if torch.cuda.is_available() else "cpu"
     os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
     
+    mode_label = "早期終了あり" if epoch_mode == "early_stop" else f"強制 {epochs} エポック"
     print("\n" + "=" * 70)
-    print(f"🚀 NeuroQ {model_size.upper()} クラウド学習")
+    print(f"🚀 NeuroQ {model_size.upper()} クラウド学習 (モード: {mode_label})")
     print("=" * 70)
 
     # モジュール読込
@@ -1567,7 +1569,7 @@ def train_model(
                     
             print(f"   Q: {display_prompt} | A: {resp_text[:120]}")
 
-        # Early Stopping
+        # Early Stopping / Fixed Mode 判定
         if avg_val < best_val_loss - 0.01:
             best_val_loss = avg_val
             patience_counter = 0
@@ -1578,9 +1580,11 @@ def train_model(
         else:
             patience_counter += 1
             print(f"   ⏳ 改善なし ({patience_counter}/{patience})")
-            if patience_counter >= patience:
-                print("🛑 早期終了")
+            if epoch_mode == "early_stop" and patience_counter >= patience:
+                print("🛑 早期終了: ロスが安定したため学習を停止します。")
                 break
+            elif epoch_mode == "fixed" and patience_counter >= patience:
+                print(f"   ℹ️ 改善なしが {patience} 回続いていますが、強制モードのため学習を継続します。")
     
     # 最終保存
     if best_state: model.load_state_dict({k: v.to(device) for k, v in best_state.items()})
