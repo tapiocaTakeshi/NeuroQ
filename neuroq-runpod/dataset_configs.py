@@ -227,6 +227,29 @@ def get_dataset_config(dataset_id: str) -> dict:
     return AVAILABLE_DATASETS[dataset_id]
 
 
+def get_datasets_list() -> list:
+    """
+    利用可能なデータセットを {id, config} のリスト形式で返す
+
+    Returns:
+        [{"id": "oasst1_ja", "config": {...}}, ...] 形式のリスト
+    """
+    result = []
+    for dataset_id, config in AVAILABLE_DATASETS.items():
+        result.append({
+            "id": dataset_id,
+            "config": {
+                "name": config["name"],
+                "description": config["description"],
+                "source": config["source"],
+                "language": config["language"],
+                "format": config["format"],
+                "default_params": config["default_params"],
+            },
+        })
+    return result
+
+
 def find_data_file(dataset_config: dict) -> str:
     """
     データセット設定からデータファイルのパスを探す

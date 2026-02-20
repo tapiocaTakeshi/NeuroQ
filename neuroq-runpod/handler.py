@@ -55,8 +55,9 @@ except ImportError:
 # データセット設定をインポート
 try:
     from dataset_configs import (
-        AVAILABLE_DATASETS, get_dataset_config, load_dataset_texts,
-        find_data_file, find_tokenizer_file, get_training_params
+        AVAILABLE_DATASETS, get_dataset_config, get_datasets_list,
+        load_dataset_texts, find_data_file, find_tokenizer_file,
+        get_training_params
     )
     DATASET_CONFIGS_AVAILABLE = True
     print("✅ dataset_configs.py をインポートしました")
@@ -773,7 +774,7 @@ def handler(job):
             "daily_time_limit": time_status
         }
         if DATASET_CONFIGS_AVAILABLE:
-            result["available_datasets"] = list(AVAILABLE_DATASETS.keys())
+            result["datasets"] = get_datasets_list()
             result["dataset_configs_available"] = True
         else:
             result["dataset_configs_available"] = False
@@ -1109,11 +1110,11 @@ def handler(job):
                 ds_config = get_dataset_config(dataset_id)
             except ValueError as e:
                 daily_limiter.end_request(time.time() - train_request_start)
-                available_ids = list(AVAILABLE_DATASETS.keys()) if DATASET_CONFIGS_AVAILABLE else []
+                datasets = get_datasets_list() if DATASET_CONFIGS_AVAILABLE else []
                 return {
                     "status": "error",
                     "error": str(e),
-                    "available_datasets": available_ids
+                    "datasets": datasets
                 }
 
             print("=" * 70)
@@ -1630,7 +1631,7 @@ def handler(job):
             "time_limit_status",  # 日次時間制限ステータス確認
             "set_time_limit"      # 日次時間制限設定
         ],
-        "available_datasets": list(AVAILABLE_DATASETS.keys()) if DATASET_CONFIGS_AVAILABLE else ["oasst1_ja"],
+        "datasets": get_datasets_list() if DATASET_CONFIGS_AVAILABLE else [{"id": "oasst1_ja", "config": {"name": "OASST1 Japanese", "description": "kunishou/oasst1-89k-ja 日本語会話データセット"}}],
         "translation_note": "generate アクションで use_translation=true を指定すると、日本語入力→英語生成→日本語出力の翻訳パイプラインを使用できます"
     }
 
