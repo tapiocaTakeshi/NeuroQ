@@ -139,14 +139,176 @@ Content-Type: application/json
 | `use_rag`       | bool     | false      | Web RAGを使用（検索結果をコンテキストに追加）                 |
 | `force_search`  | bool     | false      | 検索を強制（`use_rag=true` の場合のみ有効）                  |
 
-## curlでのテスト
+## フルリクエスト例（全パラメータ指定）
+
+### POST /generate（全パラメータ）
+
+```bash
+curl -X POST https://api.neuroq.he-ro.jp/generate \
+  -H "Content-Type: application/json" \
+  -d '{
+    "prompt": "量子コンピュータの仕組みを教えて",
+    "max_length": 100,
+    "temperature": 0.7,
+    "temp_min": 0.5,
+    "temp_max": 0.9,
+    "model_size": "small",
+    "session_id": "session_abc123",
+    "system_prompt": "あなたは量子物理学の教授です。専門用語を避け、中学生にもわかるように説明してください。",
+    "history": [
+      {"role": "user", "content": "量子ビットって何？"},
+      {"role": "assistant", "content": "0と1を同時に持てる特殊なビットです。"},
+      {"role": "user", "content": "普通のビットとどう違うの？"},
+      {"role": "assistant", "content": "普通のビットは0か1のどちらかですが、量子ビットは両方の状態を重ね合わせられます。"}
+    ],
+    "use_rag": true,
+    "force_search": true
+  }'
+```
+
+レスポンス:
+
+```json
+{
+  "status": "success",
+  "prompt": "量子コンピュータの仕組みを教えて",
+  "generated": "量子コンピュータは...",
+  "model_size": "small",
+  "system_prompt": "あなたは量子物理学の教授です。...",
+  "session_id": "session_abc123",
+  "rag_used": true,
+  "rag_sources": ["https://example.com/quantum"],
+  "rag_query": "量子コンピュータ 仕組み"
+}
+```
+
+### POST /embeddings（全パラメータ）
+
+```bash
+curl -X POST https://api.neuroq.he-ro.jp/embeddings \
+  -H "Content-Type: application/json" \
+  -d '{
+    "text": "こんにちは世界",
+    "model_size": "small"
+  }'
+```
+
+レスポンス:
+
+```json
+{
+  "status": "success",
+  "text": "こんにちは世界",
+  "num_tokens": 3,
+  "embed_dim": 256,
+  "tokens": [
+    {
+      "index": 0,
+      "token": "こんにちは",
+      "token_id": 12345,
+      "embedding_preview": [0.01, 0.02, 0.03, 0.04, 0.05, "...", -0.01, -0.02, -0.03, -0.04, -0.05],
+      "embedding_full": [0.01, 0.02, "...（256次元）"]
+    }
+  ]
+}
+```
+
+### POST /decode_embeddings（全パラメータ）
+
+```bash
+# ※ embedding_full の値は /embeddings のレスポンスからコピーして使用
+curl -X POST https://api.neuroq.he-ro.jp/decode_embeddings \
+  -H "Content-Type: application/json" \
+  -d '{
+    "embeddings": [
+      [0.01, 0.02, 0.03, 0.04, 0.05],
+      [-0.01, 0.03, -0.02, 0.01, 0.04]
+    ],
+    "model_size": "small",
+    "top_k": 10
+  }'
+```
+
+レスポンス:
+
+```json
+{
+  "status": "success",
+  "num_input_vectors": 2,
+  "embed_dim": 5,
+  "decoded_tokens": [
+    {
+      "index": 0,
+      "best_token": "こんにちは",
+      "best_token_id": 12345,
+      "similarity": 0.9821,
+      "candidates": [
+        {"rank": 1, "token": "こんにちは", "token_id": 12345, "similarity": 0.9821},
+        {"rank": 2, "token": "おはよう", "token_id": 12346, "similarity": 0.8734}
+      ]
+    }
+  ],
+  "reconstructed_text": "こんにちは世界"
+}
+```
+
+### POST /train（全パラメータ）
+
+```bash
+curl -X POST https://api.neuroq.he-ro.jp/train \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model_size": "small",
+    "epochs": 20,
+    "batch_size": 4,
+    "learning_rate": 0.00005,
+    "dataset_ids": ["OpenAssistant/oasst1", "OpenAssistant/oasst2"],
+    "text_column": "text",
+    "split": "train",
+    "max_samples": 50000
+  }'
+```
+
+レスポンス:
+
+```json
+{
+  "status": "started",
+  "message": "Training SMALL model started",
+  "model_size": "small",
+  "epochs": 20,
+  "batch_size": 4,
+  "learning_rate": 0.00005,
+  "dataset_ids": ["OpenAssistant/oasst1", "OpenAssistant/oasst2"],
+  "text_column": "text",
+  "split": "train",
+  "max_samples": 50000,
+  "call_id": "fc-xxxxxxxx"
+}
+```
+
+### GET /train/status/{call_id}
+
+```bash
+curl https://api.neuroq.he-ro.jp/train/status/fc-xxxxxxxx
+```
+
+レスポンス（実行中）:
+
+```json
+{"status": "running", "message": "Training is still in progress"}
+```
+
+レスポンス（完了）:
+
+```json
+{"status": "completed", "result": {"status": "success", "best_val_loss": 3.1234}}
+```
+
+## curlでのテスト（簡易版）
 
 ```bash
 BASE_URL="https://api.neuroq.he-ro.jp"
-
-# ========================================
-# 基本
-# ========================================
 
 # ヘルスチェック
 curl $BASE_URL/health
@@ -154,113 +316,20 @@ curl $BASE_URL/health
 # ステータス確認
 curl $BASE_URL/status
 
-# ========================================
-# テキスト生成 (POST /generate)
-# ========================================
-
 # シンプルな生成
 curl -X POST $BASE_URL/generate \
   -H "Content-Type: application/json" \
   -d '{"prompt": "こんにちは", "max_length": 50}'
 
-# モデルサイズ・温度を指定
-curl -X POST $BASE_URL/generate \
-  -H "Content-Type: application/json" \
-  -d '{
-    "prompt": "What is quantum computing?",
-    "max_length": 100,
-    "temperature": 0.7,
-    "model_size": "small"
-  }'
-
-# 会話履歴付き（マルチターン）
-curl -X POST $BASE_URL/generate \
-  -H "Content-Type: application/json" \
-  -d '{
-    "prompt": "それについてもう少し教えて",
-    "max_length": 80,
-    "temperature": 0.5,
-    "session_id": "user123",
-    "history": [
-      {"role": "user", "content": "量子コンピュータって何？"},
-      {"role": "assistant", "content": "量子ビットを使った計算機です。"}
-    ]
-  }'
-
-# カスタムシステムプロンプト
-curl -X POST $BASE_URL/generate \
-  -H "Content-Type: application/json" \
-  -d '{
-    "prompt": "自己紹介して",
-    "max_length": 100,
-    "session_id": "user123",
-    "system_prompt": "あなたは猫です。語尾に「にゃ」を付けてください。"
-  }'
-
-# Web RAG（検索結果をコンテキストに追加）
-curl -X POST $BASE_URL/generate \
-  -H "Content-Type: application/json" \
-  -d '{
-    "prompt": "最新のAIニュースを教えて",
-    "max_length": 100,
-    "use_rag": true,
-    "force_search": true
-  }'
-
-# ========================================
-# 埋め込みベクトル (POST /embeddings)
-# ========================================
-
-# テキストの埋め込みベクトルを取得
+# 埋め込みベクトル取得
 curl -X POST $BASE_URL/embeddings \
   -H "Content-Type: application/json" \
-  -d '{
-    "text": "こんにちは世界",
-    "model_size": "micro"
-  }'
+  -d '{"text": "テスト", "model_size": "micro"}'
 
-# ========================================
-# 埋め込みデコード (POST /decode_embeddings)
-# ========================================
-
-# 埋め込みベクトルからテキストに復元（top-5候補）
-# ※ embeddings の値は /embeddings で取得した embedding_full を使用
-curl -X POST $BASE_URL/decode_embeddings \
-  -H "Content-Type: application/json" \
-  -d '{
-    "embeddings": [[0.1, 0.2, 0.3, ...]],
-    "model_size": "micro",
-    "top_k": 5
-  }'
-
-# ========================================
-# 学習 (POST /train)
-# ========================================
-
-# デフォルト設定で学習開始（バックグラウンド実行）
+# 学習開始
 curl -X POST $BASE_URL/train \
   -H "Content-Type: application/json" \
-  -d '{
-    "model_size": "micro",
-    "epochs": 10
-  }'
-
-# 詳細設定で学習
-curl -X POST $BASE_URL/train \
-  -H "Content-Type: application/json" \
-  -d '{
-    "model_size": "small",
-    "epochs": 5,
-    "batch_size": 4,
-    "learning_rate": 0.0001,
-    "dataset_ids": ["OpenAssistant/oasst1"],
-    "text_column": "text",
-    "split": "train",
-    "max_samples": 10000
-  }'
-
-# 学習ステータス確認（call_id は /train のレスポンスに含まれる）
-curl $BASE_URL/train/status/{call_id}
+  -d '{"model_size": "micro", "epochs": 10}'
 ```
 
 ## Pythonクライアント例
