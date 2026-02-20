@@ -125,29 +125,142 @@ Content-Type: application/json
 
 ### パラメータ
 
-| パラメータ    | 型     | デフォルト | 説明                              |
-| ------------- | ------ | ---------- | --------------------------------- |
-| `prompt`      | string | 必須       | 入力プロンプト                    |
-| `max_length`  | int    | 50         | 最大生成長                        |
-| `temperature` | float  | 0.5        | 生成の多様性（0.0-1.0）           |
-| `temp_min`    | float  | null       | 最低温度（指定時は範囲を使用）    |
-| `temp_max`    | float  | null       | 最高温度                          |
-| `session_id`  | string | "default"  | 会話セッションID                  |
-| `model_size`  | string | "micro"    | モデルサイズ: micro, small, large |
+| パラメータ      | 型       | デフォルト | 説明                                                         |
+| --------------- | -------- | ---------- | ------------------------------------------------------------ |
+| `prompt`        | string   | 必須       | 入力プロンプト                                               |
+| `max_length`    | int      | 50         | 最大生成トークン数                                           |
+| `temperature`   | float    | 0.5        | 生成の多様性（0.0-1.0）                                      |
+| `temp_min`      | float    | null       | 最低温度（指定時は範囲を使用）                               |
+| `temp_max`      | float    | null       | 最高温度                                                     |
+| `history`       | array    | null       | 会話履歴 `[{"role":"user","content":"..."},...]`              |
+| `model_size`    | string   | "micro"    | モデルサイズ: micro, small, large                            |
+| `system_prompt` | string   | null       | カスタムシステムプロンプト（省略時はデフォルト）              |
+| `session_id`    | string   | null       | セッションID（システムプロンプトの永続化用）                  |
+| `use_rag`       | bool     | false      | Web RAGを使用（検索結果をコンテキストに追加）                 |
+| `force_search`  | bool     | false      | 検索を強制（`use_rag=true` の場合のみ有効）                  |
 
 ## curlでのテスト
 
 ```bash
+BASE_URL="https://api.neuroq.he-ro.jp"
+
+# ========================================
+# 基本
+# ========================================
+
 # ヘルスチェック
-curl https://higuchiyuya-riddle--neuroq-api-fastapi-app.modal.run/health
+curl $BASE_URL/health
 
 # ステータス確認
-curl https://higuchiyuya-riddle--neuroq-api-fastapi-app.modal.run/status
+curl $BASE_URL/status
 
-# テキスト生成
-curl -X POST https://higuchiyuya-riddle--neuroq-api-fastapi-app.modal.run/generate \
+# ========================================
+# テキスト生成 (POST /generate)
+# ========================================
+
+# シンプルな生成
+curl -X POST $BASE_URL/generate \
   -H "Content-Type: application/json" \
   -d '{"prompt": "こんにちは", "max_length": 50}'
+
+# モデルサイズ・温度を指定
+curl -X POST $BASE_URL/generate \
+  -H "Content-Type: application/json" \
+  -d '{
+    "prompt": "What is quantum computing?",
+    "max_length": 100,
+    "temperature": 0.7,
+    "model_size": "small"
+  }'
+
+# 会話履歴付き（マルチターン）
+curl -X POST $BASE_URL/generate \
+  -H "Content-Type: application/json" \
+  -d '{
+    "prompt": "それについてもう少し教えて",
+    "max_length": 80,
+    "temperature": 0.5,
+    "session_id": "user123",
+    "history": [
+      {"role": "user", "content": "量子コンピュータって何？"},
+      {"role": "assistant", "content": "量子ビットを使った計算機です。"}
+    ]
+  }'
+
+# カスタムシステムプロンプト
+curl -X POST $BASE_URL/generate \
+  -H "Content-Type: application/json" \
+  -d '{
+    "prompt": "自己紹介して",
+    "max_length": 100,
+    "session_id": "user123",
+    "system_prompt": "あなたは猫です。語尾に「にゃ」を付けてください。"
+  }'
+
+# Web RAG（検索結果をコンテキストに追加）
+curl -X POST $BASE_URL/generate \
+  -H "Content-Type: application/json" \
+  -d '{
+    "prompt": "最新のAIニュースを教えて",
+    "max_length": 100,
+    "use_rag": true,
+    "force_search": true
+  }'
+
+# ========================================
+# 埋め込みベクトル (POST /embeddings)
+# ========================================
+
+# テキストの埋め込みベクトルを取得
+curl -X POST $BASE_URL/embeddings \
+  -H "Content-Type: application/json" \
+  -d '{
+    "text": "こんにちは世界",
+    "model_size": "micro"
+  }'
+
+# ========================================
+# 埋め込みデコード (POST /decode_embeddings)
+# ========================================
+
+# 埋め込みベクトルからテキストに復元（top-5候補）
+# ※ embeddings の値は /embeddings で取得した embedding_full を使用
+curl -X POST $BASE_URL/decode_embeddings \
+  -H "Content-Type: application/json" \
+  -d '{
+    "embeddings": [[0.1, 0.2, 0.3, ...]],
+    "model_size": "micro",
+    "top_k": 5
+  }'
+
+# ========================================
+# 学習 (POST /train)
+# ========================================
+
+# デフォルト設定で学習開始（バックグラウンド実行）
+curl -X POST $BASE_URL/train \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model_size": "micro",
+    "epochs": 10
+  }'
+
+# 詳細設定で学習
+curl -X POST $BASE_URL/train \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model_size": "small",
+    "epochs": 5,
+    "batch_size": 4,
+    "learning_rate": 0.0001,
+    "dataset_ids": ["OpenAssistant/oasst1"],
+    "text_column": "text",
+    "split": "train",
+    "max_samples": 10000
+  }'
+
+# 学習ステータス確認（call_id は /train のレスポンスに含まれる）
+curl $BASE_URL/train/status/{call_id}
 ```
 
 ## Pythonクライアント例
@@ -155,9 +268,9 @@ curl -X POST https://higuchiyuya-riddle--neuroq-api-fastapi-app.modal.run/genera
 ```python
 import requests
 
-BASE_URL = "https://higuchiyuya-riddle--neuroq-api-fastapi-app.modal.run"
+BASE_URL = "https://api.neuroq.he-ro.jp"
 
-# テキスト生成
+# --- テキスト生成 ---
 response = requests.post(
     f"{BASE_URL}/generate",
     json={
@@ -167,9 +280,57 @@ response = requests.post(
         "model_size": "micro"
     }
 )
-
 result = response.json()
 print(f"Generated: {result['generated']}")
+
+# --- 会話履歴付き生成 ---
+response = requests.post(
+    f"{BASE_URL}/generate",
+    json={
+        "prompt": "続きを教えて",
+        "max_length": 80,
+        "session_id": "session_001",
+        "history": [
+            {"role": "user", "content": "Pythonの特徴は？"},
+            {"role": "assistant", "content": "読みやすい文法が特徴です。"},
+        ]
+    }
+)
+print(response.json()["generated"])
+
+# --- Web RAG付き生成 ---
+response = requests.post(
+    f"{BASE_URL}/generate",
+    json={
+        "prompt": "東京の天気は？",
+        "use_rag": True,
+        "force_search": True
+    }
+)
+result = response.json()
+print(f"Generated: {result['generated']}")
+print(f"Sources: {result.get('rag_sources')}")
+
+# --- 埋め込みベクトル取得 ---
+response = requests.post(
+    f"{BASE_URL}/embeddings",
+    json={"text": "こんにちは世界", "model_size": "micro"}
+)
+tokens = response.json()["tokens"]
+for t in tokens:
+    print(f"  {t['token']} (id={t['token_id']}): {t['embedding_preview']}")
+
+# --- 学習開始 & ステータス確認 ---
+response = requests.post(
+    f"{BASE_URL}/train",
+    json={"model_size": "micro", "epochs": 5}
+)
+call_id = response.json()["call_id"]
+print(f"Training started: {call_id}")
+
+# ステータス確認
+status = requests.get(f"{BASE_URL}/train/status/{call_id}").json()
+print(f"Status: {status['status']}")
 ```
 
 ## GPU設定
