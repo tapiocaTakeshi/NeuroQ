@@ -71,11 +71,12 @@ def load_oasst_data(dataset_id="OpenAssistant/oasst1", max_samples=10000):
     random.shuffle(conversations)
     return conversations[:max_samples]
 
-def train_model(model_size, epochs, max_samples=10000):
+def train_model(model_size, epochs, max_samples=10000, epoch_mode="early_stop"):
     """
     特定のサイズのモデルを学習
     """
-    logger.info(f"\n🚀 {model_size.upper()} モデルの学習を開始します (Epochs: {epochs})")
+    mode_label = "早期終了あり" if epoch_mode == "early_stop" else f"強制 {epochs} エポック"
+    logger.info(f"\n🚀 {model_size.upper()} モデルの学習を開始します (Epochs: {epochs}, モード: {mode_label})")
     
     # 1. データ準備
     texts_1 = load_oasst_data("OpenAssistant/oasst1", max_samples=max_samples // 2)
@@ -221,9 +222,11 @@ def train_model(model_size, epochs, max_samples=10000):
         if is_best:
             save_checkpoint(model, config_dict, model_size, f"neuroq_{model_size}_best.pt")
 
-        if patience_counter >= patience:
+        if epoch_mode == "early_stop" and patience_counter >= patience:
             logger.info("🛑 早期終了: ロスが安定したため学習を停止します。")
             break
+        elif epoch_mode == "fixed" and patience_counter >= patience:
+            logger.info(f"   ℹ️ 改善なしが {patience} 回続いていますが、強制モードのため学習を継続します。")
 
     # 学習完了後は best を正規のチェックポイント名としてアップロード対象にする
     best_path = Path("checkpoints") / f"neuroq_{model_size}_best.pt"
@@ -272,10 +275,12 @@ if __name__ == "__main__":
     parser.add_argument("--epochs", type=int, default=50)
     parser.add_argument("--samples", type=int, default=10000)
     parser.add_argument("--sizes", nargs="+", default=["micro", "small", "large"])
+    parser.add_argument("--epoch-mode", choices=["early_stop", "fixed"], default="early_stop",
+                        help="early_stop: 改善なしで打ち切り（デフォルト） / fixed: 指定エポック数を強制的に回す")
     args = parser.parse_args()
 
     for size in args.sizes:
-        path = train_model(size, args.epochs, args.samples)
+        path = train_model(size, args.epochs, args.samples, epoch_mode=args.epoch_mode)
         if path:
             upload_to_modal(path)
     
