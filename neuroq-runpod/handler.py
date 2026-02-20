@@ -52,6 +52,18 @@ try:
 except ImportError:
     MODEL_CONFIGS_AVAILABLE = False
 
+# データセット設定をインポート
+try:
+    from dataset_configs import (
+        AVAILABLE_DATASETS, get_dataset_config, load_dataset_texts,
+        find_data_file, find_tokenizer_file, get_training_params
+    )
+    DATASET_CONFIGS_AVAILABLE = True
+    print("✅ dataset_configs.py をインポートしました")
+except ImportError as e:
+    DATASET_CONFIGS_AVAILABLE = False
+    print(f"⚠️ dataset_configs.py のインポートに失敗: {e}")
+
 # BPEトークナイザー学習モジュールをインポート
 try:
     from bpe_tokenizer_trainer import BPETokenizerTrainer, TrainedBPETokenizer, train_bpe_tokenizer
@@ -748,7 +760,7 @@ def handler(job):
     # ========================================
     if action == "status":
         time_status = daily_limiter.get_status()
-        return {
+        result = {
             "status": "ok",
             "initialized": is_initialized,
             "device": DEVICE,
@@ -760,6 +772,12 @@ def handler(job):
             "translation_initialized": translation_initialized,
             "daily_time_limit": time_status
         }
+        if DATASET_CONFIGS_AVAILABLE:
+            result["available_datasets"] = list(AVAILABLE_DATASETS.keys())
+            result["dataset_configs_available"] = True
+        else:
+            result["dataset_configs_available"] = False
+        return result
     
     # ========================================
     # GENERATE（モデルが必要な処理）
@@ -1039,7 +1057,7 @@ def handler(job):
 
         パラメータ:
         - model_size: 'micro', 'small', 'large'（デフォルト: 'micro'）
-        - dataset_id: データセットID（'oasst1_ja'で日本語会話データを使用）
+        - dataset_id: データセットID（dataset_configs.pyで定義されたID）
         - epochs: エポック数
         - batch_size: バッチサイズ
         - lr: 学習率
@@ -1049,8 +1067,13 @@ def handler(job):
         - tokenizer_vocab_size: トークナイザー語彙サイズ（デフォルト: 32000）
         - use_custom_tokenizer: カスタムトークナイザーを使用するか（デフォルト: False）
 
-        dataset_id オプション:
-        - 'oasst1_ja': kunishou/oasst1-89k-ja 日本語会話データセット（User/Assistant形式）
+        dataset_id オプション（dataset_configs.pyで定義）:
+        - 'oasst1_ja': kunishou/oasst1-89k-ja 日本語会話データセット
+        - 'oasst1_ja_cleaned': クリーニング済み日本語会話データ
+        - 'training_data': 汎用トレーニングデータ
+        - 'combined_clean': 結合・クリーニング済みデータ
+        - 'high_quality': キュレーション済み高品質会話データ
+        - 'japanese_corpus': 日本語トレーニングコーパス
         """
 
         # 日次時間制限チェック
@@ -1079,80 +1102,138 @@ def handler(job):
         # ========================================
         # dataset_id による学習データ切り替え
         # ========================================
-        oasst1_ja_tokenizer_path = None
+        dataset_tokenizer_path = None
 
-        if dataset_id == "oasst1_ja":
+        if dataset_id is not None and DATASET_CONFIGS_AVAILABLE:
+            try:
+                ds_config = get_dataset_config(dataset_id)
+            except ValueError as e:
+                daily_limiter.end_request(time.time() - train_request_start)
+                available_ids = list(AVAILABLE_DATASETS.keys()) if DATASET_CONFIGS_AVAILABLE else []
+                return {
+                    "status": "error",
+                    "error": str(e),
+                    "available_datasets": available_ids
+                }
+
             print("=" * 70)
-            print("📚 dataset_id='oasst1_ja' - 日本語会話データセットで学習")
+            print(f"📚 dataset_id='{dataset_id}' - {ds_config['name']}で学習")
+            print(f"   {ds_config['description']}")
             print("=" * 70)
-
-            # oasst1_ja用のデータファイルとトークナイザーを探す
-            data_file_candidates = [
-                "data/oasst1_ja_conversations.txt",
-                "../data/oasst1_ja_conversations.txt",
-                os.path.join(os.path.dirname(__file__), "data/oasst1_ja_conversations.txt"),
-                os.path.join(os.path.dirname(os.path.dirname(__file__)), "data/oasst1_ja_conversations.txt"),
-            ]
-
-            tokenizer_candidates = [
-                "neuroq_tokenizer_oasst1_ja.model",
-                "../neuroq_tokenizer_oasst1_ja.model",
-                os.path.join(os.path.dirname(__file__), "neuroq_tokenizer_oasst1_ja.model"),
-                os.path.join(os.path.dirname(os.path.dirname(__file__)), "neuroq_tokenizer_oasst1_ja.model"),
-            ]
 
             # データファイルを探す
-            data_file = None
-            for path in data_file_candidates:
-                if os.path.exists(path):
-                    data_file = path
-                    break
-
-            if data_file is None:
+            try:
+                data_file = find_data_file(ds_config)
+            except FileNotFoundError as e:
                 daily_limiter.end_request(time.time() - train_request_start)
                 return {
                     "status": "error",
-                    "error": "oasst1_ja data file not found. Run convert_oasst1_ja.py first.",
-                    "searched_paths": data_file_candidates
+                    "error": str(e),
+                    "dataset_id": dataset_id
                 }
 
             # トークナイザーを探す
-            for path in tokenizer_candidates:
-                if os.path.exists(path):
-                    oasst1_ja_tokenizer_path = path
-                    break
-
-            if oasst1_ja_tokenizer_path is None:
+            try:
+                dataset_tokenizer_path = find_tokenizer_file(ds_config)
+            except FileNotFoundError as e:
                 daily_limiter.end_request(time.time() - train_request_start)
                 return {
                     "status": "error",
-                    "error": "oasst1_ja tokenizer not found. Run train_japanese_tokenizer.py first.",
-                    "searched_paths": tokenizer_candidates
+                    "error": str(e),
+                    "dataset_id": dataset_id
                 }
 
-            # 会話データを読み込み
-            print(f"📖 会話データ読み込み: {data_file}")
-            with open(data_file, 'r', encoding='utf-8') as f:
-                content = f.read()
+            # テキストデータを読み込み
+            texts = load_dataset_texts(dataset_id)
+            if dataset_tokenizer_path:
+                print(f"🔤 トークナイザー: {dataset_tokenizer_path}")
 
-            # 空行で区切られた会話ブロックに分割
-            texts = []
-            blocks = content.split('\n\n')
-            for block in blocks:
-                block = block.strip()
-                if block and 'User:' in block and 'Assistant:' in block:
-                    texts.append(block)
+            # データセットのデフォルトパラメータを適用（ユーザー指定がない場合のみ）
+            ds_defaults = get_training_params(dataset_id, overrides={
+                'epochs': job_input.get("epochs"),
+                'batch_size': job_input.get("batch_size"),
+                'lr': job_input.get("lr"),
+                'seq_length': job_input.get("seq_length"),
+            })
+            epochs = ds_defaults['epochs']
+            batch_size = ds_defaults['batch_size']
+            lr = ds_defaults['lr']
+            seq_length = ds_defaults['seq_length']
 
-            print(f"   {len(texts)} 個の会話を読み込みました")
-            print(f"🔤 トークナイザー: {oasst1_ja_tokenizer_path}")
+        elif dataset_id is not None and not DATASET_CONFIGS_AVAILABLE:
+            # dataset_configs が利用不可でも oasst1_ja は後方互換のためサポート
+            if dataset_id == "oasst1_ja":
+                print("=" * 70)
+                print("📚 dataset_id='oasst1_ja' - 日本語会話データセットで学習（レガシーモード）")
+                print("=" * 70)
 
-            # oasst1_ja用のデフォルト設定
-            if job_input.get("epochs") is None:
-                epochs = 5
-            if job_input.get("seq_length") is None:
-                seq_length = 128
-            if job_input.get("lr") is None:
-                lr = 0.0003
+                data_file_candidates = [
+                    "data/oasst1_ja_conversations.txt",
+                    "../data/oasst1_ja_conversations.txt",
+                    os.path.join(os.path.dirname(__file__), "data/oasst1_ja_conversations.txt"),
+                    os.path.join(os.path.dirname(os.path.dirname(__file__)), "data/oasst1_ja_conversations.txt"),
+                ]
+
+                tokenizer_candidates = [
+                    "neuroq_tokenizer_oasst1_ja.model",
+                    "../neuroq_tokenizer_oasst1_ja.model",
+                    os.path.join(os.path.dirname(__file__), "neuroq_tokenizer_oasst1_ja.model"),
+                    os.path.join(os.path.dirname(os.path.dirname(__file__)), "neuroq_tokenizer_oasst1_ja.model"),
+                ]
+
+                data_file = None
+                for path in data_file_candidates:
+                    if os.path.exists(path):
+                        data_file = path
+                        break
+
+                if data_file is None:
+                    daily_limiter.end_request(time.time() - train_request_start)
+                    return {
+                        "status": "error",
+                        "error": "oasst1_ja data file not found. Run convert_oasst1_ja.py first.",
+                        "searched_paths": data_file_candidates
+                    }
+
+                for path in tokenizer_candidates:
+                    if os.path.exists(path):
+                        dataset_tokenizer_path = path
+                        break
+
+                if dataset_tokenizer_path is None:
+                    daily_limiter.end_request(time.time() - train_request_start)
+                    return {
+                        "status": "error",
+                        "error": "oasst1_ja tokenizer not found. Run train_japanese_tokenizer.py first.",
+                        "searched_paths": tokenizer_candidates
+                    }
+
+                with open(data_file, 'r', encoding='utf-8') as f:
+                    content = f.read()
+
+                texts = []
+                blocks = content.split('\n\n')
+                for block in blocks:
+                    block = block.strip()
+                    if block and 'User:' in block and 'Assistant:' in block:
+                        texts.append(block)
+
+                print(f"   {len(texts)} 個の会話を読み込みました")
+                print(f"🔤 トークナイザー: {dataset_tokenizer_path}")
+
+                if job_input.get("epochs") is None:
+                    epochs = 5
+                if job_input.get("seq_length") is None:
+                    seq_length = 128
+                if job_input.get("lr") is None:
+                    lr = 0.0003
+            else:
+                daily_limiter.end_request(time.time() - train_request_start)
+                return {
+                    "status": "error",
+                    "error": f"dataset_configs.py が利用できないため、dataset_id='{dataset_id}' を解決できません。"
+                             f" dataset_configs.py をインストールしてください。",
+                }
 
         # モデルサイズに応じて設定を調整
         if model_size == 'small':
@@ -1173,17 +1254,21 @@ def handler(job):
                 if texts is None:
                     texts = get_training_data()
 
+                # モデル設定を取得（トークナイザー初期化前に必要）
+                config = get_model_config(model_size)
+                checkpoint_path = MODEL_CHECKPOINT_PATHS.get(model_size, MODEL_CHECKPOINT_PATHS['micro'])
+
                 # トークナイザー初期化
                 tokenizer = None
                 tokenizer_type = 'sentencepiece'
                 custom_tokenizer_path = None
 
-                # oasst1_ja データセット用トークナイザー
-                if oasst1_ja_tokenizer_path is not None:
-                    print(f"🔤 oasst1_ja専用トークナイザーを使用: {oasst1_ja_tokenizer_path}")
-                    tokenizer = NeuroQuantumTokenizer(vocab_size=8000, model_file=oasst1_ja_tokenizer_path)
-                    tokenizer_type = 'sentencepiece_oasst1_ja'
-                    custom_tokenizer_path = oasst1_ja_tokenizer_path
+                # データセット専用トークナイザー
+                if dataset_tokenizer_path is not None:
+                    print(f"🔤 データセット専用トークナイザーを使用: {dataset_tokenizer_path}")
+                    tokenizer = NeuroQuantumTokenizer(vocab_size=8000, model_file=dataset_tokenizer_path)
+                    tokenizer_type = f'sentencepiece_dataset'
+                    custom_tokenizer_path = dataset_tokenizer_path
 
                 # カスタムトークナイザー学習
                 elif train_tokenizer_flag and BPE_TRAINER_AVAILABLE:
@@ -1222,10 +1307,6 @@ def handler(job):
                     tokenizer = NeuroQuantumTokenizer(vocab_size=config.get('vocab_size', 8000))
                     tokenizer.build_vocab(texts, model_prefix="neuroq_tokenizer")
                     tokenizer_type = 'sentencepiece'
-
-                # モデル設定を取得
-                config = get_model_config(model_size)
-                checkpoint_path = MODEL_CHECKPOINT_PATHS.get(model_size, MODEL_CHECKPOINT_PATHS['micro'])
 
                 # カスタムトークナイザー使用時は vocab_size を更新
                 if tokenizer_type == 'custom_bpe':
@@ -1364,6 +1445,8 @@ def handler(job):
                     "tokenizer_type": tokenizer_type,
                 }
 
+                if dataset_id:
+                    result["dataset_id"] = dataset_id
                 if tokenizer_type == 'custom_bpe':
                     result["tokenizer_path"] = custom_tokenizer_path
                     result["tokenizer_vocab_size"] = tokenizer.vocab_size
@@ -1391,12 +1474,12 @@ def handler(job):
                         use_sentencepiece=True
                     )
 
-                    # oasst1_ja用トークナイザーを優先的に使用
-                    if oasst1_ja_tokenizer_path is not None and os.path.exists(oasst1_ja_tokenizer_path):
-                        print(f"✅ oasst1_jaトークナイザーをロード: {oasst1_ja_tokenizer_path}")
+                    # データセット専用トークナイザーを優先的に使用
+                    if dataset_tokenizer_path is not None and os.path.exists(dataset_tokenizer_path):
+                        print(f"✅ データセットトークナイザーをロード: {dataset_tokenizer_path}")
                         model.tokenizer = NeuroQuantumTokenizer(
                             vocab_size=8000,
-                            model_file=oasst1_ja_tokenizer_path
+                            model_file=dataset_tokenizer_path
                         )
                     elif os.path.exists(TOKENIZER_MODEL_PATH):
                         print(f"✅ トークナイザーをロード: {TOKENIZER_MODEL_PATH}")
@@ -1537,7 +1620,7 @@ def handler(job):
         "available_actions": [
             "health",             # ヘルスチェック
             "status",             # ステータス確認
-            "train",              # 学習（dataset_id='oasst1_ja'で日本語会話データ）
+            "train",              # 学習（dataset_idでデータセット指定可能）
             "generate",           # 推論（use_translation=trueで翻訳パイプライン使用）
             "pretrain_openai",    # OpenAIデータセット事前学習
             "pretrain_status",    # 事前学習ステータス
@@ -1547,6 +1630,7 @@ def handler(job):
             "time_limit_status",  # 日次時間制限ステータス確認
             "set_time_limit"      # 日次時間制限設定
         ],
+        "available_datasets": list(AVAILABLE_DATASETS.keys()) if DATASET_CONFIGS_AVAILABLE else ["oasst1_ja"],
         "translation_note": "generate アクションで use_translation=true を指定すると、日本語入力→英語生成→日本語出力の翻訳パイプラインを使用できます"
     }
 
