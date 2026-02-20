@@ -1272,6 +1272,7 @@ def fastapi_app():
         text_column: str = "text"
         split: str = "train"
         max_samples: Optional[int] = None
+        force_mode: bool = False  # フォースモード: 長時間学習用（タイムアウト8時間）
     
     @web_app.post("/train")
     async def train(request: TrainRequest):
@@ -1284,17 +1285,30 @@ def fastapi_app():
         注意: .remote() を使用するため、学習完了まで応答を待機します
         """
         try:
-            # train_model関数を .remote() で同期実行（A100 GPUで実行）
-            result = train_model.remote(
-                model_size=request.model_size,
-                epochs=request.epochs,
-                batch_size=request.batch_size,
-                lr=request.learning_rate,
-                dataset_ids=request.dataset_ids,
-                text_column=request.text_column,
-                split=request.split,
-                max_samples=request.max_samples
-            )
+            # フォースモードの場合は train_model_force を使用（タイムアウト8時間）
+            if request.force_mode:
+                result = train_model_force.remote(
+                    model_size=request.model_size,
+                    epochs=request.epochs,
+                    batch_size=request.batch_size,
+                    lr=request.learning_rate,
+                    dataset_ids=request.dataset_ids,
+                    text_column=request.text_column,
+                    split=request.split,
+                    max_samples=request.max_samples
+                )
+            else:
+                # train_model関数を .remote() で同期実行（A100 GPUで実行）
+                result = train_model.remote(
+                    model_size=request.model_size,
+                    epochs=request.epochs,
+                    batch_size=request.batch_size,
+                    lr=request.learning_rate,
+                    dataset_ids=request.dataset_ids,
+                    text_column=request.text_column,
+                    split=request.split,
+                    max_samples=request.max_samples
+                )
 
             return {
                 "status": "completed",
@@ -1307,6 +1321,7 @@ def fastapi_app():
                 "text_column": request.text_column,
                 "split": request.split,
                 "max_samples": request.max_samples or "all",
+                "force_mode": request.force_mode,
                 "result": result
             }
         except Exception as e:
@@ -1794,6 +1809,292 @@ def load_lima_data(max_samples: int = 1000) -> list:
         print(f"   ⚠️ lima ロードエラー: {e}")
 
     return texts
+
+
+# ========================================
+# フォースモード学習関数（8時間タイムアウト）
+# ========================================
+@app.function(
+    image=image,
+    gpu="A100",  # 学習にはA100推奨（40GB/80GB VRAM）
+    timeout=28800,  # 8時間（フォースモード）
+    volumes={"/model_checkpoints": checkpoints_volume},
+)
+def train_model_force(
+    model_size: str = "small",
+    epochs: int = 10,
+    batch_size: int = None,
+    lr: float = None,
+    dataset_ids: str = None,
+    text_column: str = "text",
+    split: str = "train",
+    max_samples: int = None
+):
+    """
+    フォースモード学習（8時間タイムアウト）
+    長時間の学習（200エポック以上）に使用
+    """
+    import sys
+    import os
+    import torch
+    import random
+    from torch.cuda.amp import autocast, GradScaler
+
+    sys.path.insert(0, "/root/neuroq")
+    os.chdir("/root/neuroq")
+
+    print("=" * 70)
+    print(f"🔥 NeuroQ {model_size.upper()} モデル学習【FORCE MODE】（A100 GPU + FP16）")
+    print(f"⏱️ タイムアウト: 8時間")
+    print("=" * 70)
+
+    # デバイス
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    print(f"📊 Device: {device}")
+    if torch.cuda.is_available():
+        print(f"📊 GPU: {torch.cuda.get_device_name(0)}")
+        print(f"📊 VRAM: {torch.cuda.get_device_properties(0).total_memory / 1e9:.1f} GB")
+        torch.cuda.empty_cache()
+
+    # モジュールインポート
+    from neuroquantum_layered import NeuroQuantum, NeuroQuantumConfig
+    from neuroquantum_brain import get_training_data
+    from tiktoken_tokenizer import TikTokenTokenizer
+    from model_configs import get_model_config, get_checkpoint_path, AVAILABLE_MODELS
+
+    # 学習設定（A100用に調整）
+    if batch_size is None:
+        batch_size = 8 if model_size == 'micro' else (4 if model_size == 'small' else 2)
+    if lr is None:
+        lr = 0.0005 if model_size == 'micro' else 0.0003
+    seq_length = 64
+
+    print(f"\n📋 学習設定【FORCE MODE】:")
+    print(f"   model_size: {model_size}")
+    print(f"   epochs: {epochs}")
+    print(f"   batch_size: {batch_size}")
+    print(f"   lr: {lr}")
+    if dataset_ids:
+        print(f"   dataset_ids: {dataset_ids}")
+        print(f"   text_column: {text_column}")
+        print(f"   split: {split}")
+        if max_samples:
+            print(f"   max_samples: {max_samples} (per dataset)")
+
+    # モデル設定を先に取得（vocab_size を使うため）
+    print("\n📚 トークナイザー初期化...")
+    config = get_model_config(model_size)
+    model_vocab_size = config['vocab_size']
+    tokenizer = TikTokenTokenizer(encoding_name="o200k_base", max_vocab=model_vocab_size)
+    print(f"   語彙サイズ: {tokenizer.vocab_size:,} (max_vocab={model_vocab_size})")
+
+    # 学習データ
+    print("\n📊 学習データ準備...")
+
+    texts = []
+
+    # dataset_idsがJSON文字列の場合はパース
+    dataset_ids_list = None
+    if dataset_ids:
+        import json
+        try:
+            if isinstance(dataset_ids, str):
+                dataset_ids_list = json.loads(dataset_ids)
+            else:
+                dataset_ids_list = dataset_ids
+        except json.JSONDecodeError:
+            print(f"   ⚠️ dataset_idsのパースに失敗: {dataset_ids}")
+            dataset_ids_list = None
+
+    if dataset_ids_list and len(dataset_ids_list) > 0:
+        # Hugging Faceデータセットからロード
+        from datasets import load_dataset
+
+        for dataset_id in dataset_ids_list:
+            print(f"\n   🤗 Hugging Faceからデータセットをロード: {dataset_id}")
+
+            try:
+                if "/" in dataset_id and dataset_id.count("/") >= 2:
+                    parts = dataset_id.split("/")
+                    ds_name = "/".join(parts[:-1])
+                    ds_subset = parts[-1]
+                    dataset = load_dataset(ds_name, ds_subset, split=split)
+                else:
+                    try:
+                        dataset = load_dataset(dataset_id, split=split)
+                    except:
+                        dataset = load_dataset(dataset_id, "default", split=split)
+
+                print(f"   ✅ データセットロード完了: {len(dataset)} サンプル")
+
+                if max_samples and len(dataset) > max_samples:
+                    dataset = dataset.shuffle(seed=42).select(range(max_samples))
+                    print(f"   📉 サンプル数を {max_samples} に制限")
+
+                available_columns = dataset.column_names
+                print(f"   利用可能なカラム: {available_columns}")
+
+                if text_column in available_columns:
+                    target_column = text_column
+                elif "text" in available_columns:
+                    target_column = "text"
+                elif "content" in available_columns:
+                    target_column = "content"
+                elif "sentence" in available_columns:
+                    target_column = "sentence"
+                elif "prompt" in available_columns:
+                    target_column = "prompt"
+                elif "question" in available_columns:
+                    target_column = "question"
+                else:
+                    target_column = available_columns[0]
+                    print(f"   ⚠️ テキストカラムが見つかりません。'{target_column}' を使用します")
+
+                print(f"   📝 テキストカラム: {target_column}")
+
+                dataset_texts = []
+                for item in dataset:
+                    text = item.get(target_column, "")
+                    if text and isinstance(text, str) and len(text) > 10:
+                        dataset_texts.append(text)
+
+                print(f"   有効なテキスト: {len(dataset_texts)} 件")
+                texts.extend(dataset_texts)
+
+            except Exception as e:
+                print(f"   ❌ データセットロードエラー ({dataset_id}): {e}")
+
+        if len(texts) == 0:
+            print("\n   📚 デフォルトデータにフォールバック...")
+            texts = get_training_data()
+    else:
+        texts = get_training_data()
+
+    print(f"   サンプル数: {len(texts)}")
+
+    all_tokens = []
+    for text in texts:
+        tokens = tokenizer.encode(text, add_special=False)
+        all_tokens.extend(tokens)
+        all_tokens.append(tokenizer.eos_id)
+    print(f"   総トークン数: {len(all_tokens):,}")
+
+    # モデル構築
+    print("\n🧠 モデル構築...")
+    config = get_model_config(model_size)
+
+    nq_config = NeuroQuantumConfig()
+    nq_config.vocab_size = config['vocab_size']
+    nq_config.embed_dim = config['embed_dim']
+    nq_config.num_heads = config['num_heads']
+    nq_config.num_layers = config['num_layers']
+    nq_config.max_seq_len = config.get('max_seq_len', 512)
+    nq_config.dropout = config.get('dropout', 0.1)
+
+    model = NeuroQuantum(nq_config).to(device)
+    total_params = sum(p.numel() for p in model.parameters())
+    print(f"   {config['name']}: {total_params:,} パラメータ ({total_params/1e6:.1f}M)")
+    print(f"   embed_dim: {config['embed_dim']}")
+    print(f"   num_heads: {config['num_heads']}")
+    print(f"   num_layers: {config['num_layers']}")
+
+    # シーケンス作成
+    sequences = []
+    for i in range(0, len(all_tokens) - seq_length, seq_length // 2):
+        sequences.append(all_tokens[i:i + seq_length])
+    print(f"\n   シーケンス数: {len(sequences):,}")
+
+    # 学習ループ (Mixed Precision FP16)
+    print("\n🎓 学習開始【FORCE MODE】（Mixed Precision FP16）...")
+    optimizer = torch.optim.AdamW(model.parameters(), lr=lr)
+    criterion = torch.nn.CrossEntropyLoss()
+    scaler = GradScaler()
+
+    total_batches = (len(sequences) - batch_size) // batch_size
+    print(f"   バッチ数/エポック: {total_batches:,}")
+
+    best_loss = float('inf')
+
+    for epoch in range(epochs):
+        model.train()
+        total_loss = 0
+        batch_count = 0
+
+        random.shuffle(sequences)
+
+        for i in range(0, len(sequences) - batch_size, batch_size):
+            batch = sequences[i:i + batch_size]
+            batch_tensor = torch.tensor(batch, device=device)
+
+            input_ids = batch_tensor[:, :-1]
+            target_ids = batch_tensor[:, 1:]
+
+            optimizer.zero_grad()
+
+            with autocast():
+                logits = model(input_ids)
+                loss = criterion(
+                    logits.reshape(-1, config['vocab_size']),
+                    target_ids.reshape(-1)
+                )
+
+            scaler.scale(loss).backward()
+            scaler.unscale_(optimizer)
+            torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
+            scaler.step(optimizer)
+            scaler.update()
+
+            total_loss += loss.item()
+            batch_count += 1
+
+            if batch_count % max(1, total_batches // 10) == 0:
+                progress = batch_count / total_batches * 100
+                print(f"   Epoch {epoch+1}/{epochs} - {progress:.0f}% - Loss: {total_loss/batch_count:.4f}")
+
+        avg_loss = total_loss / max(batch_count, 1)
+        if avg_loss < best_loss:
+            best_loss = avg_loss
+        print(f"   ✅ Epoch {epoch+1}/{epochs} 完了: Loss={avg_loss:.4f}")
+
+    print(f"\n✅ 学習完了【FORCE MODE】！ ベストLoss: {best_loss:.4f}")
+
+    # チェックポイント保存
+    checkpoint_filename = f"neuroq_{model_size}_checkpoint.pt"
+    checkpoint_path = f"/checkpoints/{checkpoint_filename}"
+    local_path = f"checkpoints/{checkpoint_filename}"
+
+    checkpoint = {
+        'model_state_dict': model.state_dict(),
+        'config': config,
+        'tokenizer': {
+            'type': 'tiktoken',
+            'encoding': 'o200k_base',
+            'vocab_size': tokenizer.vocab_size,
+        },
+        'model_size': model_size,
+    }
+
+    torch.save(checkpoint, checkpoint_path)
+    checkpoints_volume.commit()
+    print(f"💾 チェックポイント保存: {checkpoint_path}")
+
+    os.makedirs("checkpoints", exist_ok=True)
+    torch.save(checkpoint, local_path)
+    print(f"💾 ローカルにもコピー: {local_path}")
+
+    print("\n" + "=" * 70)
+    print("✅ 学習完了【FORCE MODE】！")
+    print("=" * 70)
+
+    return {
+        "status": "success",
+        "model_size": model_size,
+        "parameters": total_params,
+        "best_loss": best_loss,
+        "checkpoint_path": checkpoint_path,
+        "epochs": epochs,
+        "force_mode": True,
+    }
 
 
 @app.function(
