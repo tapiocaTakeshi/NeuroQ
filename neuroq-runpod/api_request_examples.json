@@ -156,6 +156,53 @@
     }
   },
 
+  "7. 日次時間制限ステータス確認": {
+    "説明": "本日の使用時間と残り時間を確認",
+    "リクエスト": {
+      "input": {
+        "action": "time_limit_status"
+      }
+    },
+    "レスポンス例": {
+      "status": "success",
+      "allowed": true,
+      "used_seconds": 3600.0,
+      "remaining_seconds": 82800.0,
+      "daily_limit_seconds": 86400,
+      "used_hours": 1.0,
+      "remaining_hours": 23.0,
+      "daily_limit_hours": 24.0,
+      "date": "2026-02-20",
+      "active_requests": 0
+    }
+  },
+
+  "8. 日次時間制限設定": {
+    "説明": "1日あたりの最大使用時間を変更（秒または時間で指定）",
+    "リクエスト（秒指定）": {
+      "input": {
+        "action": "set_time_limit",
+        "daily_limit_seconds": 86400
+      }
+    },
+    "リクエスト（時間指定）": {
+      "input": {
+        "action": "set_time_limit",
+        "daily_limit_hours": 24
+      }
+    },
+    "パラメータ説明": {
+      "daily_limit_seconds": "制限時間（秒）。86400 = 1日",
+      "daily_limit_hours": "制限時間（時間）。24 = 1日。daily_limit_secondsが優先される"
+    },
+    "レスポンス例": {
+      "status": "success",
+      "message": "Daily time limit set to 86400 seconds (24.0 hours)",
+      "daily_limit_seconds": 86400,
+      "daily_limit_hours": 24.0
+    }
+  },
+
   "エラー例": {
     "不明なアクション": {
       "リクエスト": {
@@ -200,7 +247,7 @@
     "action": {
       "型": "string",
       "必須": true,
-      "選択肢": ["health", "generate", "train"],
+      "選択肢": ["health", "generate", "train", "time_limit_status", "set_time_limit"],
       "説明": "実行するアクション"
     },
     "mode": {
