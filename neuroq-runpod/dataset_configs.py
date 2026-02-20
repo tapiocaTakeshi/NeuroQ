@@ -237,6 +237,54 @@ DATASET_SWALLOW_NEMOTRON = {
     },
 }
 
+DATASET_SWALLOW_CODE_V2 = {
+    'id': 'tokyotech-llm/swallow-code-v2',
+    'config': 'stage1-auto-format',
+    'name': 'Swallow Code v2',
+    'description': 'Tokyo Tech Swallow コードデータセット v2 (stage1-auto-format)',
+    'language': 'multi',
+    'format': 'plain',
+    'data_files': [],
+    'tokenizer_files': [],
+    'requires_tokenizer': False,
+    'hf_text_field': 'text',
+    'hf_max_samples': 10000,
+    'default_params': {
+        'epochs': 3,
+        'batch_size': 4,
+        'lr': 0.0002,
+        'seq_length': 256,
+    },
+    'parse_config': {
+        'block_separator': '\n\n',
+        'required_markers': [],
+    },
+}
+
+DATASET_SWALLOW_MATH_V2 = {
+    'id': 'tokyotech-llm/swallow-math-v2',
+    'config': 'swallow-math-v2-qa',
+    'name': 'Swallow Math v2',
+    'description': 'Tokyo Tech Swallow 数学データセット v2 (QA形式)',
+    'language': 'ja',
+    'format': 'mixed',
+    'data_files': [],
+    'tokenizer_files': [],
+    'requires_tokenizer': False,
+    'hf_text_field': 'text',
+    'hf_max_samples': 10000,
+    'default_params': {
+        'epochs': 3,
+        'batch_size': 4,
+        'lr': 0.0002,
+        'seq_length': 256,
+    },
+    'parse_config': {
+        'block_separator': '\n\n',
+        'required_markers': [],
+    },
+}
+
 
 # ===============================
 # 利用可能なデータセット一覧
@@ -249,6 +297,8 @@ AVAILABLE_DATASETS = {
     'high_quality': DATASET_HIGH_QUALITY,
     'japanese_corpus': DATASET_JAPANESE_CORPUS,
     'swallow_nemotron': DATASET_SWALLOW_NEMOTRON,
+    'swallow_code_v2': DATASET_SWALLOW_CODE_V2,
+    'swallow_math_v2': DATASET_SWALLOW_MATH_V2,
 }
 
 

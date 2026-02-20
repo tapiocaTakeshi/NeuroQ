@@ -57,6 +57,7 @@ image = (
         "pydantic>=2.0.0",
         "openai>=1.0.0",
         "datasets>=2.14.0",
+        "huggingface_hub>=0.20.0",
         "duckduckgo-search>=6.0.0",  # Web RAG用
     )
     # ローカルのPythonファイルをコンテナにコピー
@@ -1242,46 +1243,72 @@ def fastapi_app():
         except Exception as e:
             raise HTTPException(status_code=500, detail=str(e))
     
+    # データセットエントリ（id + config 形式）
+    class DatasetEntry(BaseModel):
+        id: str
+        config: Optional[str] = None
+
     # 学習リクエスト用のモデル
     class TrainRequest(BaseModel):
         model_size: str = "micro"
         epochs: int = 10
         batch_size: Optional[int] = None
         learning_rate: Optional[float] = None
-        dataset_ids: Optional[List[str]] = None  # Hugging Face dataset IDs リスト
+        dataset_ids: Optional[List[str]] = None  # 後方互換: 文字列IDリスト
+        datasets: Optional[List[DatasetEntry]] = None  # 新形式: {id, config} リスト
         text_column: str = "text"
         split: str = "train"
         max_samples: Optional[int] = None
+        epoch_mode: str = "fixed"  # early_stop | fixed
+        hf_token: Optional[str] = None  # HuggingFace アクセストークン
     
     @web_app.post("/train")
     async def train(request: TrainRequest):
         """
         モデルの学習を開始（バックグラウンドで実行）
-        
-        dataset_ids に Hugging Face データセットIDのリストを指定すると、それらのデータセットで学習します。
-        例: ["wikitext", "openai/summarize_from_feedback", "databricks/dolly-15k"]
+
+        datasets: [{id, config}] 形式でデータセットを指定（config対応）
+        dataset_ids: 後方互換の文字列IDリスト
+        epoch_mode: "fixed"（全エポック実行）または "early_stop"（早期終了）
         """
         try:
-            # train_model関数を呼び出し（A10G GPUで実行）
+            # datasets_with_config を構築
+            datasets_with_config = None
+            if request.datasets:
+                datasets_with_config = [
+                    {"id": ds.id, "config": ds.config}
+                    for ds in request.datasets
+                ]
+
             call = train_model.spawn(
                 model_size=request.model_size,
                 epochs=request.epochs,
                 batch_size=request.batch_size,
                 lr=request.learning_rate,
                 dataset_ids=request.dataset_ids,
+                datasets_with_config=datasets_with_config,
                 text_column=request.text_column,
                 split=request.split,
-                max_samples=request.max_samples
+                max_samples=request.max_samples,
+                epoch_mode=request.epoch_mode,
+                hf_token=request.hf_token,
             )
-            
+
+            ds_display = (
+                [{"id": ds.id, "config": ds.config} for ds in request.datasets]
+                if request.datasets
+                else request.dataset_ids or ["default"]
+            )
+
             return {
                 "status": "started",
                 "message": f"Training {request.model_size.upper()} model started",
                 "model_size": request.model_size,
                 "epochs": request.epochs,
+                "epoch_mode": request.epoch_mode,
                 "batch_size": request.batch_size or "auto",
                 "learning_rate": request.learning_rate or "auto",
-                "dataset_ids": request.dataset_ids or ["default"],
+                "datasets": ds_display,
                 "text_column": request.text_column,
                 "split": request.split,
                 "max_samples": request.max_samples or "all",
@@ -1380,6 +1407,7 @@ def test_health():
     gpu="A100",
     timeout=86400,  # 1日
     volumes={"/model_checkpoints": checkpoints_volume},
+    # HF_TOKEN は train_model の hf_token パラメータで渡す
 )
 def train_model(
     model_size: str = "micro",
@@ -1387,10 +1415,12 @@ def train_model(
     batch_size: int = None,
     lr: float = None,
     dataset_ids: list = None,
+    datasets_with_config: list = None,
     text_column: str = "text",
     split: str = "train",
     max_samples: int = None,
     epoch_mode: str = "early_stop",
+    hf_token: str = None,
 ):
     import os
     import sys
@@ -1429,27 +1459,70 @@ def train_model(
     
     # データ準備
     print("\n📥 データロード中...")
+    _hf_token = hf_token or os.environ.get("HF_TOKEN")
+    if _hf_token:
+        import huggingface_hub
+        huggingface_hub.login(token=_hf_token, add_to_git_credential=False)
+        print("   🔑 HuggingFace トークン認証完了")
+
     from datasets import load_dataset, concatenate_datasets
     ds_list = []
-    ids = dataset_ids or ["OpenAssistant/oasst1", "OpenAssistant/oasst2"]
-    
-    for ds_id in ids:
-        try:
-            print(f"   - {ds_id} をロード...")
-            ds = load_dataset(ds_id, split=split)
-            if max_samples:
-                ds = ds.shuffle(seed=42).select(range(min(len(ds), max_samples)))
-            ds_list.append(ds)
-        except Exception as e:
-            print(f"   ⚠️ {ds_id} 失敗: {e}")
+
+    # datasets_with_config: [{id, config, ...}] 形式を優先
+    if datasets_with_config:
+        for ds_entry in datasets_with_config:
+            ds_id = ds_entry.get("id") if isinstance(ds_entry, dict) else ds_entry
+            ds_config = ds_entry.get("config") if isinstance(ds_entry, dict) else None
+            try:
+                if ds_config:
+                    print(f"   - load_dataset('{ds_id}', '{ds_config}') をロード...")
+                    ds = load_dataset(ds_id, ds_config, split=split, trust_remote_code=True)
+                else:
+                    print(f"   - load_dataset('{ds_id}') をロード...")
+                    ds = load_dataset(ds_id, split=split, trust_remote_code=True)
+                if max_samples:
+                    ds = ds.shuffle(seed=42).select(range(min(len(ds), max_samples)))
+                ds_list.append(ds)
+            except Exception as e:
+                print(f"   ⚠️ {ds_id} (config={ds_config}) 失敗: {e}")
+    else:
+        ids = dataset_ids or ["OpenAssistant/oasst1", "OpenAssistant/oasst2"]
+        for ds_id in ids:
+            try:
+                print(f"   - {ds_id} をロード...")
+                ds = load_dataset(ds_id, split=split, trust_remote_code=True)
+                if max_samples:
+                    ds = ds.shuffle(seed=42).select(range(min(len(ds), max_samples)))
+                ds_list.append(ds)
+            except Exception as e:
+                print(f"   ⚠️ {ds_id} 失敗: {e}")
             
     all_tokens = []
     if ds_list:
         combined = concatenate_datasets(ds_list)
+        # カラム名を表示
+        print(f"   📋 カラム: {combined.column_names}")
         for i, ex in enumerate(combined):
-            txt = ex.get(text_column, "")
-            if txt:
-                all_tokens.extend(tokenizer.encode(txt, add_special=False) + [tokenizer.eos_id])
+            # テキストフィールドを柔軟に抽出
+            txt = ""
+            if text_column and text_column in ex and ex[text_column]:
+                txt = ex[text_column]
+            elif "text" in ex and ex["text"]:
+                txt = ex["text"]
+            elif "content" in ex and ex["content"]:
+                txt = ex["content"]
+            elif "instruction" in ex:
+                txt = ex["instruction"] or ""
+                if "output" in ex and ex["output"]:
+                    txt = f"User: {ex['instruction']}\nAssistant: {ex['output']}"
+            else:
+                # 最初の非空文字列フィールドを使用
+                for v in ex.values():
+                    if isinstance(v, str) and len(v) > 10:
+                        txt = v
+                        break
+            if txt and isinstance(txt, str):
+                all_tokens.extend(tokenizer.encode(txt.strip(), add_special=False) + [tokenizer.eos_id])
             if i % 10000 == 0 and i > 0: print(f"      {i}件トークン化完了...")
     
     print(f"📊 総トークン数: {len(all_tokens):,}")
