@@ -338,7 +338,11 @@
 
     "2. テキスト生成": "curl -X POST https://api.runpod.ai/v2/YOUR_ENDPOINT_ID/runsync -H 'Content-Type: application/json' -H 'Authorization: Bearer YOUR_API_KEY' -d '{\"input\": {\"action\": \"generate\", \"mode\": \"layered\", \"prompt\": \"人工知能とは\", \"max_length\": 100, \"temperature\": 0.8}}'",
 
-    "3. 追加学習": "curl -X POST https://api.runpod.ai/v2/YOUR_ENDPOINT_ID/runsync -H 'Content-Type: application/json' -H 'Authorization: Bearer YOUR_API_KEY' -d '{\"input\": {\"action\": \"train\", \"mode\": \"layered\", \"training_data\": [\"テキスト1\", \"テキスト2\"], \"epochs\": 10}}'"
+    "3. 追加学習": "curl -X POST https://api.runpod.ai/v2/YOUR_ENDPOINT_ID/runsync -H 'Content-Type: application/json' -H 'Authorization: Bearer YOUR_API_KEY' -d '{\"input\": {\"action\": \"train\", \"mode\": \"layered\", \"training_data\": [\"テキスト1\", \"テキスト2\"], \"epochs\": 10}}'",
+
+    "4. 時間制限ステータス確認": "curl -X POST https://api.runpod.ai/v2/YOUR_ENDPOINT_ID/runsync -H 'Content-Type: application/json' -H 'Authorization: Bearer YOUR_API_KEY' -d '{\"input\": {\"action\": \"time_limit_status\"}}'",
+
+    "5. 時間制限設定（1日）": "curl -X POST https://api.runpod.ai/v2/YOUR_ENDPOINT_ID/runsync -H 'Content-Type: application/json' -H 'Authorization: Bearer YOUR_API_KEY' -d '{\"input\": {\"action\": \"set_time_limit\", \"daily_limit_seconds\": 86400}}'"
   },
 
   "使用例 - Python": {

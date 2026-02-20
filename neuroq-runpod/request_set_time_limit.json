@@ -1,0 +1,6 @@
+{
+  "input": {
+    "action": "set_time_limit",
+    "daily_limit_seconds": 86400
+  }
+}
