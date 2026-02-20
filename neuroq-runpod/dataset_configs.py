@@ -217,19 +217,80 @@ DATASET_SWALLOW_NEMOTRON = {
     'id': 'tokyotech-llm/Swallow-Nemotron-Post-Training-Dataset-v1',
     'config': 'Nemotron-Post-Training-Dataset-v1',
     'name': 'Swallow Nemotron Post-Training',
-    'description': 'Tokyo Tech Swallow Nemotron ポストトレーニングデータセット',
+    'description': 'Tokyo Tech Swallow Nemotron ポストトレーニング会話データセット'
+             '（code/math/stem、~5.14M rows）',
     'language': 'ja',
-    'format': 'mixed',
+    'format': 'conversation',
     'data_files': [],  # HuggingFaceからダウンロード
     'tokenizer_files': [],
     'requires_tokenizer': False,
-    'hf_text_field': 'text',
-    'hf_max_samples': 10000,
+    # HuggingFace設定
+    'hf_text_field': 'conversation',  # conversation形式（list of {role, content}）
+    'hf_max_samples': 5000,
+    'hf_split': None,  # None = 最初に見つかったsplitを使用（code/math/stem）
+    'hf_requires_auth': False,
+    'hf_streaming': True,  # 大規模データセットはストリーミングで読み込み
     'default_params': {
         'epochs': 3,
         'batch_size': 4,
         'lr': 0.0002,
         'seq_length': 256,
+    },
+    'parse_config': {
+        'block_separator': '\n\n',
+        'required_markers': [],
+    },
+}
+
+DATASET_SWALLOW_CODE_V2 = {
+    'id': 'tokyotech-llm/swallow-code-v2',
+    'config': 'stage1-auto-format',
+    'name': 'Swallow Code v2',
+    'description': 'Tokyo Tech Swallow Pythonコードデータセット'
+             '（auto-formatted、~54.8M rows）',
+    'language': 'en',
+    'format': 'code',
+    'data_files': [],
+    'tokenizer_files': [],
+    'requires_tokenizer': False,
+    'hf_text_field': 'text',
+    'hf_max_samples': 5000,
+    'hf_split': 'train',
+    'hf_requires_auth': True,
+    'hf_streaming': True,
+    'default_params': {
+        'epochs': 3,
+        'batch_size': 4,
+        'lr': 0.0002,
+        'seq_length': 512,
+    },
+    'parse_config': {
+        'block_separator': '\n\n',
+        'required_markers': [],
+    },
+}
+
+DATASET_SWALLOW_MATH_V2 = {
+    'id': 'tokyotech-llm/swallow-math-v2',
+    'config': 'swallow-math-v2-qa',
+    'name': 'Swallow Math v2 QA',
+    'description': 'Tokyo Tech Swallow 数学QAデータセット'
+             '（Question/Answer/Code形式、~8.47M rows）',
+    'language': 'en',
+    'format': 'qa',
+    'data_files': [],
+    'tokenizer_files': [],
+    'requires_tokenizer': False,
+    'hf_text_field': 'text',
+    'hf_max_samples': 5000,
+    'hf_split': 'train',
+    'hf_requires_auth': True,
+    'hf_streaming': True,
+    'default_params': {
+        'epochs': 3,
+        'batch_size': 4,
+        'lr': 0.0002,
+        'seq_length': 512,
     },
     'parse_config': {
         'block_separator': '\n\n',
@@ -249,6 +310,8 @@ AVAILABLE_DATASETS = {
     'high_quality': DATASET_HIGH_QUALITY,
     'japanese_corpus': DATASET_JAPANESE_CORPUS,
     'swallow_nemotron': DATASET_SWALLOW_NEMOTRON,
+    'swallow_code': DATASET_SWALLOW_CODE_V2,
+    'swallow_math': DATASET_SWALLOW_MATH_V2,
 }
 
 
@@ -359,6 +422,8 @@ def _load_from_huggingface(dataset_config: dict) -> list:
     HuggingFace Hub からデータセットをダウンロードしてテキストリストを返す
 
     load_dataset(id, config) パターンで読み込む。
+    認証が必要なデータセットは HF_TOKEN 環境変数またはデータセット設定の
+    hf_requires_auth フラグで対応する。
 
     Args:
         dataset_config: データセット設定辞書
@@ -378,23 +443,56 @@ def _load_from_huggingface(dataset_config: dict) -> list:
     hf_config = dataset_config['config']
     text_field = dataset_config.get('hf_text_field', 'text')
     max_samples = dataset_config.get('hf_max_samples')
+    requires_auth = dataset_config.get('hf_requires_auth', False)
+
+    # HuggingFace認証トークン
+    hf_token = os.environ.get('HF_TOKEN') or os.environ.get('HUGGING_FACE_HUB_TOKEN')
+    if requires_auth and not hf_token:
+        raise EnvironmentError(
+            f"データセット '{hf_id}' はログインが必要です。"
+            " HF_TOKEN 環境変数を設定するか、"
+            " huggingface-cli login を実行してください。"
+        )
 
     print(f"🌐 HuggingFace からデータセットをロード中...")
     print(f"   load_dataset('{hf_id}', '{hf_config}')" if hf_config
           else f"   load_dataset('{hf_id}')")
+    if requires_auth:
+        print(f"   🔑 認証トークン使用")
+
+    load_kwargs = {}
+    if hf_token:
+        load_kwargs['token'] = hf_token
+
+    # ストリーミングモード（大規模データセット対応）
+    use_streaming = dataset_config.get('hf_streaming', False)
+    if use_streaming:
+        load_kwargs['streaming'] = True
+        print(f"   📡 ストリーミングモード")
 
     if hf_config:
-        ds = load_dataset(hf_id, hf_config)
+        ds = load_dataset(hf_id, hf_config, **load_kwargs)
     else:
-        ds = load_dataset(hf_id)
+        ds = load_dataset(hf_id, **load_kwargs)
 
-    # split を自動選択（train > validation > test）
+    # split を選択
+    hf_split = dataset_config.get('hf_split')
     if hasattr(ds, 'keys'):
-        for split_name in ['train', 'validation', 'test']:
-            if split_name in ds:
-                ds = ds[split_name]
-                print(f"   split: '{split_name}'")
-                break
+        if hf_split and hf_split in ds:
+            ds = ds[hf_split]
+            print(f"   split: '{hf_split}'")
+        else:
+            # 自動選択（train > 最初に見つかったsplit）
+            for split_name in ['train', 'validation', 'test']:
+                if split_name in ds:
+                    ds = ds[split_name]
+                    print(f"   split: '{split_name}'")
+                    break
+            else:
+                # train/validation/test がない場合、最初のsplitを使用
+                first_split = next(iter(ds.keys()))
+                ds = ds[first_split]
+                print(f"   split: '{first_split}'（自動選択）")
 
     # テキストフィールドを抽出
     texts = []
@@ -402,31 +500,94 @@ def _load_from_huggingface(dataset_config: dict) -> list:
         if max_samples and i >= max_samples:
             break
 
-        if text_field and text_field in item:
-            text = item[text_field]
-        elif 'text' in item:
-            text = item['text']
-        elif 'content' in item:
-            text = item['content']
-        elif 'instruction' in item:
-            # instruction + output 形式
-            text = item['instruction']
-            if 'output' in item and item['output']:
-                text = f"User: {item['instruction']}\nAssistant: {item['output']}"
-        else:
-            # 最初の文字列フィールドを使用
-            for v in item.values():
-                if isinstance(v, str) and len(v) > 10:
-                    text = v
-                    break
-            else:
-                continue
+        text = _extract_text_from_item(item, text_field)
 
-        if isinstance(text, str) and text.strip():
+        if text and text.strip():
             texts.append(text.strip())
 
     print(f"   {len(texts)} 個のテキストを読み込みました")
     return texts
+
+
+def _extract_text_from_item(item: dict, text_field: str = 'text') -> str:
+    """
+    データセットのアイテムからテキストを抽出する
+
+    conversation形式、text形式、instruction形式など
+    様々なデータ形式に対応。
+
+    Args:
+        item: データセットの1レコード
+        text_field: テキストフィールド名
+
+    Returns:
+        抽出されたテキスト文字列
+    """
+    # 1. conversation 形式（list of {role, content}）
+    if text_field == 'conversation' and 'conversation' in item:
+        return _format_conversation(item['conversation'])
+
+    # 2. messages 形式（OpenAI互換）
+    if text_field == 'messages' and 'messages' in item:
+        return _format_conversation(item['messages'])
+
+    # 3. 指定されたtext_fieldがある場合
+    if text_field and text_field in item:
+        value = item[text_field]
+        if isinstance(value, str):
+            return value
+        if isinstance(value, list):
+            return _format_conversation(value)
+
+    # 4. フォールバック: よくあるフィールド名を試す
+    for field_name in ['text', 'content', 'text_qwen3', 'text_gpt_oss']:
+        if field_name in item and isinstance(item[field_name], str):
+            return item[field_name]
+
+    # 5. instruction + output 形式
+    if 'instruction' in item:
+        text = item['instruction']
+        if 'output' in item and item['output']:
+            return f"User: {item['instruction']}\nAssistant: {item['output']}"
+        return text
+
+    # 6. 最初の文字列フィールドを使用
+    for v in item.values():
+        if isinstance(v, str) and len(v) > 10:
+            return v
+
+    return ''
+
+
+def _format_conversation(messages: list) -> str:
+    """
+    会話メッセージリストをテキスト形式に変換
+
+    Args:
+        messages: [{role: 'user', content: '...'}, ...] 形式のリスト
+
+    Returns:
+        'User: ...\nAssistant: ...' 形式のテキスト
+    """
+    parts = []
+    for msg in messages:
+        if not isinstance(msg, dict):
+            continue
+        role = msg.get('role', '')
+        content = msg.get('content', '')
+        if not content:
+            continue
+
+        if role == 'user':
+            parts.append(f"User: {content}")
+        elif role == 'assistant':
+            parts.append(f"Assistant: {content}")
+        elif role == 'system':
+            parts.append(f"System: {content}")
+        else:
+            parts.append(content)
+
+    return '\n'.join(parts)
 
 
 def load_dataset_texts(dataset_id: str) -> list:

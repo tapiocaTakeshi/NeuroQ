@@ -1122,16 +1122,20 @@ def handler(job):
             print(f"   {ds_config['description']}")
             print("=" * 70)
 
-            # データファイルを探す
+            # データファイルを探す（HFデータセットの場合はローカルファイル不要）
             try:
                 data_file = find_data_file(ds_config)
-            except FileNotFoundError as e:
-                daily_limiter.end_request(time.time() - train_request_start)
-                return {
-                    "status": "error",
-                    "error": str(e),
-                    "dataset_id": dataset_id
-                }
+            except FileNotFoundError:
+                if ds_config.get('id') is not None:
+                    data_file = None  # HuggingFaceからダウンロード
+                    print(f"   📡 ローカルファイルなし → HuggingFace Hubからロード")
+                else:
+                    daily_limiter.end_request(time.time() - train_request_start)
+                    return {
+                        "status": "error",
+                        "error": f"データファイルが見つかりません: {ds_config['name']}",
+                        "dataset_id": dataset_id
+                    }
 
             # トークナイザーを探す
             try:
