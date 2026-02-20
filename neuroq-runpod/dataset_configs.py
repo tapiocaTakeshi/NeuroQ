@@ -2,18 +2,23 @@
 """
 NeuroQ データセット設定ファイル（neuroq-runpod用）
 
-dataset_id でトレーニングデータセットの設定を管理する。
-model_configs.py と同様のパターンで、データセットごとの
-デフォルトパラメータ、ファイルパス、トークナイザー設定を定義。
+HuggingFace の load_dataset(id, config) パターンに対応。
+各データセットは id（リポジトリパス）と config（サブセット名）で識別される。
 
 使用例:
     from dataset_configs import get_dataset_config, AVAILABLE_DATASETS, load_dataset_texts
 
-    # 設定を取得
+    # 設定を取得（内部キーで）
     config = get_dataset_config('oasst1_ja')
 
-    # データセット一覧
-    print(AVAILABLE_DATASETS.keys())
+    # HuggingFace形式: load_dataset(id, config)
+    # config['id']     -> 'kunishou/oasst1-89k-ja'
+    # config['config'] -> None
+
+    # データセット一覧（{id, config} のリスト）
+    from dataset_configs import get_datasets_list
+    datasets = get_datasets_list()
+    # [{"id": "kunishou/oasst1-89k-ja", "config": null, ...}, ...]
 
     # テキストデータを読み込み
     texts = load_dataset_texts('oasst1_ja')
@@ -32,11 +37,15 @@ _RUNPOD_DIR = str(Path(__file__).parent)
 # ===============================
 
 DATASET_OASST1_JA = {
+    # HuggingFace load_dataset() の引数に対応
+    'id': 'kunishou/oasst1-89k-ja',
+    'config': None,
+    # メタデータ
     'name': 'OASST1 Japanese',
     'description': 'kunishou/oasst1-89k-ja 日本語会話データセット（User/Assistant形式）',
-    'source': 'kunishou/oasst1-89k-ja',
     'language': 'ja',
     'format': 'conversation',  # conversation | plain | mixed
+    # ローカルデータファイル（存在すればHFダウンロードより優先）
     'data_files': [
         os.path.join(_BASE_DIR, 'data', 'oasst1_ja_conversations.txt'),
         os.path.join(_RUNPOD_DIR, 'data', 'oasst1_ja_conversations.txt'),
@@ -46,6 +55,9 @@ DATASET_OASST1_JA = {
         os.path.join(_BASE_DIR, 'neuroq_tokenizer_oasst1_ja.model'),
     ],
     'requires_tokenizer': True,
+    # HuggingFaceからロードする際のテキストフィールド名
+    'hf_text_field': 'text',
+    'hf_max_samples': None,
     # デフォルトトレーニングパラメータ
     'default_params': {
         'epochs': 5,
@@ -53,7 +65,7 @@ DATASET_OASST1_JA = {
         'lr': 0.0003,
         'seq_length': 128,
     },
-    # 会話パース設定
+    # ローカルファイルのパース設定
     'parse_config': {
         'block_separator': '\n\n',
         'required_markers': ['User:', 'Assistant:'],
@@ -61,9 +73,10 @@ DATASET_OASST1_JA = {
 }
 
 DATASET_OASST1_JA_CLEANED = {
+    'id': 'kunishou/oasst1-89k-ja',
+    'config': 'cleaned',
     'name': 'OASST1 Japanese (Cleaned)',
     'description': 'クリーニング済み日本語会話データセット',
-    'source': 'kunishou/oasst1-89k-ja (cleaned)',
     'language': 'ja',
     'format': 'plain',
     'data_files': [
@@ -75,6 +88,8 @@ DATASET_OASST1_JA_CLEANED = {
         os.path.join(_BASE_DIR, 'neuroq_tokenizer_oasst1_ja.model'),
     ],
     'requires_tokenizer': True,
+    'hf_text_field': 'text',
+    'hf_max_samples': None,
     'default_params': {
         'epochs': 5,
         'batch_size': 8,
@@ -88,9 +103,10 @@ DATASET_OASST1_JA_CLEANED = {
 }
 
 DATASET_TRAINING_DATA = {
+    'id': None,  # ローカル専用データセット
+    'config': None,
     'name': 'General Training Data',
     'description': '汎用トレーニングデータ（3.6MB）',
-    'source': 'local',
     'language': 'ja',
     'format': 'plain',
     'data_files': [
@@ -99,6 +115,8 @@ DATASET_TRAINING_DATA = {
     ],
     'tokenizer_files': [],
     'requires_tokenizer': False,
+    'hf_text_field': None,
+    'hf_max_samples': None,
     'default_params': {
         'epochs': 10,
         'batch_size': 8,
@@ -112,9 +130,10 @@ DATASET_TRAINING_DATA = {
 }
 
 DATASET_COMBINED_CLEAN = {
+    'id': None,
+    'config': None,
     'name': 'Combined Clean Data',
     'description': '結合・クリーニング済みデータセット（16MB）',
-    'source': 'local',
     'language': 'ja',
     'format': 'plain',
     'data_files': [
@@ -123,6 +142,8 @@ DATASET_COMBINED_CLEAN = {
     ],
     'tokenizer_files': [],
     'requires_tokenizer': False,
+    'hf_text_field': None,
+    'hf_max_samples': None,
     'default_params': {
         'epochs': 5,
         'batch_size': 8,
@@ -136,9 +157,10 @@ DATASET_COMBINED_CLEAN = {
 }
 
 DATASET_HIGH_QUALITY = {
+    'id': None,
+    'config': None,
     'name': 'High Quality Conversations',
     'description': 'キュレーション済み高品質会話データ',
-    'source': 'local',
     'language': 'ja',
     'format': 'conversation',
     'data_files': [
@@ -147,6 +169,8 @@ DATASET_HIGH_QUALITY = {
     ],
     'tokenizer_files': [],
     'requires_tokenizer': False,
+    'hf_text_field': None,
+    'hf_max_samples': None,
     'default_params': {
         'epochs': 10,
         'batch_size': 4,
@@ -160,9 +184,10 @@ DATASET_HIGH_QUALITY = {
 }
 
 DATASET_JAPANESE_CORPUS = {
+    'id': None,
+    'config': None,
     'name': 'Japanese Training Corpus',
     'description': '日本語トレーニングコーパス',
-    'source': 'local',
     'language': 'ja',
     'format': 'plain',
     'data_files': [
@@ -174,11 +199,37 @@ DATASET_JAPANESE_CORPUS = {
         os.path.join(_BASE_DIR, 'neuroq_tokenizer_oasst1_ja.model'),
     ],
     'requires_tokenizer': False,
+    'hf_text_field': None,
+    'hf_max_samples': None,
     'default_params': {
         'epochs': 10,
         'batch_size': 8,
         'lr': 0.0005,
         'seq_length': 64,
+    },
+    'parse_config': {
+        'block_separator': '\n\n',
+        'required_markers': [],
+    },
+}
+
+DATASET_SWALLOW_NEMOTRON = {
+    'id': 'tokyotech-llm/Swallow-Nemotron-Post-Training-Dataset-v1',
+    'config': 'Nemotron-Post-Training-Dataset-v1',
+    'name': 'Swallow Nemotron Post-Training',
+    'description': 'Tokyo Tech Swallow Nemotron ポストトレーニングデータセット',
+    'language': 'ja',
+    'format': 'mixed',
+    'data_files': [],  # HuggingFaceからダウンロード
+    'tokenizer_files': [],
+    'requires_tokenizer': False,
+    'hf_text_field': 'text',
+    'hf_max_samples': 10000,
+    'default_params': {
+        'epochs': 3,
+        'batch_size': 4,
+        'lr': 0.0002,
+        'seq_length': 256,
     },
     'parse_config': {
         'block_separator': '\n\n',
@@ -197,6 +248,7 @@ AVAILABLE_DATASETS = {
     'combined_clean': DATASET_COMBINED_CLEAN,
     'high_quality': DATASET_HIGH_QUALITY,
     'japanese_corpus': DATASET_JAPANESE_CORPUS,
+    'swallow_nemotron': DATASET_SWALLOW_NEMOTRON,
 }
 
 
@@ -209,7 +261,7 @@ def get_dataset_config(dataset_id: str) -> dict:
     データセットIDに応じた設定を取得
 
     Args:
-        dataset_id: データセットID
+        dataset_id: データセットの内部キー（例: 'oasst1_ja', 'swallow_nemotron'）
 
     Returns:
         データセット設定辞書
@@ -229,23 +281,26 @@ def get_dataset_config(dataset_id: str) -> dict:
 
 def get_datasets_list() -> list:
     """
-    利用可能なデータセットを {id, config} のリスト形式で返す
+    利用可能なデータセットを {id, config, ...} のリスト形式で返す
+
+    id と config は HuggingFace の load_dataset(id, config) に対応:
+    - id: データセットリポジトリパス（例: 'kunishou/oasst1-89k-ja'）
+    - config: サブセット/コンフィグ名（例: 'Nemotron-Post-Training-Dataset-v1'）
 
     Returns:
-        [{"id": "oasst1_ja", "config": {...}}, ...] 形式のリスト
+        [{"id": "kunishou/oasst1-89k-ja", "config": null, ...}, ...] 形式のリスト
     """
     result = []
-    for dataset_id, config in AVAILABLE_DATASETS.items():
+    for key, ds in AVAILABLE_DATASETS.items():
         result.append({
-            "id": dataset_id,
-            "config": {
-                "name": config["name"],
-                "description": config["description"],
-                "source": config["source"],
-                "language": config["language"],
-                "format": config["format"],
-                "default_params": config["default_params"],
-            },
+            "id": ds["id"],
+            "config": ds["config"],
+            "key": key,
+            "name": ds["name"],
+            "description": ds["description"],
+            "language": ds["language"],
+            "format": ds["format"],
+            "default_params": ds["default_params"],
         })
     return result
 
@@ -299,46 +354,136 @@ def find_tokenizer_file(dataset_config: dict) -> str:
     return None
 
 
+def _load_from_huggingface(dataset_config: dict) -> list:
+    """
+    HuggingFace Hub からデータセットをダウンロードしてテキストリストを返す
+
+    load_dataset(id, config) パターンで読み込む。
+
+    Args:
+        dataset_config: データセット設定辞書
+
+    Returns:
+        テキストのリスト
+    """
+    try:
+        from datasets import load_dataset
+    except ImportError:
+        raise ImportError(
+            "HuggingFace datasets ライブラリが必要です。"
+            " pip install datasets でインストールしてください。"
+        )
+
+    hf_id = dataset_config['id']
+    hf_config = dataset_config['config']
+    text_field = dataset_config.get('hf_text_field', 'text')
+    max_samples = dataset_config.get('hf_max_samples')
+
+    print(f"🌐 HuggingFace からデータセットをロード中...")
+    print(f"   load_dataset('{hf_id}', '{hf_config}')" if hf_config
+          else f"   load_dataset('{hf_id}')")
+
+    if hf_config:
+        ds = load_dataset(hf_id, hf_config)
+    else:
+        ds = load_dataset(hf_id)
+
+    # split を自動選択（train > validation > test）
+    if hasattr(ds, 'keys'):
+        for split_name in ['train', 'validation', 'test']:
+            if split_name in ds:
+                ds = ds[split_name]
+                print(f"   split: '{split_name}'")
+                break
+
+    # テキストフィールドを抽出
+    texts = []
+    for i, item in enumerate(ds):
+        if max_samples and i >= max_samples:
+            break
+
+        if text_field and text_field in item:
+            text = item[text_field]
+        elif 'text' in item:
+            text = item['text']
+        elif 'content' in item:
+            text = item['content']
+        elif 'instruction' in item:
+            # instruction + output 形式
+            text = item['instruction']
+            if 'output' in item and item['output']:
+                text = f"User: {item['instruction']}\nAssistant: {item['output']}"
+        else:
+            # 最初の文字列フィールドを使用
+            for v in item.values():
+                if isinstance(v, str) and len(v) > 10:
+                    text = v
+                    break
+            else:
+                continue
+
+        if isinstance(text, str) and text.strip():
+            texts.append(text.strip())
+
+    print(f"   {len(texts)} 個のテキストを読み込みました")
+    return texts
+
+
 def load_dataset_texts(dataset_id: str) -> list:
     """
     データセットIDからテキストデータを読み込む
 
+    ローカルファイルが存在すればそちらを優先。
+    存在しなければ HuggingFace Hub からダウンロード。
+
     Args:
-        dataset_id: データセットID
+        dataset_id: データセットの内部キー
 
     Returns:
         テキストのリスト
     """
     config = get_dataset_config(dataset_id)
-    data_file = find_data_file(config)
 
-    print(f"📖 データ読み込み: {data_file}")
+    # 1. ローカルファイルを探す
+    try:
+        data_file = find_data_file(config)
+        print(f"📖 ローカルデータ読み込み: {data_file}")
 
-    with open(data_file, 'r', encoding='utf-8') as f:
-        content = f.read()
+        with open(data_file, 'r', encoding='utf-8') as f:
+            content = f.read()
 
-    parse_config = config.get('parse_config', {})
-    separator = parse_config.get('block_separator', '\n\n')
-    required_markers = parse_config.get('required_markers', [])
+        parse_config = config.get('parse_config', {})
+        separator = parse_config.get('block_separator', '\n\n')
+        required_markers = parse_config.get('required_markers', [])
 
-    # ブロック分割
-    blocks = content.split(separator)
+        blocks = content.split(separator)
 
-    texts = []
-    for block in blocks:
-        block = block.strip()
-        if not block:
-            continue
-
-        # 必須マーカーチェック
-        if required_markers:
-            if all(marker in block for marker in required_markers):
+        texts = []
+        for block in blocks:
+            block = block.strip()
+            if not block:
+                continue
+            if required_markers:
+                if all(marker in block for marker in required_markers):
+                    texts.append(block)
+            else:
                 texts.append(block)
-        else:
-            texts.append(block)
 
-    print(f"   {len(texts)} 個のテキストブロックを読み込みました")
-    return texts
+        print(f"   {len(texts)} 個のテキストブロックを読み込みました")
+        return texts
+
+    except FileNotFoundError:
+        pass
+
+    # 2. HuggingFace Hub からダウンロード
+    if config['id'] is not None:
+        return _load_from_huggingface(config)
+
+    # 3. どちらも利用不可
+    raise FileNotFoundError(
+        f"データセット '{dataset_id}' のデータが見つかりません。"
+        f" ローカルファイルもHuggingFace IDも設定されていません。"
+    )
 
 
 def get_training_params(dataset_id: str, overrides: dict = None) -> dict:
@@ -347,7 +492,7 @@ def get_training_params(dataset_id: str, overrides: dict = None) -> dict:
     overridesで上書き可能
 
     Args:
-        dataset_id: データセットID
+        dataset_id: データセットの内部キー
         overrides: 上書きパラメータ辞書（Noneの値はスキップ）
 
     Returns:
@@ -370,12 +515,19 @@ def print_available_datasets():
     print("📚 NeuroQ 利用可能なデータセット")
     print("=" * 60)
 
-    for dataset_id, config in AVAILABLE_DATASETS.items():
-        print(f"\n📦 {dataset_id}")
+    for key, config in AVAILABLE_DATASETS.items():
+        hf_id = config['id']
+        hf_config = config['config']
+
+        print(f"\n📦 {key}")
+        if hf_id:
+            id_str = f"load_dataset('{hf_id}', '{hf_config}')" if hf_config else f"load_dataset('{hf_id}')"
+            print(f"   HuggingFace: {id_str}")
+        else:
+            print(f"   ソース: ローカルファイル")
         print(f"   名前: {config['name']}")
         print(f"   説明: {config['description']}")
-        print(f"   言語: {config['language']}")
-        print(f"   形式: {config['format']}")
+        print(f"   言語: {config['language']}, 形式: {config['format']}")
 
         # ファイル存在チェック
         try:
@@ -387,7 +539,10 @@ def print_available_datasets():
                 size_str = f"{file_size / 1024:.1f}KB"
             print(f"   データ: {size_str} ({data_file})")
         except FileNotFoundError:
-            print(f"   データ: ❌ ファイルが見つかりません")
+            if hf_id:
+                print(f"   データ: HuggingFace Hubからダウンロード")
+            else:
+                print(f"   データ: ❌ ファイルが見つかりません")
 
         # トークナイザーチェック
         try:
