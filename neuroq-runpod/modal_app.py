@@ -92,7 +92,7 @@ Follow these rules:
 @app.cls(
     image=image,
     gpu="T4",  # GPU選択: T4, A10G, A100, H100など
-    timeout=604800,  # 1週間 (7日)
+    timeout=86400,  # 1日
     scaledown_window=120,  # アイドル状態で2分後にコンテナを停止
     volumes={"/model_checkpoints": checkpoints_volume},
 )
@@ -1040,7 +1040,7 @@ class NeuroQInference:
 @app.function(
     image=image,
     gpu="T4",
-    timeout=604800,  # 1週間 (7日)
+    timeout=86400,  # 1日
     scaledown_window=120,
     volumes={"/model_checkpoints": checkpoints_volume},
 )
@@ -1378,7 +1378,7 @@ def test_health():
 @app.function(
     image=image,
     gpu="A100",
-    timeout=604800,  # 1週間 (7日)
+    timeout=86400,  # 1日
     volumes={"/model_checkpoints": checkpoints_volume},
 )
 def train_model(
