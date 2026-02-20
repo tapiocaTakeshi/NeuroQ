@@ -1631,7 +1631,7 @@ def handler(job):
             "time_limit_status",  # 日次時間制限ステータス確認
             "set_time_limit"      # 日次時間制限設定
         ],
-        "datasets": get_datasets_list() if DATASET_CONFIGS_AVAILABLE else [{"id": "oasst1_ja", "config": {"name": "OASST1 Japanese", "description": "kunishou/oasst1-89k-ja 日本語会話データセット"}}],
+        "datasets": get_datasets_list() if DATASET_CONFIGS_AVAILABLE else [{"id": "kunishou/oasst1-89k-ja", "config": None, "key": "oasst1_ja", "name": "OASST1 Japanese", "description": "kunishou/oasst1-89k-ja 日本語会話データセット"}],
         "translation_note": "generate アクションで use_translation=true を指定すると、日本語入力→英語生成→日本語出力の翻訳パイプラインを使用できます"
     }
 
