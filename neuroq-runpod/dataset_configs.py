@@ -237,6 +237,54 @@ DATASET_SWALLOW_NEMOTRON = {
     },
 }
 
+DATASET_SWALLOW_CODE_V2 = {
+    'id': 'tokyotech-llm/swallow-code-v2',
+    'config': 'stage1-auto-format',
+    'name': 'Swallow Code v2',
+    'description': 'Tokyo Tech Swallow コードデータセット v2（stage1-auto-format）',
+    'language': 'ja',
+    'format': 'mixed',
+    'data_files': [],  # HuggingFaceからダウンロード
+    'tokenizer_files': [],
+    'requires_tokenizer': False,
+    'hf_text_field': 'text',
+    'hf_max_samples': 10000,
+    'default_params': {
+        'epochs': 200,
+        'batch_size': 4,
+        'lr': 0.0002,
+        'seq_length': 256,
+    },
+    'parse_config': {
+        'block_separator': '\n\n',
+        'required_markers': [],
+    },
+}
+
+DATASET_SWALLOW_MATH_V2 = {
+    'id': 'tokyotech-llm/swallow-math-v2',
+    'config': 'swallow-math-v2-qa',
+    'name': 'Swallow Math v2',
+    'description': 'Tokyo Tech Swallow 数学データセット v2（QA形式）',
+    'language': 'ja',
+    'format': 'mixed',
+    'data_files': [],  # HuggingFaceからダウンロード
+    'tokenizer_files': [],
+    'requires_tokenizer': False,
+    'hf_text_field': 'text',
+    'hf_max_samples': 10000,
+    'default_params': {
+        'epochs': 200,
+        'batch_size': 4,
+        'lr': 0.0002,
+        'seq_length': 256,
+    },
+    'parse_config': {
+        'block_separator': '\n\n',
+        'required_markers': [],
+    },
+}
+
 
 # ===============================
 # 利用可能なデータセット一覧
@@ -249,6 +297,8 @@ AVAILABLE_DATASETS = {
     'high_quality': DATASET_HIGH_QUALITY,
     'japanese_corpus': DATASET_JAPANESE_CORPUS,
     'swallow_nemotron': DATASET_SWALLOW_NEMOTRON,
+    'swallow_code_v2': DATASET_SWALLOW_CODE_V2,
+    'swallow_math_v2': DATASET_SWALLOW_MATH_V2,
 }
 
 
@@ -359,6 +409,7 @@ def _load_from_huggingface(dataset_config: dict) -> list:
     HuggingFace Hub からデータセットをダウンロードしてテキストリストを返す
 
     load_dataset(id, config) パターンで読み込む。
+    ストリーミングモードを優先し、ディスク容量を節約する。
 
     Args:
         dataset_config: データセット設定辞書
@@ -383,18 +434,38 @@ def _load_from_huggingface(dataset_config: dict) -> list:
     print(f"   load_dataset('{hf_id}', '{hf_config}')" if hf_config
           else f"   load_dataset('{hf_id}')")
 
-    if hf_config:
-        ds = load_dataset(hf_id, hf_config)
-    else:
-        ds = load_dataset(hf_id)
+    # ストリーミングモードで読み込み（ディスク容量節約）
+    # split を自動選択（train > 最初のsplit）
+    split_candidates = ['train', 'validation', 'test']
+    ds = None
 
-    # split を自動選択（train > validation > test）
-    if hasattr(ds, 'keys'):
-        for split_name in ['train', 'validation', 'test']:
-            if split_name in ds:
-                ds = ds[split_name]
-                print(f"   split: '{split_name}'")
-                break
+    for split_name in split_candidates:
+        try:
+            if hf_config:
+                ds = load_dataset(hf_id, hf_config, split=split_name, streaming=True)
+            else:
+                ds = load_dataset(hf_id, split=split_name, streaming=True)
+            print(f"   split: '{split_name}' (streaming)")
+            break
+        except (ValueError, KeyError):
+            continue
+
+    if ds is None:
+        # split名が標準でない場合、全体をロードしてから選択
+        try:
+            if hf_config:
+                ds_dict = load_dataset(hf_id, hf_config, streaming=True)
+            else:
+                ds_dict = load_dataset(hf_id, streaming=True)
+
+            if hasattr(ds_dict, 'keys'):
+                first_split = list(ds_dict.keys())[0]
+                ds = ds_dict[first_split]
+                print(f"   split: '{first_split}' (streaming)")
+            else:
+                ds = ds_dict
+        except Exception as e:
+            raise RuntimeError(f"データセットの読み込みに失敗: {hf_id} - {e}")
 
     # テキストフィールドを抽出
     texts = []

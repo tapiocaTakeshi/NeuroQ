@@ -261,13 +261,40 @@
         "lr": 0.0002
       }
     },
+    "リクエスト（swallow_code_v2 - 200エポック）": {
+      "input": {
+        "action": "train",
+        "model_size": "micro",
+        "dataset_id": "swallow_code_v2",
+        "epochs": 200
+      }
+    },
+    "リクエスト（swallow_math_v2 - 200エポック）": {
+      "input": {
+        "action": "train",
+        "model_size": "micro",
+        "dataset_id": "swallow_math_v2",
+        "epochs": 200
+      }
+    },
+    "リクエスト（swallow_nemotron - 200エポック）": {
+      "input": {
+        "action": "train",
+        "model_size": "micro",
+        "dataset_id": "swallow_nemotron",
+        "epochs": 200
+      }
+    },
     "利用可能なdataset_id": {
       "oasst1_ja": "kunishou/oasst1-89k-ja 日本語会話データセット（User/Assistant形式）",
       "oasst1_ja_cleaned": "クリーニング済み日本語会話データ",
       "training_data": "汎用トレーニングデータ（3.6MB）",
       "combined_clean": "結合・クリーニング済みデータセット（16MB）",
       "high_quality": "キュレーション済み高品質会話データ",
-      "japanese_corpus": "日本語トレーニングコーパス"
+      "japanese_corpus": "日本語トレーニングコーパス",
+      "swallow_nemotron": "Tokyo Tech Swallow Nemotron ポストトレーニングデータセット",
+      "swallow_code_v2": "Tokyo Tech Swallow コードデータセット v2（stage1-auto-format）",
+      "swallow_math_v2": "Tokyo Tech Swallow 数学データセット v2（swallow-math-v2-qa）"
     },
     "パラメータ説明": {
       "dataset_id": "データセットID。指定するとデータファイル、トークナイザー、デフォルトパラメータが自動設定される",
@@ -343,7 +370,7 @@
     "dataset_id": {
       "型": "string",
       "必須": false,
-      "選択肢": ["oasst1_ja", "oasst1_ja_cleaned", "training_data", "combined_clean", "high_quality", "japanese_corpus"],
+      "選択肢": ["oasst1_ja", "oasst1_ja_cleaned", "training_data", "combined_clean", "high_quality", "japanese_corpus", "swallow_nemotron", "swallow_code_v2", "swallow_math_v2"],
       "説明": "データセットID。指定するとデータファイル・トークナイザー・デフォルトパラメータが自動設定される"
     },
     "training_data": {

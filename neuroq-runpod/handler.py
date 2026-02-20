@@ -1075,6 +1075,9 @@ def handler(job):
         - 'combined_clean': 結合・クリーニング済みデータ
         - 'high_quality': キュレーション済み高品質会話データ
         - 'japanese_corpus': 日本語トレーニングコーパス
+        - 'swallow_nemotron': Tokyo Tech Swallow Nemotronポストトレーニング
+        - 'swallow_code_v2': Tokyo Tech Swallowコードデータセットv2
+        - 'swallow_math_v2': Tokyo Tech Swallow数学データセットv2
         """
 
         # 日次時間制限チェック
@@ -1122,16 +1125,20 @@ def handler(job):
             print(f"   {ds_config['description']}")
             print("=" * 70)
 
-            # データファイルを探す
+            # データファイルを探す（HuggingFace専用データセットはスキップ）
             try:
                 data_file = find_data_file(ds_config)
-            except FileNotFoundError as e:
-                daily_limiter.end_request(time.time() - train_request_start)
-                return {
-                    "status": "error",
-                    "error": str(e),
-                    "dataset_id": dataset_id
-                }
+            except FileNotFoundError:
+                if ds_config['id'] is not None:
+                    # HuggingFaceからダウンロードするのでローカルファイルは不要
+                    data_file = None
+                else:
+                    daily_limiter.end_request(time.time() - train_request_start)
+                    return {
+                        "status": "error",
+                        "error": f"データファイルが見つかりません: {ds_config['name']}",
+                        "dataset_id": dataset_id
+                    }
 
             # トークナイザーを探す
             try:
