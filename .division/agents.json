@@ -1,0 +1,49 @@
+{
+  "activeProjectIds": [
+    "37562386-6f57-4508-9db9-c2ed9beddf53"
+  ],
+  "projects": [
+    {
+      "id": "37562386-6f57-4508-9db9-c2ed9beddf53",
+      "name": "Default Division Project",
+      "projectId": "",
+      "agents": [
+        {
+          "role": "leader",
+          "provider": "openAI",
+          "model": "gpt-5.2"
+        },
+        {
+          "role": "coder",
+          "provider": "anthropic",
+          "model": "claude-opus-4-6"
+        },
+        {
+          "role": "planner",
+          "provider": "gemini",
+          "model": "gemini-3-pro"
+        },
+        {
+          "role": "search",
+          "provider": "perplexity",
+          "model": "sonar-pro"
+        },
+        {
+          "role": "research",
+          "provider": "perplexity",
+          "model": "sonar-deep-research"
+        },
+        {
+          "role": "design",
+          "provider": "gemini",
+          "model": "gemini-3-flash"
+        },
+        {
+          "role": "writing",
+          "provider": "anthropic",
+          "model": "claude-opus-4-6"
+        }
+      ]
+    }
+  ]
+}
