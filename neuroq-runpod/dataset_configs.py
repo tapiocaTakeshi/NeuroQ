@@ -285,6 +285,37 @@ DATASET_SWALLOW_MATH_V2 = {
     },
 }
 
+DATASET_ORCA_DPO_PAIRS = {
+    'id': 'Intel/orca_dpo_pairs',
+    'config': None,
+    'name': 'Orca DPO Pairs',
+    'description': 'Intel Orca DPO Pairs - 12k DPO用選好データセット（chosen/rejected）',
+    'language': 'en',
+    'format': 'dpo',  # DPO形式: system, question, chosen, rejected
+    'data_files': [],  # HuggingFaceからダウンロード
+    'tokenizer_files': [],
+    'requires_tokenizer': False,
+    # DPO形式専用フィールド設定
+    'hf_text_field': None,  # DPO形式のため個別フィールドを使用
+    'hf_dpo_fields': {
+        'system': 'system',
+        'question': 'question',
+        'chosen': 'chosen',
+        'rejected': 'rejected',
+    },
+    'hf_max_samples': 12000,
+    'default_params': {
+        'epochs': 3,
+        'batch_size': 4,
+        'lr': 0.0002,
+        'seq_length': 256,
+    },
+    'parse_config': {
+        'block_separator': '\n\n',
+        'required_markers': [],
+    },
+}
+
 
 # ===============================
 # 利用可能なデータセット一覧
@@ -299,6 +330,7 @@ AVAILABLE_DATASETS = {
     'swallow_nemotron': DATASET_SWALLOW_NEMOTRON,
     'swallow_code_v2': DATASET_SWALLOW_CODE_V2,
     'swallow_math_v2': DATASET_SWALLOW_MATH_V2,
+    'orca_dpo_pairs': DATASET_ORCA_DPO_PAIRS,
 }
 
 
@@ -404,6 +436,49 @@ def find_tokenizer_file(dataset_config: dict) -> str:
     return None
 
 
+def _parse_dpo_dataset(ds, dpo_fields: dict, max_samples: int = None) -> list:
+    """
+    DPO形式のデータセットをSFT用テキストに変換する
+
+    chosen（優良回答）を使用してUser/Assistant形式の会話テキストを生成。
+
+    Args:
+        ds: HuggingFace Dataset オブジェクト
+        dpo_fields: DPOフィールドマッピング（system, question, chosen, rejected）
+        max_samples: 最大サンプル数
+
+    Returns:
+        テキストのリスト
+    """
+    sys_field = dpo_fields.get('system', 'system')
+    q_field = dpo_fields.get('question', 'question')
+    chosen_field = dpo_fields.get('chosen', 'chosen')
+
+    texts = []
+    for i, item in enumerate(ds):
+        if max_samples and i >= max_samples:
+            break
+
+        question = item.get(q_field, '')
+        chosen = item.get(chosen_field, '')
+
+        if not question or not chosen:
+            continue
+
+        # system プロンプトがあれば先頭に追加
+        system = item.get(sys_field, '')
+        parts = []
+        if system and system.strip():
+            parts.append(f"System: {system.strip()}")
+        parts.append(f"User: {question.strip()}")
+        parts.append(f"Assistant: {chosen.strip()}")
+
+        texts.append('\n'.join(parts))
+
+    print(f"   {len(texts)} 個のDPOペアを読み込みました（chosen回答を使用）")
+    return texts
+
+
 def _load_from_huggingface(dataset_config: dict) -> list:
     """
     HuggingFace Hub からデータセットをダウンロードしてテキストリストを返す
@@ -445,6 +520,11 @@ def _load_from_huggingface(dataset_config: dict) -> list:
                 ds = ds[split_name]
                 print(f"   split: '{split_name}'")
                 break
+
+    # DPO形式の処理
+    dpo_fields = dataset_config.get('hf_dpo_fields')
+    if dpo_fields:
+        return _parse_dpo_dataset(ds, dpo_fields, max_samples)
 
     # テキストフィールドを抽出
     texts = []
