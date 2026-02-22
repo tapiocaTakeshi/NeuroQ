@@ -111,9 +111,16 @@ class NeuroQInference:
     def initialize(self):
         """コンテナ起動時に呼ばれる初期化処理"""
         import sys
-        import torch
         import os
-        
+
+        # PyTorch のキャッシュディレクトリを /tmp から移動（容量不足対策）
+        _torch_cache = "/model_checkpoints/.torch_cache"
+        os.makedirs(_torch_cache, exist_ok=True)
+        os.environ["TORCHINDUCTOR_CACHE_DIR"] = _torch_cache
+        os.environ["TORCH_HOME"] = _torch_cache
+
+        import torch
+
         # パスを設定
         sys.path.insert(0, "/root/neuroq")
         os.chdir("/root/neuroq")
@@ -1424,10 +1431,17 @@ def train_model(
 ):
     import os
     import sys
-    import torch
     import random
+
+    # PyTorch のキャッシュディレクトリを /tmp から移動（容量不足対策）
+    _torch_cache = "/model_checkpoints/.torch_cache"
+    os.makedirs(_torch_cache, exist_ok=True)
+    os.environ["TORCHINDUCTOR_CACHE_DIR"] = _torch_cache
+    os.environ["TORCH_HOME"] = _torch_cache
+
+    import torch
     from torch.cuda.amp import autocast, GradScaler
-    
+
     # コンテナ内のパス解決
     if os.path.exists("/root/neuroq"):
         sys.path.insert(0, "/root/neuroq")
@@ -1435,7 +1449,7 @@ def train_model(
     elif os.path.exists("/root"):
         sys.path.insert(0, "/root")
         os.chdir("/root")
-    
+
     device = "cuda" if torch.cuda.is_available() else "cpu"
     os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
     
