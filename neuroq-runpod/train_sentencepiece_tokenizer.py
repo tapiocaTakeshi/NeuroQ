@@ -171,7 +171,7 @@ def train_japanese_tokenizer(
             input=tmp_corpus_path,
             model_prefix=model_prefix,
             vocab_size=vocab_size,
-            model_type='bpe',
+            model_type='unigram',
             character_coverage=character_coverage,
             pad_id=0,
             unk_id=1,
