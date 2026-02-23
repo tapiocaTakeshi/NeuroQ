@@ -5,6 +5,8 @@ import torch.nn as nn
 from torch.utils.data import Dataset, DataLoader
 from tqdm import tqdm
 from pathlib import Path
+import langdetect
+from langdetect.lang_detect_exception import LangDetectException
 
 # Load HuggingFace Datasets
 try:
@@ -33,9 +35,10 @@ HIDDEN_DIM = 512         # FFN internal dim
 NUM_HEADS = 8            # Attention heads
 NUM_LAYERS = 4           # Transformer blocks
 MAX_SEQ_LEN = 256        # Sequence length
-BATCH_SIZE = 8           # Batch size
+BATCH_SIZE = 8           # Batch size (per accumulation step)
+ACCUMULATION_STEPS = 4   # Effective batch size = 32
 EPOCHS = 3               # Training epochs
-LEARNING_RATE = 3e-4     # Learning rate
+LEARNING_RATE = 2e-4     # Slightly lower LR for larger batch/dataset
 
 DEVICE = torch.device("mps" if torch.backends.mps.is_available() else "cuda" if torch.cuda.is_available() else "cpu")
 
@@ -52,42 +55,68 @@ class OASSTDataset(Dataset):
         
     def __getitem__(self, idx):
         tokens = self.data[idx]
-        # Autoregressive shift: input is x[:-1], target is x[1:]
         x = torch.tensor(tokens[:-1], dtype=torch.long)
         y = torch.tensor(tokens[1:], dtype=torch.long)
         
-        # Pad to max length
         pad_len = MAX_SEQ_LEN - 1 - len(x)
         if pad_len > 0:
             x = torch.cat([x, torch.full((pad_len,), self.pad_id, dtype=torch.long)])
-            y = torch.cat([y, torch.full((pad_len,), -100, dtype=torch.long)]) # -100 ignores loss
+            y = torch.cat([y, torch.full((pad_len,), -100, dtype=torch.long)])
             
         return x, y
 
-def prepare_data(tokenizer, max_samples=2000):
-    print("Loading OASST dataset (timdettmers/openassistant-guanaco)...")
-    dataset = load_dataset("timdettmers/openassistant-guanaco", split="train")
+def is_en_ja(text):
+    try:
+        lang = langdetect.detect(text)
+        return lang in ['en', 'ja']
+    except LangDetectException:
+        # Fallback if langdetect fails
+        if any('\u3040' <= c <= '\u30FF' or '\u4E00' <= c <= '\u9FFF' for c in text):
+            return True
+        ascii_count = sum(1 for c in text if ord(c) < 128)
+        return (ascii_count / max(1, len(text))) > 0.8
+
+def prepare_data(tokenizer, max_samples=20000):
+    print("Loading OASST datasets...")
     
-    # Take a subset for rapid experimentation
-    subset = dataset.select(range(min(max_samples, len(dataset))))
+    # Dataset 1: OASST1 (via guanaco variant which is already flattened to conversations)
+    dataset1 = load_dataset("timdettmers/openassistant-guanaco", split="train")
     
-    encoded_data = []
-    print("Tokenizing data...")
-    for item in tqdm(subset):
-        text = item["text"]
-        tokens = tokenizer.encode(text)
+    if max_samples:
+        subset_size = min(max_samples // 2, len(dataset1))
+        dataset1 = dataset1.select(range(subset_size))
         
-        # Filter too short texts
-        if len(tokens) < 10:
+    encoded_data = []
+    print(f"Filtering and Tokenizing OASST1 ({len(dataset1)} samples)...")
+    for item in tqdm(dataset1):
+        text = item["text"]
+        if not is_en_ja(text):
             continue
             
-        # Truncate to MAX_SEQ_LEN
-        if len(tokens) > MAX_SEQ_LEN:
-            tokens = tokens[:MAX_SEQ_LEN]
+        tokens = tokenizer.encode(text)
+        if len(tokens) >= 10:
+            encoded_data.append(tokens[:MAX_SEQ_LEN])
             
-        encoded_data.append(tokens)
-        
-    print(f"Prepared {len(encoded_data)} sequences.")
+    # Dataset 2: OASST2 (English Top1 variant flattened to conversations)
+    try:
+        dataset2 = load_dataset("OpenAssistant/oasst_top1_2023-08-25", split="train")
+        if max_samples:
+             subset_size = min(max_samples // 2, len(dataset2))
+             dataset2 = dataset2.select(range(subset_size))
+             
+        print(f"Filtering and Tokenizing OASST2 ({len(dataset2)} samples)...")
+        for item in tqdm(dataset2):
+            text = item["text"]
+            if not is_en_ja(text):
+                continue
+                
+            tokens = tokenizer.encode(text)
+            if len(tokens) >= 10:
+                encoded_data.append(tokens[:MAX_SEQ_LEN])
+    except Exception as e:
+        print(f"Warning: Could not load or format OASST2 correctly. Only using OASST1. Error: {e}")
+
+    print(f"Total Prepared Sequences (OASST1 + OASST2, En/Ja Only): {len(encoded_data)}")
     return encoded_data
 
 # ==========================================
@@ -95,14 +124,15 @@ def prepare_data(tokenizer, max_samples=2000):
 # ==========================================
 def train():
     print("=" * 70)
-    print("🚀 Starting QBNN Autoregressive Training on OASST")
+    print("🚀 Starting QBNN Autoregressive Training on OASST1 & OASST2")
     print("=" * 70)
     print(f"Device: {DEVICE}")
+    print(f"Gradient Accumulation Steps: {ACCUMULATION_STEPS} (Effective Batch: {BATCH_SIZE * ACCUMULATION_STEPS})")
     
     tokenizer = TikTokenTokenizer(encoding_name="p50k_base")
     
-    # 1. Prepare Dataset
-    tokenized_texts = prepare_data(tokenizer, max_samples=3000)
+    # 1. Prepare Dataset (using 20,000 samples for substantial training)
+    tokenized_texts = prepare_data(tokenizer, max_samples=20000)
     dataset = OASSTDataset(tokenized_texts, pad_id=tokenizer.pad_id)
     dataloader = DataLoader(dataset, batch_size=BATCH_SIZE, shuffle=True)
     
@@ -130,34 +160,50 @@ def train():
     # 3. Training
     for epoch in range(EPOCHS):
         total_loss = 0
+        optimizer.zero_grad()
+        
         progress = tqdm(dataloader, desc=f"Epoch {epoch+1}/{EPOCHS}")
         
         for batch_idx, (x, y) in enumerate(progress):
             x, y = x.to(DEVICE), y.to(DEVICE)
             
-            optimizer.zero_grad()
-            
-            # Forward pass: (batch, seq, vocab_size)
+            # Forward pass
             logits = model(x)
             
-            # Calculate loss: Reshape to (batch * seq, vocab_size) and (batch * seq)
+            # Calculate loss
             loss = criterion(logits.view(-1, VOCAB_SIZE), y.view(-1))
             
-            # Backward pass
+            # Scale loss by accumulation steps
+            loss = loss / ACCUMULATION_STEPS
             loss.backward()
-            torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
-            optimizer.step()
             
-            total_loss += loss.item()
-            progress.set_postfix({'loss': f"{loss.item():.4f}"})
+            # Step optimizer every ACCUMULATION_STEPS
+            if ((batch_idx + 1) % ACCUMULATION_STEPS == 0) or (batch_idx + 1 == len(dataloader)):
+                torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
+                optimizer.step()
+                optimizer.zero_grad()
+            
+            total_loss += loss.item() * ACCUMULATION_STEPS # Original loss scaling for logging
+            progress.set_postfix({'loss': f"{loss.item() * ACCUMULATION_STEPS:.4f}"})
             
         avg_loss = total_loss / len(dataloader)
         print(f"Epoch {epoch+1} completed | Average Loss: {avg_loss:.4f}")
         
-        # 4. Save checkpoint
-        save_path = f"qbnn_oasst_epoch_{epoch+1}.pt"
-        torch.save(model.state_dict(), save_path)
-        print(f"💾 Checkpoint saved: {save_path}\n")
+        # 4. Save checkpoint (Using dict format for Modal API compatibility directly)
+        save_path = f"qbnn_oasst_full_epoch_{epoch+1}.pt"
+        
+        checkpoint_dict = {
+            'model_state_dict': model.state_dict(),
+            'config': {
+                'vocab_size': VOCAB_SIZE, 'embed_dim': EMBED_DIM, 'hidden_dim': HIDDEN_DIM,
+                'num_heads': NUM_HEADS, 'num_layers': NUM_LAYERS, 'lambda_entangle': 0.5,
+                'max_seq_len': MAX_SEQ_LEN, 'dropout': 0.1
+            },
+            'tokenizer': {'type': 'tiktoken', 'encoding': 'p50k_base'}
+        }
+        
+        torch.save(checkpoint_dict, save_path)
+        print(f"💾 Checkpoint saved (Modal compatible format): {save_path}\n")
         
     print("✅ Training Complete!")
 
