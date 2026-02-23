@@ -28,6 +28,14 @@ import re
 import warnings
 warnings.filterwarnings('ignore')
 
+# fugashi（日本語形態素解析トークナイザー用）
+try:
+    import fugashi
+    FUGASHI_AVAILABLE = True
+except ImportError:
+    FUGASHI_AVAILABLE = False
+    warnings.warn("fugashiライブラリがインストールされていません。pip install fugashi unidic-lite を実行してください。")
+
 # neuroquantum_layered.py からトークナイザーをインポート
 try:
     from neuroquantum_layered import NeuroQuantumTokenizer
@@ -998,156 +1006,234 @@ class NeuroQuantumBrain(nn.Module):
 
 
 # ========================================
-# トークナイザー（サブワード対応）
+# トークナイザー（fugashi使用）
 # ========================================
 
 class BrainTokenizer:
     """
-    サブワード対応トークナイザー（図2-4のトークン化ステップに準拠）
-    
-    処理フロー:
-    1. 入力テキスト → トークン化（テキストを個々のトークンに分割）
-    2. トークン → トークンID（各トークンを数値IDに変換）
-    
-    特徴:
-    - 文字単位 + 頻出バイグラム/単語単位
-    - 最大50,000トークン対応
+    fugashiトークナイザーを使用
+
+    - fugashi (MeCab wrapper) で形態素解析し語彙を構築
+    - 語彙サイズを指定して学習可能（8000-32000推奨）
+    - 日本語の形態素解析に適している
+    - モデルの保存・読み込みが可能（JSON形式）
+    - フォールバック: 簡易トークナイザー（fugashi未インストール時）
     """
-    
-    def __init__(self, max_vocab: int = 50000, use_subword: bool = True):
-        self.max_vocab = max_vocab
-        self.use_subword = use_subword
-        self.token2idx = {'<PAD>': 0, '<UNK>': 1, '<BOS>': 2, '<EOS>': 3}
-        self.idx2token = {0: '<PAD>', 1: '<UNK>', 2: '<BOS>', 3: '<EOS>'}
-        self.vocab_size = 4
-        self.subword_list = []
-    
-    def fit(self, texts: List[str]):
-        """語彙を構築（文字 + サブワード）"""
-        
-        # 1. 文字カウント
+
+    def __init__(self, vocab_size: int = 16000, model_file: str = None):
+        """
+        Args:
+            vocab_size: 語彙サイズ（デフォルト: 16000）
+            model_file: 既存のfugashi語彙ファイルパス（JSON形式、Noneの場合は新規学習）
+        """
+        self.vocab_size = vocab_size
+        self.actual_vocab_size = None
+        self.model_file = model_file
+        self.tagger = None
+
+        # 特殊トークン
+        self.pad_token = '<pad>'
+        self.unk_token = '<unk>'
+        self.bos_token = '<s>'
+        self.eos_token = '</s>'
+
+        # fugashiを使用
+        if FUGASHI_AVAILABLE:
+            try:
+                self.tagger = fugashi.Tagger()
+            except Exception as e:
+                warnings.warn(f"fugashi Taggerの初期化に失敗: {e}。フォールバックを使用します。")
+                self.tagger = None
+
+            if self.tagger is not None and model_file and os.path.exists(model_file):
+                # 既存モデル（JSON語彙）を読み込み
+                try:
+                    import json
+                    with open(model_file, 'r', encoding='utf-8') as f:
+                        vocab_data = json.load(f)
+                    self.token2idx = vocab_data['token2idx']
+                    self.idx2token = {int(k): v for k, v in vocab_data['idx2token'].items()}
+                    self.actual_vocab_size = len(self.token2idx)
+                    self.vocab_size = self.actual_vocab_size
+                    # 特殊トークンIDを取得
+                    self.pad_id = self.token2idx.get(self.pad_token, 0)
+                    self.unk_id = self.token2idx.get(self.unk_token, 1)
+                    self.bos_id = self.token2idx.get(self.bos_token, 2)
+                    self.eos_id = self.token2idx.get(self.eos_token, 3)
+                    print(f"   ✅ fugashi語彙モデル読み込み: {model_file} (語彙サイズ: {self.actual_vocab_size})")
+                    return
+                except Exception as e:
+                    warnings.warn(f"fugashi語彙モデルの読み込みに失敗: {e}。新規学習します。")
+        else:
+            # fugashi未インストール
+            self.tagger = None
+
+        # fugashiが使えない場合はフォールバック
+        self._init_fallback()
+
+    def _init_fallback(self):
+        """フォールバック用の簡易トークナイザー初期化"""
+        self.token2idx = {'<pad>': 0, '<unk>': 1, '<s>': 2, '</s>': 3}
+        self.idx2token = {0: '<pad>', 1: '<unk>', 2: '<s>', 3: '</s>'}
+        # vocab_sizeは設定されている値を保持（上書きしない）
+        if not hasattr(self, 'vocab_size') or self.vocab_size is None:
+            self.vocab_size = 4
+        self.actual_vocab_size = None  # fit()で設定される
+
+        # 特殊トークンID
+        self.pad_id = 0
+        self.unk_id = 1
+        self.bos_id = 2
+        self.eos_id = 3
+
+    def fit(self, texts: List[str], character_coverage: float = 0.9995, model_prefix: str = "fugashi_vocab_brain"):
+        """
+        fugashiで形態素解析し語彙を構築
+
+        Args:
+            texts: 学習テキストのリスト
+            character_coverage: 文字カバレッジ（互換性のため残しているが、fugashiでは未使用）
+            model_prefix: モデルファイルのプレフィックス
+        """
+        if not FUGASHI_AVAILABLE or self.tagger is None:
+            warnings.warn("fugashiが利用できません。フォールバックトークナイザーを使用します。")
+            self._fit_fallback(texts)
+            return
+
+        # vocab_sizeが4以下（特殊トークンのみ）の場合は、デフォルト値を使用
+        actual_vocab_size = max(self.vocab_size, 16000) if self.vocab_size <= 4 else self.vocab_size
+        print(f"   🔤 fugashiで語彙構築中... (目標語彙サイズ: {actual_vocab_size})")
+
+        try:
+            # 形態素解析して語彙を構築
+            morpheme_counts = Counter()
+            for text in texts:
+                words = self.tagger(text)
+                for word in words:
+                    surface = word.surface
+                    if surface.strip():
+                        morpheme_counts[surface] += 1
+
+            # 特殊トークンで初期化
+            self.token2idx = {
+                self.pad_token: 0,
+                self.unk_token: 1,
+                self.bos_token: 2,
+                self.eos_token: 3,
+            }
+            self.idx2token = {0: self.pad_token, 1: self.unk_token, 2: self.bos_token, 3: self.eos_token}
+
+            # 頻度順に語彙を追加
+            for morpheme, _ in morpheme_counts.most_common(actual_vocab_size - 4):
+                if morpheme not in self.token2idx:
+                    idx = len(self.token2idx)
+                    self.token2idx[morpheme] = idx
+                    self.idx2token[idx] = morpheme
+
+            self.actual_vocab_size = len(self.token2idx)
+            self.vocab_size = self.actual_vocab_size
+
+            # 特殊トークンIDを設定
+            self.pad_id = 0
+            self.unk_id = 1
+            self.bos_id = 2
+            self.eos_id = 3
+
+            # JSON形式で保存
+            import json
+            model_file_path = model_prefix + '.json'
+            vocab_data = {
+                'token2idx': self.token2idx,
+                'idx2token': {str(k): v for k, v in self.idx2token.items()},
+            }
+            with open(model_file_path, 'w', encoding='utf-8') as f:
+                json.dump(vocab_data, f, ensure_ascii=False, indent=2)
+            self.model_file = model_file_path
+
+            print(f"   ✅ fugashi語彙構築完了 (語彙サイズ: {self.actual_vocab_size})")
+
+        except Exception as e:
+            warnings.warn(f"fugashi語彙構築に失敗: {e}。フォールバックを使用します。")
+            self._fit_fallback(texts)
+
+    def _fit_fallback(self, texts: List[str]):
+        """フォールバック：簡易語彙構築"""
+        print(f"   🔤 フォールバック語彙構築中...")
         char_counts = Counter()
         for text in texts:
             char_counts.update(list(text))
-        
-        # 2. 単一文字を追加
-        for char, _ in char_counts.most_common():
+
+        # vocab_sizeが4以下（特殊トークンのみ）の場合は、デフォルト値を使用
+        target_vocab_size = max(self.vocab_size, 16000) if self.vocab_size <= 4 else self.vocab_size
+
+        for char, _ in char_counts.most_common(target_vocab_size - 4):
             if char not in self.token2idx:
                 idx = len(self.token2idx)
                 self.token2idx[char] = idx
                 self.idx2token[idx] = char
-        
-        # 3. サブワード（バイグラム、トライグラム、頻出単語）
-        if self.use_subword:
-            # バイグラム
-            bigram_counts = Counter()
-            for text in texts:
-                chars = list(text)
-                for i in range(len(chars) - 1):
-                    bigram = chars[i] + chars[i + 1]
-                    bigram_counts[bigram] += 1
-            
-            # トライグラム
-            trigram_counts = Counter()
-            for text in texts:
-                chars = list(text)
-                for i in range(len(chars) - 2):
-                    trigram = chars[i] + chars[i + 1] + chars[i + 2]
-                    trigram_counts[trigram] += 1
-            
-            # 頻出単語（日本語対応）
-            word_counts = Counter()
-            for text in texts:
-                # 簡易的な単語分割（句読点、スペースで分割）
-                words = re.split(r'[、。，．！？\s\n]+', text)
-                for word in words:
-                    if 2 <= len(word) <= 8:
-                        word_counts[word] += 1
-            
-            # サブワードを追加（頻度順）
-            available_slots = self.max_vocab - len(self.token2idx)
-            
-            # 各タイプから均等に追加
-            subwords_to_add = []
-            
-            # 頻出単語（最大40%）
-            for word, cnt in word_counts.most_common(available_slots * 2 // 5):
-                if cnt >= 5 and word not in self.token2idx:
-                    subwords_to_add.append((word, cnt * 3))  # 優先度高め
-            
-            # バイグラム（最大35%）
-            for bigram, cnt in bigram_counts.most_common(available_slots * 7 // 20):
-                if cnt >= 10 and bigram not in self.token2idx:
-                    subwords_to_add.append((bigram, cnt * 2))
-            
-            # トライグラム（最大25%）
-            for trigram, cnt in trigram_counts.most_common(available_slots // 4):
-                if cnt >= 5 and trigram not in self.token2idx:
-                    subwords_to_add.append((trigram, cnt))
-            
-            # 頻度でソートして追加
-            subwords_to_add.sort(key=lambda x: -x[1])
-            
-            for token, _ in subwords_to_add:
-                if len(self.token2idx) >= self.max_vocab:
-                    break
-                if token not in self.token2idx:
-                    idx = len(self.token2idx)
-                    self.token2idx[token] = idx
-                    self.idx2token[idx] = token
-                    self.subword_list.append(token)
-        
+
         self.vocab_size = len(self.token2idx)
-        print(f"   語彙サイズ: {self.vocab_size} (サブワード: {len(self.subword_list)})")
-    
-    def encode(self, text: str) -> List[int]:
-        """
-        エンコード（図2-4のトークン化ステップ）
-        
-        処理:
-        1. 入力テキスト → トークン化（テキストを個々のトークンに分割）
-        2. トークン → トークンID（各トークンを数値IDに変換）
-        
-        Args:
-            text: 入力テキスト（例: "This is an example."）
-        
-        Returns:
-            トークンIDのリスト（例: [40134, 2052, 133, 389, 12]）
-        """
-        tokens = []
-        i = 0
-        text_len = len(text)
-        
-        # トークン化: テキストを個々のトークンに分割
-        while i < text_len:
-            matched = False
-            
-            # 長いサブワードから優先的にマッチ
-            for length in [8, 7, 6, 5, 4, 3, 2]:
-                if i + length <= text_len:
+        self.actual_vocab_size = self.vocab_size
+        print(f"   ✅ 語彙サイズ: {self.vocab_size}")
+
+    def encode(self, text: str, add_special: bool = False) -> List[int]:
+        """エンコード"""
+        if self.tagger is not None and hasattr(self, 'token2idx') and len(self.token2idx) > 4:
+            # fugashi使用
+            tokens = []
+            if add_special:
+                tokens.append(self.bos_id)
+
+            words = self.tagger(text)
+            for word in words:
+                surface = word.surface
+                if surface in self.token2idx:
+                    tokens.append(self.token2idx[surface])
+                else:
+                    # 未知語は文字単位で分割
+                    for ch in surface:
+                        tokens.append(self.token2idx.get(ch, self.unk_id))
+
+            if add_special:
+                tokens.append(self.eos_id)
+
+            return tokens
+        else:
+            # フォールバック：最長マッチ方式
+            tokens = []
+            if add_special:
+                tokens.append(self.bos_id)
+
+            i = 0
+            text_len = len(text)
+            while i < text_len:
+                matched = False
+                for length in range(min(8, text_len - i), 0, -1):
                     substr = text[i:i+length]
                     if substr in self.token2idx:
-                        # トークンID: 各トークンを数値IDに変換
                         tokens.append(self.token2idx[substr])
                         i += length
                         matched = True
                         break
-            
-            if not matched:
-                # 単一文字
-                char = text[i]
-                tokens.append(self.token2idx.get(char, 1))  # UNK
-                i += 1
-        
-        return tokens
-    
-    def decode(self, tokens: List[int]) -> str:
-        """トークンをテキストに変換"""
+
+                if not matched:
+                    tokens.append(self.token2idx.get(text[i], self.unk_id))
+                    i += 1
+
+            if add_special:
+                tokens.append(self.eos_id)
+
+            return tokens
+
+    def decode(self, tokens: List[int], skip_special: bool = True) -> str:
+        """デコード"""
         result = []
+        special_ids = {self.pad_id, self.unk_id, self.bos_id, self.eos_id}
         for t in tokens:
-            if t not in [0, 1, 2, 3]:  # 特殊トークンスキップ
-                token = self.idx2token.get(t, '')
-                result.append(token)
+            if skip_special and t in special_ids:
+                continue
+            token = self.idx2token.get(t, '')
+            result.append(token)
         return ''.join(result)
 
 
