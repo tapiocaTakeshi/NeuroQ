@@ -344,7 +344,7 @@ class NeuroQInference:
                                 print(f"   ⚠️ TikTokenTokenizerインポートエラー: {e}")
                         else:
                             # fugashiトークナイザー (デフォルト/フォールバック)
-                            tokenizer_path = "/root/neuroq/neuroq_tokenizer.json"
+                            tokenizer_path = "/root/neuroq/neuroq_tokenizer_oasst1_ja.model"
                             if os.path.exists(tokenizer_path):
                                 self.tokenizer = self.NeuroQuantumTokenizer(
                                     vocab_size=vocab_size,
@@ -395,7 +395,7 @@ class NeuroQInference:
                     )
                     
                     # fugashiトークナイザーをロード
-                    tokenizer_path = "/root/neuroq/neuroq_tokenizer.json"
+                    tokenizer_path = "/root/neuroq/neuroq_tokenizer_oasst1_ja.model"
                     if os.path.exists(tokenizer_path):
                         self.model.tokenizer = self.NeuroQuantumTokenizer(
                             vocab_size=vocab_size,
@@ -770,7 +770,7 @@ class NeuroQInference:
             if hasattr(self.model, 'tokenizer') and self.model.tokenizer is not None:
                 tokenizer = self.model.tokenizer
             else:
-                tokenizer_path = "/root/neuroq/neuroq_tokenizer.json"
+                tokenizer_path = "/root/neuroq/neuroq_tokenizer_oasst1_ja.model"
                 tokenizer = self.NeuroQuantumTokenizer(vocab_size=model_vocab_size, model_file=tokenizer_path)
 
             # テキストをトークン化
@@ -869,7 +869,7 @@ class NeuroQInference:
             if hasattr(self.model, 'tokenizer') and self.model.tokenizer is not None:
                 tokenizer = self.model.tokenizer
             else:
-                tokenizer_path = "/root/neuroq/neuroq_tokenizer.json"
+                tokenizer_path = "/root/neuroq/neuroq_tokenizer_oasst1_ja.model"
                 tokenizer = self.NeuroQuantumTokenizer(vocab_size=vocab_size, model_file=tokenizer_path)
             
             # 入力ベクトルをテンソルに変換
