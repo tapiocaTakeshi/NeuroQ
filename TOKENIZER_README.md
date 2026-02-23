@@ -2,7 +2,7 @@
 
 ## 概要
 
-NeuroQuantum では、**SentencePiece** を使用した8,000語彙のトークナイザーを採用しています。これにより、以前の86語彙から大幅に改善され、より自然で正確なテキスト生成が可能になりました。
+NeuroQuantum では、**SentencePiece（BPE方式）** を使用した8,000語彙のトークナイザーを採用しています。これにより、以前の86語彙から大幅に改善され、より自然で正確なテキスト生成が可能になりました。
 
 ## 🔑 重要な改善点
 
@@ -85,7 +85,7 @@ python train_sentencepiece_tokenizer.py
 
 これにより：
 - Hugging Face から日本語Wikipedia、対話データを取得
-- vocab_size=8,000 で SentencePiece モデルを学習
+- vocab_size=8,000 で SentencePiece BPE モデルを学習
 - `neuroq_tokenizer.model` と `neuroq_tokenizer.vocab` を生成
 
 ### カスタマイズ
