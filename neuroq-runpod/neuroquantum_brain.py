@@ -1013,7 +1013,7 @@ class BrainTokenizer:
     """
     SentencePiece日本語サブワードトークナイザー
 
-    - SentencePieceによるサブワードトークン化（BPE/Unigram）
+    - SentencePieceによるサブワードトークン化（BPE）
     - 語彙サイズを指定して学習可能（8000-32000推奨）
     - 日本語のサブワード分割に適している
     - モデルの保存・読み込みが可能（.model形式）
@@ -1109,7 +1109,7 @@ class BrainTokenizer:
                 input=tmp_corpus_path,
                 model_prefix=model_prefix,
                 vocab_size=actual_vocab_size,
-                model_type='unigram',
+                model_type='bpe',
                 character_coverage=character_coverage,
                 pad_id=self.pad_id,
                 unk_id=self.unk_id,
