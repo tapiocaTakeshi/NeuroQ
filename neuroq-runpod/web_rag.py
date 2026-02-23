@@ -318,17 +318,17 @@ RAG_SYSTEM_PROMPT_JA = """あなたはAIアシスタントです。
 2. 情報源を明示する（例: 「検索結果によると...」）
 3. 情報が不確かな場合は、その旨を伝える
 4. 簡潔で分かりやすい回答を心がける
-5. 英語で回答を生成してください（後で日本語に翻訳されます）"""
+5. 常に日本語で回答する"""
 
-RAG_SYSTEM_PROMPT_EN = """You are an AI assistant.
-Answer user questions using the provided reference information.
+RAG_SYSTEM_PROMPT_EN = """あなたはAIアシスタントです。
+提供された参考情報を活用して、ユーザーの質問に回答してください。
 
-Rules:
-1. Answer accurately based on the reference information
-2. Cite your sources (e.g., "According to the search results...")
-3. If information is uncertain, mention that
-4. Keep answers concise and clear
-5. Always respond in English"""
+ルール:
+1. 参考情報に基づいて正確に回答する
+2. 情報源を明示する（例: 「検索結果によると...」）
+3. 情報が不確かな場合は、その旨を伝える
+4. 簡潔で分かりやすい回答を心がける
+5. 常に日本語で回答する"""
 
 
 # テスト用
