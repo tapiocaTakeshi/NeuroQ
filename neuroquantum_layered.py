@@ -33,13 +33,13 @@ import re
 from typing import List, Dict, Optional, Tuple
 import warnings
 
-# fugashi（日本語形態素解析トークナイザー用）
+# sentencepiece（日本語サブワードトークナイザー用）
 try:
-    import fugashi
-    FUGASHI_AVAILABLE = True
+    import sentencepiece as spm
+    SENTENCEPIECE_AVAILABLE = True
 except ImportError:
-    FUGASHI_AVAILABLE = False
-    warnings.warn("fugashiライブラリがインストールされていません。pip install fugashi unidic-lite を実行してください。")
+    SENTENCEPIECE_AVAILABLE = False
+    warnings.warn("sentencepieceライブラリがインストールされていません。pip install sentencepiece を実行してください。")
 
 # Transformersライブラリ（アテンション用）
 try:
@@ -52,13 +52,13 @@ except ImportError:
     TRANSFORMERS_AVAILABLE = False
     # 警告は表示しない（フォールバックモードで動作可能なため）
 
-# OpenAI API（オプション）
+# Google Generative AI（テキストエンベディング用）
 try:
-    from openai import OpenAI
-    OPENAI_AVAILABLE = True
+    import google.generativeai as genai
+    GOOGLE_GENAI_AVAILABLE = True
 except ImportError:
-    OPENAI_AVAILABLE = False
-    warnings.warn("OpenAI APIが利用できません。openai>=1.0.0をインストールしてください。")
+    GOOGLE_GENAI_AVAILABLE = False
+    warnings.warn("Google Generative AIが利用できません。pip install google-generativeai を実行してください。")
 
 # ========================================
 # qbnn_layered.py からコアコンポーネントをインポート
@@ -483,129 +483,133 @@ class QBNNTransformerBlock(nn.Module):
 # Part 4: Embedding（埋め込み層）
 # ========================================
 
-class OpenAIEmbeddingWrapper:
+
+
+
+
+class GoogleEmbeddingWrapper:
     """
-    OpenAI Embedding API ラッパー
-    
-    テキストを直接OpenAI APIに送信してエンベディングを取得
+    Google Text Embedding API ラッパー
+
+    Google Generative AI の text-embedding モデルを使用してテキストのエンベディングを取得
+
+    対応モデル:
+    - text-embedding-004 (768次元、デフォルト)
     """
-    
-    def __init__(self, api_key: Optional[str] = None, model: str = "text-embedding-3-large", dimensions: Optional[int] = None):
-        if not OPENAI_AVAILABLE:
-            raise ImportError("OpenAI APIが利用できません。openai>=1.0.0をインストールしてください。")
-        
-        self.api_key = api_key or os.getenv("OPENAI_API_KEY")
+
+    def __init__(self, api_key: Optional[str] = None, model: str = "models/text-embedding-004", dimensions: Optional[int] = None):
+        if not GOOGLE_GENAI_AVAILABLE:
+            raise ImportError("Google Generative AIが利用できません。pip install google-generativeai を実行してください。")
+
+        self.api_key = api_key or os.getenv("GOOGLE_API_KEY")
         if not self.api_key:
-            raise ValueError("OpenAI APIキーが必要です。OPENAI_API_KEY環境変数を設定するか、api_key引数を指定してください。")
-        
-        self.client = OpenAI(api_key=self.api_key)
+            raise ValueError("Google APIキーが必要です。GOOGLE_API_KEY環境変数を設定するか、api_key引数を指定してください。")
+
+        genai.configure(api_key=self.api_key)
         self.model = model
-        
+
         # モデルごとのデフォルト次元
         if dimensions is not None:
             self.embed_dim = dimensions
             self.dimensions = dimensions
-        elif "ada-002" in model:
-            self.embed_dim = 1536
-            self.dimensions = None
-        elif "embedding-3-large" in model:
-            self.embed_dim = 3072  # text-embedding-3-largeのデフォルト次元
-            self.dimensions = None
-        elif "embedding-3-small" in model:
-            self.embed_dim = 1536  # text-embedding-3-smallのデフォルト次元
+        elif "text-embedding-004" in model:
+            self.embed_dim = 768
             self.dimensions = None
         else:
-            self.embed_dim = 3072  # デフォルト
+            self.embed_dim = 768  # デフォルト
             self.dimensions = None
-    
+
     def get_embeddings(self, texts: List[str], batch_size: int = 100) -> np.ndarray:
         """
         テキストのリストからエンベディングを取得
-        
+
         Args:
             texts: テキストのリスト
             batch_size: バッチサイズ（API制限を考慮）
-        
+
         Returns:
             (N, embed_dim) エンベディング配列
         """
         all_embeddings = []
-        
+
         # バッチ処理
         for i in range(0, len(texts), batch_size):
             batch = texts[i:i + batch_size]
-            
+
             try:
-                # dimensionsパラメータを指定可能（text-embedding-3-large等で使用）
-                params = {
-                    "model": self.model,
-                    "input": batch
-                }
-                if self.dimensions is not None:
-                    params["dimensions"] = self.dimensions
-                
-                response = self.client.embeddings.create(**params)
-                
-                batch_embeddings = [item.embedding for item in response.data]
-                all_embeddings.extend(batch_embeddings)
+                result = genai.embed_content(
+                    model=self.model,
+                    content=batch,
+                    task_type="RETRIEVAL_DOCUMENT",
+                    output_dimensionality=self.dimensions,
+                )
+
+                # 単一テキストの場合と複数テキストの場合を処理
+                if isinstance(result['embedding'][0], list):
+                    all_embeddings.extend(result['embedding'])
+                else:
+                    all_embeddings.append(result['embedding'])
             except Exception as e:
-                raise RuntimeError(f"OpenAI APIエラー: {e}")
-        
+                raise RuntimeError(f"Google Embedding APIエラー: {e}")
+
         return np.array(all_embeddings)
 
 
 class NeuroQuantumEmbedding(nn.Module):
     """
     ニューロQ 埋め込み層
-    
+
     Token → テキストエンベディング + 位置エンコーディング
-    
-    OpenAI Embedding APIを使用するオプションあり
+
+    Google Text Embedding APIを使用するオプションあり
     """
-    
+
     def __init__(
-        self, 
+        self,
         config: NeuroQuantumConfig,
-        use_openai_embedding: bool = False,
-        openai_api_key: Optional[str] = None,
-        openai_model: str = "text-embedding-3-large",
+        use_google_embedding: bool = False,
+        google_api_key: Optional[str] = None,
+        google_model: str = "models/text-embedding-004",
         tokenizer = None  # トークン化済みテキストを復元するためのトークナイザー
     ):
         super().__init__()
-        
-        self.use_openai_embedding = use_openai_embedding
+
+        self.use_google_embedding = use_google_embedding
+        self.use_external_embedding = False  # Google Embedding使用中かどうか
         self.config = config
         self.tokenizer = tokenizer
-        
-        if use_openai_embedding:
-            if not OPENAI_AVAILABLE:
-                warnings.warn("OpenAI APIが利用できません。従来の埋め込みを使用します。")
-                self.use_openai_embedding = False
-            
-            if self.use_openai_embedding:
-                self.openai_wrapper = OpenAIEmbeddingWrapper(
-                    api_key=openai_api_key,
-                    model=openai_model
+        self.embedding_wrapper = None  # GoogleEmbeddingWrapper
+
+        if use_google_embedding:
+            if not GOOGLE_GENAI_AVAILABLE:
+                warnings.warn("Google Generative AIが利用できません。従来の埋め込みを使用します。")
+                self.use_google_embedding = False
+
+            if self.use_google_embedding:
+                self.embedding_wrapper = GoogleEmbeddingWrapper(
+                    api_key=google_api_key,
+                    model=google_model
                 )
-                # OpenAIのエンベディング次元に合わせる
-                actual_embed_dim = self.openai_wrapper.embed_dim
+                self.use_external_embedding = True
+                actual_embed_dim = self.embedding_wrapper.embed_dim
                 if actual_embed_dim != config.embed_dim:
                     warnings.warn(
-                        f"OpenAI Embedding次元({actual_embed_dim})が設定次元({config.embed_dim})と異なります。"
+                        f"Google Embedding次元({actual_embed_dim})が設定次元({config.embed_dim})と異なります。"
                         f"射影層を追加します。"
                     )
                     self.projection = nn.Linear(actual_embed_dim, config.embed_dim)
                 else:
                     self.projection = nn.Identity()
-        else:
-            self.openai_wrapper = None
+
+        if not self.use_external_embedding:
+            self.embedding_wrapper = None
             self.projection = None
-        
-        if not self.use_openai_embedding:
+
+        if not self.use_external_embedding:
             # 従来のテキストエンベディング
             self.text_embedding = nn.Embedding(config.vocab_size, config.embed_dim)
-        
-        # 位置埋め込み（学習可能）- OpenAI使用時も必要
+
+        # 位置埋め込み（学習可能）- 外部Embedding使用時も必要
         self.position_embedding = nn.Embedding(config.max_seq_len, config.embed_dim)
         
         # ドロップアウト
@@ -618,7 +622,7 @@ class NeuroQuantumEmbedding(nn.Module):
         """
         Args:
             token_ids: (batch, seq) トークンID
-            texts: OpenAI Embedding使用時に必要。トークンIDに対応するテキストのリスト
+            texts: Google Embedding使用時に必要。トークンIDに対応するテキストのリスト
         """
         batch_size, seq_len = token_ids.shape
 
@@ -631,7 +635,7 @@ class NeuroQuantumEmbedding(nn.Module):
             token_ids = token_ids[:, :self.config.max_seq_len]
             seq_len = self.config.max_seq_len
 
-        if self.use_openai_embedding and self.openai_wrapper is not None:
+        if self.use_external_embedding and self.embedding_wrapper is not None:
             if texts is None:
                 if self.tokenizer is not None:
                     # トークンIDからテキストを復元
@@ -642,15 +646,15 @@ class NeuroQuantumEmbedding(nn.Module):
                         texts.append(text)
                 else:
                     raise ValueError(
-                        "OpenAI Embedding使用時は、texts引数またはtokenizerが必要です。"
+                        "外部Embedding使用時は、texts引数またはtokenizerが必要です。"
                     )
-            
-            # OpenAI APIからエンベディングを取得
-            # 注意: OpenAI APIは文全体のエンベディングを返すため、
+
+            # Google Text Embedding APIからエンベディングを取得
+            # 注意: APIは文全体のエンベディングを返すため、
             # トークン単位ではなく文単位で処理
             embeddings_list = []
             for text in texts:
-                embedding = self.openai_wrapper.get_embeddings([text])[0]
+                embedding = self.embedding_wrapper.get_embeddings([text])[0]
                 embeddings_list.append(embedding)
             
             # テンソルに変換
@@ -738,29 +742,30 @@ class NeuroQuantum(nn.Module):
     """
     
     def __init__(
-        self, 
+        self,
         config: NeuroQuantumConfig,
-        use_openai_embedding: bool = False,
-        openai_api_key: Optional[str] = None,
-        openai_model: str = "text-embedding-3-large",
+        use_google_embedding: bool = False,
+        google_api_key: Optional[str] = None,
+        google_model: str = "models/text-embedding-004",
         tokenizer = None
     ):
         super().__init__()
         self.config = config
-        self.use_openai_embedding = use_openai_embedding
-        
+        self.use_google_embedding = use_google_embedding
+        self.use_external_embedding = use_google_embedding
+
         # GPT標準: Text Embedding + Position Embedding
-        # OpenAI Embeddingを使用する場合はNeuroQuantumEmbeddingクラスを使用
-        if use_openai_embedding:
+        # Google Text Embeddingを使用する場合はNeuroQuantumEmbeddingクラスを使用
+        if self.use_external_embedding:
             self.embedding = NeuroQuantumEmbedding(
                 config=config,
-                use_openai_embedding=True,
-                openai_api_key=openai_api_key,
-                openai_model=openai_model,
+                use_google_embedding=use_google_embedding,
+                google_api_key=google_api_key,
+                google_model=google_model,
                 tokenizer=tokenizer
             )
             # 互換性のため、position_embeddingは保持
-            self.text_embedding = None  # OpenAI Embedding使用時は不要
+            self.text_embedding = None  # 外部Embedding使用時は不要
             self.position_embedding = self.embedding.position_embedding
         else:
             self.text_embedding = nn.Embedding(config.vocab_size, config.embed_dim)  # テキストエンベディング
@@ -825,8 +830,8 @@ class NeuroQuantum(nn.Module):
             seq = self.config.max_seq_len
 
         # ステップ1: トークンID → テキストエンベディング
-        if self.use_openai_embedding and self.embedding is not None:
-            # OpenAI Embeddingを使用
+        if self.use_external_embedding and self.embedding is not None:
+            # Google Text Embeddingを使用
             hidden_states = self.embedding(token_ids, texts=None)
         else:
             # Text Embedding: トークンIDをベクトルに変換（テキストエンベディング）
@@ -870,29 +875,29 @@ class NeuroQuantum(nn.Module):
 
 
 # ========================================
-# Part 7: トークナイザー（fugashi日本語形態素解析使用）
+# Part 7: トークナイザー（SentencePiece日本語サブワード使用）
 # ========================================
 
 class NeuroQuantumTokenizer:
     """
-    fugashi（MeCab）日本語形態素解析トークナイザー
+    SentencePiece 日本語サブワードトークナイザー
 
-    - 日本語形態素解析による高精度なトークン化
+    - SentencePieceによる高精度なサブワードトークン化（BPE/Unigram）
     - 語彙サイズを指定して学習可能（8000-32000推奨）
-    - モデルの保存・読み込みが可能（JSON形式）
-    - フォールバック: 文字単位トークナイザー（fugashi未インストール時）
+    - モデルの保存・読み込みが可能（.model形式）
+    - フォールバック: 文字単位トークナイザー（SentencePiece未インストール時）
     """
 
     def __init__(self, vocab_size: int = 16000, model_file: str = None):
         """
         Args:
             vocab_size: 語彙サイズ（デフォルト: 16000）
-            model_file: 既存の語彙ファイルパス（.json）（Noneの場合は新規学習）
+            model_file: 既存のSentencePieceモデルファイルパス（.model）（Noneの場合は新規学習）
         """
         self.vocab_size = vocab_size
         self.actual_vocab_size = None
         self.model_file = model_file
-        self.tagger = None
+        self.sp = None  # SentencePieceProcessor
 
         # 特殊トークン
         self.pad_token = '<pad>'
@@ -900,97 +905,103 @@ class NeuroQuantumTokenizer:
         self.bos_token = '<s>'
         self.eos_token = '</s>'
 
-        # 特殊トークンID
+        # 特殊トークンID（SentencePieceのデフォルト: unk=0, bos=1, eos=2, pad=-1）
+        # NeuroQ統一: pad=0, unk=1, bos=2, eos=3
         self.pad_id = 0
         self.unk_id = 1
         self.bos_id = 2
         self.eos_id = 3
 
-        # 語彙マッピング
+        # フォールバック用の語彙マッピング
         self.token_to_idx: Dict[str, int] = {}
         self.idx_to_token: Dict[int, str] = {}
-
-        # fugashiの初期化
-        if FUGASHI_AVAILABLE:
-            try:
-                self.tagger = fugashi.Tagger()
-            except Exception as e:
-                warnings.warn(f"fugashi Taggerの初期化に失敗: {e}")
-                self.tagger = None
 
         # 既存モデルの読み込み
         if model_file and os.path.exists(model_file):
             try:
-                self._load_vocab(model_file)
-                print(f"   ✅ 日本語トークナイザー読み込み: {model_file} (語彙サイズ: {self.actual_vocab_size})")
+                self._load_model(model_file)
+                print(f"   ✅ SentencePieceトークナイザー読み込み: {model_file} (語彙サイズ: {self.actual_vocab_size})")
             except Exception as e:
-                warnings.warn(f"トークナイザーモデルの読み込みに失敗: {e}。新規学習します。")
-                self._init_vocab()
+                warnings.warn(f"SentencePieceモデルの読み込みに失敗: {e}。フォールバックを使用します。")
+                self._init_fallback_vocab()
         else:
-            self._init_vocab()
+            self._init_fallback_vocab()
 
-    def _init_vocab(self):
-        """語彙を特殊トークンで初期化"""
+    def _load_model(self, path: str):
+        """SentencePieceモデルを読み込み"""
+        if not SENTENCEPIECE_AVAILABLE:
+            raise ImportError("sentencepieceがインストールされていません")
+
+        self.sp = spm.SentencePieceProcessor()
+        self.sp.Load(path)
+        self.actual_vocab_size = self.sp.GetPieceSize()
+        self.vocab_size = self.actual_vocab_size
+        self.model_file = path
+
+    def _init_fallback_vocab(self):
+        """フォールバック用の語彙を特殊トークンで初期化"""
         special_tokens = [self.pad_token, self.unk_token, self.bos_token, self.eos_token]
         self.token_to_idx = {token: i for i, token in enumerate(special_tokens)}
         self.idx_to_token = {i: token for token, i in self.token_to_idx.items()}
         self.actual_vocab_size = len(self.token_to_idx)
 
-    def _tokenize(self, text: str) -> List[str]:
-        """fugashiで形態素解析してトークンリストを返す"""
-        if self.tagger is not None:
-            words = self.tagger(text)
-            return [word.surface for word in words]
-        else:
-            # フォールバック: 文字単位
-            return list(text)
-
     def build_vocab(self, texts: List[str], min_freq: int = 2,
                     character_coverage: float = 0.9995, model_prefix: str = "neuroq_tokenizer"):
         """
-        fugashiで形態素解析して語彙を構築
+        SentencePieceモデルを学習して語彙を構築
 
         Args:
             texts: 学習テキストのリスト
-            min_freq: 最小頻度
-            character_coverage: 未使用（互換性のため保持）
+            min_freq: 未使用（互換性のため保持）
+            character_coverage: 文字カバレッジ（日本語は0.9995推奨）
             model_prefix: 保存時のファイルプレフィックス
         """
-        if not FUGASHI_AVAILABLE:
-            warnings.warn("fugashiが利用できません。フォールバックトークナイザーを使用します。")
+        if not SENTENCEPIECE_AVAILABLE:
+            warnings.warn("sentencepieceが利用できません。フォールバックトークナイザーを使用します。")
             self._build_vocab_fallback(texts, min_freq)
             return self
 
-        print(f"   🔤 fugashi（MeCab）で語彙構築中... (目標語彙サイズ: {self.vocab_size})")
+        print(f"   🔤 SentencePiece で語彙構築中... (目標語彙サイズ: {self.vocab_size})")
 
-        # 形態素の頻度をカウント
-        token_freq = Counter()
-        for text in texts:
-            morphemes = self._tokenize(text)
-            token_freq.update(morphemes)
+        import tempfile
 
-        # 特殊トークンで初期化
-        self._init_vocab()
+        # 学習テキストを一時ファイルに書き出し
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.txt', delete=False, encoding='utf-8') as f:
+            for text in texts:
+                text = text.strip()
+                if text:
+                    f.write(text + '\n')
+            tmp_corpus_path = f.name
 
-        # 頻度順にトークンを追加（語彙サイズ制限まで）
-        max_tokens = self.vocab_size - len(self.token_to_idx)
-        for token, freq in token_freq.most_common():
-            if len(self.token_to_idx) >= self.vocab_size:
-                break
-            if freq >= min_freq and token not in self.token_to_idx:
-                idx = len(self.token_to_idx)
-                self.token_to_idx[token] = idx
-                self.idx_to_token[idx] = token
+        try:
+            # SentencePieceモデルを学習
+            spm.SentencePieceTrainer.Train(
+                input=tmp_corpus_path,
+                model_prefix=model_prefix,
+                vocab_size=self.vocab_size,
+                model_type='unigram',
+                character_coverage=character_coverage,
+                pad_id=self.pad_id,
+                unk_id=self.unk_id,
+                bos_id=self.bos_id,
+                eos_id=self.eos_id,
+                pad_piece=self.pad_token,
+                unk_piece=self.unk_token,
+                bos_piece=self.bos_token,
+                eos_piece=self.eos_token,
+                user_defined_symbols=['<USER>', '<ASSISTANT>', '<SYSTEM>'],
+                train_extremely_large_corpus=False,
+            )
 
-        self.actual_vocab_size = len(self.token_to_idx)
-        self.vocab_size = self.actual_vocab_size
+            # 学習したモデルを読み込み
+            model_path = model_prefix + '.model'
+            self._load_model(model_path)
 
-        # 語彙をJSONファイルに保存
-        vocab_file = model_prefix + '.json'
-        self._save_vocab(vocab_file)
-        self.model_file = vocab_file
+            print(f"   ✅ SentencePiece語彙構築完了 (語彙サイズ: {self.actual_vocab_size})")
 
-        print(f"   ✅ 日本語語彙構築完了 (語彙サイズ: {self.actual_vocab_size})")
+        finally:
+            # 一時ファイルを削除
+            os.unlink(tmp_corpus_path)
 
         return self
 
@@ -1001,7 +1012,7 @@ class NeuroQuantumTokenizer:
         for text in texts:
             char_freq.update(text)
 
-        self._init_vocab()
+        self._init_fallback_vocab()
 
         for char, freq in char_freq.most_common():
             if len(self.token_to_idx) >= self.vocab_size:
@@ -1015,69 +1026,188 @@ class NeuroQuantumTokenizer:
         self.vocab_size = self.actual_vocab_size
         print(f"   ✅ 語彙サイズ: {self.actual_vocab_size}")
 
-    def encode(self, text: str, add_special: bool = True) -> List[int]:
-        """テキストをトークンIDのリストに変換"""
-        morphemes = self._tokenize(text)
+    def encode(self, text: str, add_special: bool = True, verbose: bool = False) -> List[int]:
+        """
+        テキストをトークンIDのリストに変換
 
-        tokens = []
-        if add_special:
-            tokens.append(self.bos_id)
-        for morpheme in morphemes:
-            tokens.append(self.token_to_idx.get(morpheme, self.unk_id))
-        if add_special:
-            tokens.append(self.eos_id)
+        Args:
+            text: 入力テキスト
+            add_special: 特殊トークン（BOS/EOS）を追加するか
+            verbose: 詳細ログを出力するか
+
+        Returns:
+            トークンIDのリスト
+        """
+        import logging
+        logger = logging.getLogger(__name__)
+
+        if self.sp is not None:
+            # SentencePieceでエンコード
+            if add_special:
+                tokens = [self.bos_id] + self.sp.EncodeAsIds(text) + [self.eos_id]
+            else:
+                tokens = self.sp.EncodeAsIds(text)
+        else:
+            # フォールバック：文字単位
+            chars = list(text)
+            tokens = []
+            if add_special:
+                tokens.append(self.bos_id)
+            for ch in chars:
+                tokens.append(self.token_to_idx.get(ch, self.unk_id))
+            if add_special:
+                tokens.append(self.eos_id)
+
+        if verbose:
+            logger.debug(f"[Encode] 入力テキスト: '{text[:50]}...'" if len(text) > 50 else f"[Encode] 入力テキスト: '{text}'")
+            logger.debug(f"[Encode] トークン数: {len(tokens)}")
+            logger.debug(f"[Encode] トークンID: {tokens[:20]}{'...' if len(tokens) > 20 else ''}")
+
         return tokens
 
-    def decode(self, token_ids: List[int], skip_special: bool = True) -> str:
-        """トークンIDのリストをテキストに復元"""
-        tokens = []
-        special_ids = {self.pad_id, self.unk_id, self.bos_id, self.eos_id}
-        for t in token_ids:
-            if skip_special and t in special_ids:
-                continue
-            token = self.idx_to_token.get(t, self.unk_token)
-            if token not in [self.pad_token, self.unk_token, self.bos_token, self.eos_token]:
-                tokens.append(token)
-        return ''.join(tokens)
+    def decode(self, token_ids: List[int], skip_special: bool = True, verbose: bool = False) -> str:
+        """
+        トークンIDのリストをテキストに復元
 
-    def _save_vocab(self, path: str):
-        """語彙をJSONファイルに保存"""
-        data = {
-            'tokenizer_type': 'fugashi',
-            'token_to_idx': self.token_to_idx,
-            'vocab_size': self.vocab_size,
-            'actual_vocab_size': self.actual_vocab_size,
+        Args:
+            token_ids: トークンIDのリスト
+            skip_special: 特殊トークンをスキップするか
+            verbose: 詳細ログを出力するか
+
+        Returns:
+            デコードされたテキスト
+        """
+        import logging
+        logger = logging.getLogger(__name__)
+
+        if self.sp is not None:
+            # 特殊トークンをフィルタリング
+            if skip_special:
+                special_ids = {self.pad_id, self.unk_id, self.bos_id, self.eos_id}
+                filtered_ids = [t for t in token_ids if t not in special_ids]
+            else:
+                filtered_ids = list(token_ids)
+            result = self.sp.DecodeIds(filtered_ids)
+        else:
+            # フォールバック：文字単位
+            tokens = []
+            special_ids = {self.pad_id, self.unk_id, self.bos_id, self.eos_id}
+            for t in token_ids:
+                if skip_special and t in special_ids:
+                    continue
+                token = self.idx_to_token.get(t, self.unk_token)
+                if token not in [self.pad_token, self.unk_token, self.bos_token, self.eos_token]:
+                    tokens.append(token)
+            result = ''.join(tokens)
+
+        if verbose:
+            logger.debug(f"[Decode] 入力トークン数: {len(token_ids)}")
+            logger.debug(f"[Decode] 出力テキスト: '{result[:100]}...'" if len(result) > 100 else f"[Decode] 出力テキスト: '{result}'")
+
+        return result
+
+    def get_tokenization_info(self, text: str) -> Dict:
+        """
+        トークン化の詳細情報を取得
+
+        Args:
+            text: 入力テキスト
+
+        Returns:
+            トークン化の詳細情報を含む辞書
+        """
+        tokens = self.encode(text, add_special=False)
+
+        info = {
+            'input_text': text,
+            'input_length': len(text),
+            'token_count': len(tokens),
+            'token_ids': tokens,
+            'compression_ratio': len(text) / len(tokens) if tokens else 0,
         }
-        with open(path, 'w', encoding='utf-8') as f:
-            json.dump(data, f, ensure_ascii=False, indent=2)
 
-    def _load_vocab(self, path: str):
-        """語彙をJSONファイルから読み込み"""
-        with open(path, 'r', encoding='utf-8') as f:
-            data = json.load(f)
-        self.token_to_idx = data['token_to_idx']
-        self.idx_to_token = {int(i): token for token, i in self.token_to_idx.items()}
-        self.vocab_size = data.get('vocab_size', len(self.token_to_idx))
-        self.actual_vocab_size = data.get('actual_vocab_size', len(self.token_to_idx))
-        self.model_file = path
+        if self.sp is not None:
+            info['tokens'] = self.sp.EncodeAsPieces(text)
+        else:
+            info['tokens'] = [self.idx_to_token.get(t, self.unk_token) for t in tokens]
+        info['unk_count'] = sum(1 for t in tokens if t == self.unk_id)
+        info['unk_rate'] = info['unk_count'] / len(tokens) if tokens else 0
+
+        return info
+
+    def print_tokenization(self, text: str):
+        """
+        トークン化の詳細をプリント
+
+        Args:
+            text: 入力テキスト
+        """
+        info = self.get_tokenization_info(text)
+        print("=" * 60)
+        print("🔤 トークン化詳細")
+        print("=" * 60)
+        print(f"入力テキスト: '{info['input_text']}'")
+        print(f"入力文字数: {info['input_length']}")
+        print(f"トークン数: {info['token_count']}")
+        print(f"圧縮率: {info['compression_ratio']:.2f}")
+        print(f"UNKトークン数: {info['unk_count']} ({info['unk_rate']*100:.1f}%)")
+        print("-" * 60)
+        print("トークン分割:")
+        for i, (tid, token) in enumerate(zip(info['token_ids'], info['tokens'])):
+            print(f"  [{i:3d}] ID={tid:5d} -> '{token}'")
+        print("=" * 60)
 
     def save(self, path: str):
-        """保存"""
-        json_path = path if path.endswith('.json') else path + '.json'
-        self._save_vocab(json_path)
+        """
+        モデルを保存
+
+        SentencePieceモデルの場合は.modelファイルをコピー。
+        フォールバックの場合はJSON形式で保存。
+        """
+        if self.sp is not None and self.model_file:
+            # SentencePieceモデルファイルをコピー
+            import shutil
+            target = path if path.endswith('.model') else path + '.model'
+            if os.path.abspath(self.model_file) != os.path.abspath(target):
+                shutil.copy2(self.model_file, target)
+        else:
+            # フォールバック：JSON保存
+            json_path = path if path.endswith('.json') else path + '.json'
+            data = {
+                'tokenizer_type': 'sentencepiece_fallback',
+                'token_to_idx': self.token_to_idx,
+                'vocab_size': self.vocab_size,
+                'actual_vocab_size': self.actual_vocab_size,
+            }
+            with open(json_path, 'w', encoding='utf-8') as f:
+                json.dump(data, f, ensure_ascii=False, indent=2)
 
     def load(self, path: str):
         """読み込み"""
-        # .json ファイルを探す
-        json_file_path = path + '.json' if not path.endswith('.json') else path
-
-        if os.path.exists(json_file_path):
-            self._load_vocab(json_file_path)
+        # .model ファイルを試す
+        model_path = path if path.endswith('.model') else path + '.model'
+        if os.path.exists(model_path) and SENTENCEPIECE_AVAILABLE:
+            self._load_model(model_path)
             return self
 
-        # .json なしのパスも試す
-        if not path.endswith('.json') and os.path.exists(path):
-            self._load_vocab(path)
+        # .model なしのパスも試す（拡張子なしで .model がある場合）
+        if not path.endswith('.model') and os.path.exists(path):
+            try:
+                self._load_model(path)
+                return self
+            except Exception:
+                pass
+
+        # JSON フォールバック
+        json_path = path + '.json' if not path.endswith('.json') else path
+        if os.path.exists(json_path):
+            with open(json_path, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+            self.token_to_idx = data['token_to_idx']
+            self.idx_to_token = {int(i): token for token, i in self.token_to_idx.items()}
+            self.vocab_size = data.get('vocab_size', len(self.token_to_idx))
+            self.actual_vocab_size = data.get('actual_vocab_size', len(self.token_to_idx))
+            self.model_file = json_path
             return self
 
         raise FileNotFoundError(f"トークナイザーモデルが見つかりません: {path}")
@@ -1090,24 +1220,24 @@ class NeuroQuantumTokenizer:
 class NeuroQuantumAI:
     """
     ニューロQ AI
-    
+
     QBNN-LLM による生成AI
-    
+
     ニューロン数（hidden_dim）を指定可能
-    
-    OpenAI Embedding使用例:
-        # OpenAI Embeddingを使用する場合
+
+    Google Text Embedding使用例:
+        # Google Text Embeddingを使用する場合
         ai = NeuroQuantumAI(
-            embed_dim=3072,  # text-embedding-3-largeの次元
-            use_openai_embedding=True,
-            openai_api_key="sk-...",  # または環境変数OPENAI_API_KEY
-            openai_model="text-embedding-3-large"
+            embed_dim=768,  # text-embedding-004の次元
+            use_google_embedding=True,
+            google_api_key="AIza...",  # または環境変数GOOGLE_API_KEY
+            google_model="models/text-embedding-004"
         )
-        
+
         # 従来の埋め込みを使用する場合（デフォルト）
         ai = NeuroQuantumAI(embed_dim=48)
     """
-    
+
     def __init__(
         self,
         embed_dim: int = 48,
@@ -1117,9 +1247,9 @@ class NeuroQuantumAI:
         max_seq_len: int = 128,
         dropout: float = 0.1,
         lambda_entangle: float = 0.5,
-        use_openai_embedding: bool = False,  # OpenAI Embeddingを使用するか
-        openai_api_key: Optional[str] = None,  # OpenAI APIキー
-        openai_model: str = "text-embedding-3-large",  # OpenAI Embeddingモデル
+        use_google_embedding: bool = False,  # Google Text Embeddingを使用するか
+        google_api_key: Optional[str] = None,  # Google APIキー
+        google_model: str = "models/text-embedding-004",  # Google Embeddingモデル
     ):
         # デバイス選択: MPS (Apple Silicon) > CUDA > CPU
         if torch.backends.mps.is_available():
@@ -1131,7 +1261,7 @@ class NeuroQuantumAI:
         else:
             self.device = torch.device("cpu")
             print("💻 CPU を使用")
-        
+
         self.embed_dim = embed_dim
         self.hidden_dim = hidden_dim
         self.num_heads = num_heads
@@ -1139,10 +1269,10 @@ class NeuroQuantumAI:
         self.max_seq_len = max_seq_len
         self.dropout = dropout
         self.lambda_entangle = lambda_entangle
-        self.use_openai_embedding = use_openai_embedding
-        self.openai_api_key = openai_api_key or os.getenv("OPENAI_API_KEY")
-        self.openai_model = openai_model
-        
+        self.use_google_embedding = use_google_embedding
+        self.google_api_key = google_api_key or os.getenv("GOOGLE_API_KEY")
+        self.google_model = google_model
+
         self.tokenizer: Optional[NeuroQuantumTokenizer] = None
         self.model: Optional[NeuroQuantum] = None
         self.config: Optional[NeuroQuantumConfig] = None
@@ -1154,26 +1284,28 @@ class NeuroQuantumAI:
             self.quantum_computer = QuantumComputer("NeuroQuantum-QC")
             print("⚛️  量子回路シミュレーターを初期化しました")
     
-    def train(self, texts: List[str], epochs: int = 50, batch_size: int = 16, 
+    def train(self, texts: List[str], epochs: int = 50, batch_size: int = 16,
               lr: float = 0.001, seq_len: int = 64, vocab_size: int = 16000):
         """学習"""
         print("\n" + "=" * 70)
         print("📚 ニューロQ 学習開始")
         print("=" * 70)
-        
-        # トークナイザー構築（fugashi日本語形態素解析使用）
+
+        # トークナイザー構築（SentencePiece日本語サブワード使用）
         print("\n🔤 トークナイザー構築...")
 
-        # 既存の語彙ファイルを探す
+        # 既存のSentencePieceモデルファイルを探す
         tokenizer_model_paths = [
-            "neuroq_tokenizer.json",  # カレントディレクトリ（推奨）
-            "neuroq_tokenizer_8k.json",  # カレントディレクトリ（旧名称）
-            "../neuroq_tokenizer.json",  # 親ディレクトリ
-            "../neuroq_tokenizer_8k.json",  # 親ディレクトリ（旧名称）
-            os.path.join(os.path.dirname(__file__), "neuroq_tokenizer.json"),  # スクリプトと同じディレクトリ
-            os.path.join(os.path.dirname(__file__), "neuroq_tokenizer_8k.json"),  # スクリプトと同じディレクトリ（旧名称）
-            os.path.join(os.path.dirname(os.path.dirname(__file__)), "neuroq_tokenizer.json"),  # 親の親ディレクトリ
-            os.path.join(os.path.dirname(os.path.dirname(__file__)), "neuroq_tokenizer_8k.json"),  # 親の親ディレクトリ（旧名称）
+            "neuroq_tokenizer.model",  # カレントディレクトリ（推奨）
+            "neuroq_tokenizer_8k.model",  # カレントディレクトリ（8k版）
+            "neuroq_tokenizer_ja.model",  # カレントディレクトリ（日本語版）
+            "neuroq_tokenizer_oasst1_ja.model",  # カレントディレクトリ（OASST1日本語版）
+            "../neuroq_tokenizer.model",  # 親ディレクトリ
+            "../neuroq_tokenizer_8k.model",  # 親ディレクトリ（8k版）
+            os.path.join(os.path.dirname(__file__), "neuroq_tokenizer.model"),  # スクリプトと同じディレクトリ
+            os.path.join(os.path.dirname(__file__), "neuroq_tokenizer_8k.model"),  # スクリプトと同じディレクトリ（8k版）
+            os.path.join(os.path.dirname(__file__), "neuroq_tokenizer_ja.model"),  # スクリプトと同じディレクトリ（日本語版）
+            os.path.join(os.path.dirname(os.path.dirname(__file__)), "neuroq_tokenizer.model"),  # 親の親ディレクトリ
         ]
 
         existing_model = None
@@ -1183,36 +1315,31 @@ class NeuroQuantumAI:
                 break
 
         if existing_model:
-            # 既存の語彙ファイルを使用
-            print(f"   既存の日本語トークナイザーを使用: {existing_model}")
+            # 既存のSentencePieceモデルを使用
+            print(f"   既存のSentencePieceモデルを使用: {existing_model}")
             self.tokenizer = NeuroQuantumTokenizer(vocab_size=vocab_size, model_file=existing_model)
         else:
-            # 新規に語彙を構築
-            print("   新規に語彙を構築します...")
+            # 新規にSentencePieceモデルを学習
+            print("   新規にSentencePieceモデルを学習します...")
             self.tokenizer = NeuroQuantumTokenizer(vocab_size=vocab_size)
             self.tokenizer.build_vocab(texts, model_prefix="neuroq_tokenizer", min_freq=2)
 
         print(f"   語彙サイズ: {self.tokenizer.actual_vocab_size}")
-        
+
         # モデル構築
         print("\n🧠 ニューロQモデル構築...")
-        
-        # OpenAI Embedding使用時は埋め込み次元を調整
-        if self.use_openai_embedding:
-            # OpenAI Embeddingの次元を使用
-            # モデルごとのデフォルト次元
-            if "ada-002" in self.openai_model:
-                actual_embed_dim = 1536
-            elif "embedding-3-large" in self.openai_model:
-                actual_embed_dim = 3072
-            elif "embedding-3-small" in self.openai_model:
-                actual_embed_dim = 1536
+
+        # Google Text Embedding使用時は埋め込み次元を調整
+        if self.use_google_embedding:
+            # Google Embeddingの次元を使用
+            if "text-embedding-004" in self.google_model:
+                actual_embed_dim = 768
             else:
-                actual_embed_dim = 3072  # デフォルト
+                actual_embed_dim = 768  # デフォルト
             if self.embed_dim != actual_embed_dim:
-                print(f"   OpenAI Embedding次元({actual_embed_dim})に合わせて調整")
+                print(f"   Google Embedding次元({actual_embed_dim})に合わせて調整")
                 self.embed_dim = actual_embed_dim
-        
+
         self.config = NeuroQuantumConfig(
             vocab_size=self.tokenizer.actual_vocab_size,
             embed_dim=self.embed_dim,
@@ -1223,18 +1350,18 @@ class NeuroQuantumAI:
             dropout=self.dropout,
             lambda_entangle=self.lambda_entangle,
         )
-        
+
         self.model = NeuroQuantum(
             config=self.config,
-            use_openai_embedding=self.use_openai_embedding,
-            openai_api_key=self.openai_api_key,
-            openai_model=self.openai_model,
+            use_google_embedding=self.use_google_embedding,
+            google_api_key=self.google_api_key,
+            google_model=self.google_model,
             tokenizer=self.tokenizer
         ).to(self.device)
-        
+
         print(f"\n📊 モデル構成:")
-        if self.use_openai_embedding:
-            print(f"   埋め込み: OpenAI Embedding ({self.openai_model})")
+        if self.use_google_embedding:
+            print(f"   埋め込み: Google Text Embedding ({self.google_model})")
         else:
             print(f"   埋め込み: 従来のEmbedding層")
         print(f"   埋め込み次元: {self.embed_dim}")
