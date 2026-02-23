@@ -2,10 +2,9 @@
 """
 NeuroQ モデル設定ファイル
 
-OpenAI text-embedding-3 の次元数に対応したモデル設定
-
-text-embedding-3-small: 1536次元
-text-embedding-3-large: 3072次元
+モデルサイズ別の設定:
+- NeuroQ-Small: embed_dim=256 (軽量モデル)
+- NeuroQ-Large: embed_dim=384 (標準モデル)
 
 使用例:
     from neuroq_model_configs import NEUROQ_SMALL, NEUROQ_LARGE, create_model
@@ -150,10 +149,10 @@ def print_model_comparison():
         print(f"   メモリ使用量:  {info['memory_mb']:.1f} MB (float32)")
     
     print("\n" + "=" * 70)
-    print("📋 OpenAI text-embedding-3 との対応")
+    print("📋 モデル構成")
     print("=" * 70)
-    print(f"   text-embedding-3-small → NeuroQ-Small (embed_dim=1536)")
-    print(f"   text-embedding-3-large → NeuroQ-Large (embed_dim=3072)")
+    print(f"   NeuroQ-Small: embed_dim=256 (軽量モデル)")
+    print(f"   NeuroQ-Large: embed_dim=384 (標準モデル)")
     print("=" * 70)
 
 

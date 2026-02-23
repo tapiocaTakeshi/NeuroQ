@@ -704,7 +704,15 @@ class NeuroQuantumBrain(nn.Module):
             (batch, seq, vocab_size) ロジット（後処理ステップ後の出力）
         """
         batch, seq = x.shape
-        
+
+        # 境界チェック: トークンIDを有効範囲 [0, vocab_size-1] にクランプ
+        x = x.clamp(0, self.vocab_size - 1)
+
+        # シーケンス長をmax_seq_lenにクランプ
+        if seq > self.max_seq_len:
+            x = x[:, :self.max_seq_len]
+            seq = self.max_seq_len
+
         # ステップ1: トークンID → テキストエンベディング
         if self.use_openai_embedding and self.openai_wrapper is not None:
             # OpenAI Embeddingを使用

@@ -39,12 +39,17 @@ def get_tokenizer_path():
     # このファイルの親ディレクトリ（/home/user/）から探す
     current_dir = Path(__file__).parent
 
-    # 候補パスをチェック
+    # 候補パスをチェック（SentencePiece .model 形式を優先）
     candidate_paths = [
-        current_dir / 'NeuroQ' / 'neuroq_tokenizer.json',
+        current_dir / 'neuroq_tokenizer.model',
+        current_dir / 'neuroq_tokenizer_8k.model',
+        current_dir / 'neuroq_tokenizer_ja.model',
+        current_dir / 'neuroq_tokenizer_oasst1_ja.model',
+        current_dir / 'NeuroQ' / 'neuroq_tokenizer.model',
+        current_dir / 'NeuroQ' / 'neuroq_tokenizer_8k.model',
+        # JSON フォールバック
         current_dir / 'neuroq_tokenizer.json',
-        current_dir / 'NeuroQ' / 'neuroq_tokenizer_8k.json',
-        current_dir / 'neuroq_tokenizer_8k.json',
+        current_dir / 'NeuroQ' / 'neuroq_tokenizer.json',
     ]
 
     for path in candidate_paths:
@@ -52,7 +57,7 @@ def get_tokenizer_path():
             return str(path)
 
     # 見つからない場合はデフォルトパスを返す
-    return str(current_dir / 'NeuroQ' / 'neuroq_tokenizer.json')
+    return str(current_dir / 'neuroq_tokenizer.model')
 
 
 def load_pretrained_tokenizer(tokenizer_path=None, verbose=True):

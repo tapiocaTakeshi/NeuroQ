@@ -28,10 +28,13 @@ import numpy as np
 import math
 import json
 import os
+import logging
 from collections import Counter
 import re
 from typing import List, Dict, Optional, Tuple
 import warnings
+
+logger = logging.getLogger(__name__)
 
 # sentencepiece（日本語サブワードトークナイザー用）
 try:
@@ -334,22 +337,27 @@ class QBNNAttention(nn.Module):
             
             # アテンション計算（transformersライブラリ）
             attn_output = self.attention(hidden_states, layer_past=None, use_cache=False, output_attentions=False)[0]
-            
+
             # QBNN拡張: 量子もつれ補正
             batch_size, seq_len, _ = x.shape
-            Q = self.attention.c_attn(x).split(self.embed_dim, dim=-1)[0]  # Qプロジェクション
-            K = self.attention.c_attn(x).split(self.embed_dim, dim=-1)[1]  # Kプロジェクション
-            
+            qkv = self.attention.c_attn(x)
+            Q, K, V = qkv.split(self.embed_dim, dim=-1)
+
             Q = Q.view(batch_size, seq_len, self.num_heads, self.head_dim).transpose(1, 2)
             K = K.view(batch_size, seq_len, self.num_heads, self.head_dim).transpose(1, 2)
-            
+            V = V.view(batch_size, seq_len, self.num_heads, self.head_dim).transpose(1, 2)
+
             Q_norm = torch.tanh(Q)
             K_norm = torch.tanh(K)
-            # もつれ補正項
+            # もつれ補正項: delta は (batch, heads, seq, seq) のアテンションスコア補正
             delta = torch.einsum('bhid,hde,bhje->bhij', Q_norm, self.J_attn, K_norm)
-            
-            # 補正を適用（簡易版：出力に加算）
-            attn_output = attn_output + self.lambda_attn * delta.view(batch_size, seq_len, self.embed_dim)
+
+            # delta を softmax で重みに変換し、V に適用して (batch, seq, embed_dim) の補正ベクトルを得る
+            delta_weights = F.softmax(delta, dim=-1)
+            correction = torch.matmul(delta_weights, V)
+            correction = correction.transpose(1, 2).contiguous().view(batch_size, seq_len, self.embed_dim)
+
+            attn_output = attn_output + self.lambda_attn * correction
             
             return attn_output
         else:
@@ -780,15 +788,23 @@ class NeuroQuantum(nn.Module):
         # GPT標準: Final LayerNorm
         self.final_norm = nn.LayerNorm(config.embed_dim)
         
-        # GPT標準: Output Head (weight tying可能だが、ここでは独立)
+        # GPT標準: Output Head (weight tying: 埋め込みと出力ヘッドの重み共有)
         self.output_head = nn.Linear(config.embed_dim, config.vocab_size, bias=False)
-        
+
         # GPT標準: Embedding Dropout
         self.dropout = nn.Dropout(config.dropout)
-        
+
+        # Causal Mask をバッファとしてキャッシュ（毎回再生成を回避）
+        causal_mask = torch.tril(torch.ones(config.max_seq_len, config.max_seq_len))
+        self.register_buffer('causal_mask', causal_mask.unsqueeze(0).unsqueeze(0))
+
         # パラメータ初期化（GPT標準）
         self.apply(self._init_weights)
-        
+
+        # Weight Tying: 埋め込みと出力ヘッドの重み共有（パラメータ効率化）
+        if self.text_embedding is not None:
+            self.output_head.weight = self.text_embedding.weight
+
         # モデル情報
         self.num_params = sum(p.numel() for p in self.parameters())
     
@@ -844,9 +860,9 @@ class NeuroQuantum(nn.Module):
             # 埋め込みの合成 + Dropout
             hidden_states = self.dropout(text_embeds + pos_embeds)
         
-        # Causal Mask生成（maskがNoneの場合）
+        # Causal Mask（キャッシュ済みバッファから切り出し）
         if mask is None:
-            mask = torch.tril(torch.ones(seq, seq, device=token_ids.device)).unsqueeze(0).unsqueeze(0)
+            mask = self.causal_mask[:, :, :seq, :seq]
         
         # ステップ2: テキストエンベディング → GPT型デコーダーのみのTransformer
         # N個のGPT Decoder Blocks（Pre-norm + Multi-Head Causal Self-Attention + FFN）
@@ -1038,9 +1054,6 @@ class NeuroQuantumTokenizer:
         Returns:
             トークンIDのリスト
         """
-        import logging
-        logger = logging.getLogger(__name__)
-
         if self.sp is not None:
             # SentencePieceでエンコード
             if add_special:
@@ -1077,9 +1090,6 @@ class NeuroQuantumTokenizer:
         Returns:
             デコードされたテキスト
         """
-        import logging
-        logger = logging.getLogger(__name__)
-
         if self.sp is not None:
             # 特殊トークンをフィルタリング
             sp_vocab_size = self.sp.GetPieceSize()

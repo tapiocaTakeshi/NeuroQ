@@ -1,5 +1,6 @@
 import os
 import sys
+import math
 import torch
 import torch.nn as nn
 from torch.utils.data import Dataset, DataLoader
@@ -152,12 +153,26 @@ def train():
     
     optimizer = torch.optim.AdamW(model.parameters(), lr=LEARNING_RATE, weight_decay=0.01)
     criterion = nn.CrossEntropyLoss(ignore_index=-100)
-    
+
+    # Learning rate warmup + cosine decay schedule
+    total_steps = len(dataloader) * EPOCHS
+    warmup_steps = min(total_steps // 10, 200)  # 10% of total or 200 steps
+
+    def lr_lambda(step):
+        if step < warmup_steps:
+            return step / max(1, warmup_steps)
+        progress = (step - warmup_steps) / max(1, total_steps - warmup_steps)
+        return 0.5 * (1.0 + math.cos(math.pi * progress))
+
+    scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda)
+
     trainable_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
     print(f"Model architecture: d_model={EMBED_DIM}, layers={NUM_LAYERS}, vocab={VOCAB_SIZE}")
     print(f"Total trainable parameters: {trainable_params:,}")
-    
+    print(f"LR schedule: warmup={warmup_steps} steps, total={total_steps} steps")
+
     # 3. Training
+    global_step = 0
     for epoch in range(EPOCHS):
         total_loss = 0
         optimizer.zero_grad()
@@ -181,10 +196,12 @@ def train():
             if ((batch_idx + 1) % ACCUMULATION_STEPS == 0) or (batch_idx + 1 == len(dataloader)):
                 torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
                 optimizer.step()
+                scheduler.step()
+                global_step += 1
                 optimizer.zero_grad()
-            
+
             total_loss += loss.item() * ACCUMULATION_STEPS # Original loss scaling for logging
-            progress.set_postfix({'loss': f"{loss.item() * ACCUMULATION_STEPS:.4f}"})
+            progress.set_postfix({'loss': f"{loss.item() * ACCUMULATION_STEPS:.4f}", 'lr': f"{scheduler.get_last_lr()[0]:.2e}"})
             
         avg_loss = total_loss / len(dataloader)
         print(f"Epoch {epoch+1} completed | Average Loss: {avg_loss:.4f}")
