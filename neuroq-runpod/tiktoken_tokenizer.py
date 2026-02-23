@@ -51,7 +51,7 @@ class TikTokenTokenizer:
 
         # 特殊トークンID
         # max_vocab制限時は、特殊トークンIDが範囲内に収まるようにする
-        # （SentencePieceと同じ規約: pad=0, unk=1, bos=2, eos=3）
+        # （fugashiと同じ規約: pad=0, unk=1, bos=2, eos=3）
         if max_vocab and max_vocab < self.vocab_size:
             # 制限された語彙サイズの場合、範囲内の小さな値を使用
             self.pad_id = 0

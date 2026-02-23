@@ -23,11 +23,11 @@ neuroq_runpod_dir = str(Path(__file__).parent / "neuroq-runpod")
 if neuroq_runpod_dir not in sys.path:
     sys.path.insert(0, neuroq_runpod_dir)
 
-# SentencePiece
+# fugashi
 try:
-    import sentencepiece as spm
+    import fugashi
 except ImportError:
-    print("sentencepiece がインストールされていません。pip install sentencepiece を実行してください。")
+    print("fugashi がインストールされていません。pip install fugashi unidic-lite を実行してください。")
     sys.exit(1)
 
 
@@ -74,16 +74,23 @@ def load_conversation_data(file_path: str) -> List[str]:
 
 
 class SimpleTokenizer:
-    """SentencePiece を使用したトークナイザー"""
+    """fugashi を使用した日本語形態素解析トークナイザー"""
 
     def __init__(self, model_path: str):
-        self.sp = spm.SentencePieceProcessor()
-        self.sp.load(model_path)
-        self.vocab_size = self.sp.get_piece_size()
-        self.pad_id = self.sp.pad_id()
-        self.unk_id = self.sp.unk_id()
-        self.bos_id = self.sp.bos_id()
-        self.eos_id = self.sp.eos_id()
+        import json
+        self.tagger = fugashi.Tagger()
+
+        # 語彙ファイル（JSON）を読み込み
+        with open(model_path, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+
+        self.vocab = data['vocab']
+        self.id_to_token = {v: k for k, v in self.vocab.items()}
+        self.vocab_size = len(self.vocab)
+        self.pad_id = self.vocab.get('<pad>', 0)
+        self.unk_id = self.vocab.get('<unk>', 1)
+        self.bos_id = self.vocab.get('<s>', 2)
+        self.eos_id = self.vocab.get('</s>', 3)
 
         print(f"トークナイザー読み込み完了")
         print(f"  語彙サイズ: {self.vocab_size}")
@@ -91,10 +98,11 @@ class SimpleTokenizer:
         print(f"  BOS ID: {self.bos_id}, EOS ID: {self.eos_id}")
 
     def encode(self, text: str) -> List[int]:
-        return self.sp.encode(text, out_type=int)
+        words = self.tagger(text)
+        return [self.vocab.get(word.surface, self.unk_id) for word in words]
 
     def decode(self, tokens: List[int]) -> str:
-        return self.sp.decode(tokens)
+        return ''.join([self.id_to_token.get(tid, '<unk>') for tid in tokens])
 
 
 class SimpleTransformer(nn.Module):
@@ -459,7 +467,7 @@ def main():
     else:
         data_path = "data/oasst1_ja_conversations.txt"
 
-    tokenizer_path = "neuroq_tokenizer_oasst1_ja.model"
+    tokenizer_path = "neuroq_tokenizer_oasst1_ja.json"
     checkpoint_path = "checkpoints/oasst1_ja_model.pt"
 
     print(f"学習データ: {data_path}")

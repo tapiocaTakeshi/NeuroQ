@@ -18,9 +18,9 @@ if current_dir not in sys.path:
     sys.path.insert(0, current_dir)
 
 try:
-    import sentencepiece as spm
+    import fugashi
 except ImportError:
-    print("sentencepiece がインストールされていません")
+    print("fugashi がインストールされていません")
     sys.exit(1)
 
 from train_oasst1_ja import SimpleTransformer, SimpleTokenizer

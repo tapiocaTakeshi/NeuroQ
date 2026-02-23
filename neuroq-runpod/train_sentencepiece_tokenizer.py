@@ -1,28 +1,29 @@
 #!/usr/bin/env python3
 """
-SentencePiece トークナイザー学習スクリプト
-===========================================
+日本語トークナイザー学習スクリプト（fugashi/MeCab）
+====================================================
 
-vocab_size=8000 の SentencePiece トークナイザーを学習します。
+vocab_size=8000 の日本語形態素解析トークナイザーを学習します。
 
 使い方:
     python train_sentencepiece_tokenizer.py
 
 生成されるファイル:
-    - neuroq_tokenizer.model: SentencePieceモデル（このファイルを使う）
-    - neuroq_tokenizer.vocab: 語彙リスト（参考用）
+    - neuroq_tokenizer.json: 語彙ファイル（このファイルを使う）
 """
 
 import os
 import sys
+import json
 from typing import List
+from collections import Counter
 
-# SentencePiece
+# fugashi
 try:
-    import sentencepiece as spm
+    import fugashi
 except ImportError:
-    print("❌ sentencepiece がインストールされていません")
-    print("   pip install sentencepiece を実行してください")
+    print("❌ fugashi がインストールされていません")
+    print("   pip install fugashi unidic-lite を実行してください")
     sys.exit(1)
 
 # データセット取得用
@@ -137,114 +138,113 @@ def fetch_training_corpus(max_samples: int = 10000) -> List[str]:
     return texts[:max_samples]
 
 
-def train_sentencepiece_tokenizer(
+def train_japanese_tokenizer(
     texts: List[str],
     model_prefix: str = "neuroq_tokenizer",
     vocab_size: int = 8000,
-    character_coverage: float = 0.9995,
+    min_freq: int = 2,
 ):
     """
-    SentencePiece トークナイザーを学習
+    fugashi（MeCab）日本語トークナイザーを学習
 
     Args:
         texts: 学習用テキストのリスト
-        model_prefix: 出力モデルのプレフィックス（.model, .vocab が生成される）
+        model_prefix: 出力モデルのプレフィックス（.json が生成される）
         vocab_size: 語彙サイズ（推奨: 8000〜32000）
-        character_coverage: 文字カバレッジ（日本語: 0.9995〜0.99995）
+        min_freq: 最小頻度
     """
-    import tempfile
-
-    print(f"\n🔤 SentencePiece 学習開始...")
+    print(f"\n🔤 fugashi（MeCab）日本語トークナイザー学習開始...")
     print(f"   語彙サイズ: {vocab_size}")
-    print(f"   文字カバレッジ: {character_coverage}")
+    print(f"   最小頻度: {min_freq}")
 
-    # 一時ファイルにテキストを保存
-    with tempfile.NamedTemporaryFile(mode='w', suffix='.txt', delete=False, encoding='utf-8') as f:
-        temp_file = f.name
-        for text in texts:
-            f.write(text.strip() + '\n')
+    # 形態素解析
+    tagger = fugashi.Tagger()
+    token_freq = Counter()
 
-    try:
-        # SentencePiece 学習
-        spm.SentencePieceTrainer.train(
-            input=temp_file,
-            model_prefix=model_prefix,
-            vocab_size=vocab_size,
-            character_coverage=character_coverage,
-            model_type='bpe',  # Byte Pair Encoding（日本語に適している）
-            pad_id=0,
-            unk_id=1,
-            bos_id=2,
-            eos_id=3,
-            pad_piece='<pad>',
-            unk_piece='<unk>',
-            bos_piece='<s>',
-            eos_piece='</s>',
-            # 追加の特殊トークン
-            user_defined_symbols=['<USER>', '<ASSISTANT>'],
-        )
+    for text in texts:
+        words = tagger(text.strip())
+        token_freq.update(word.surface for word in words)
 
-        print(f"\n✅ SentencePiece 学習完了！")
-        print(f"   生成ファイル:")
-        print(f"   - {model_prefix}.model  (メインファイル)")
-        print(f"   - {model_prefix}.vocab  (語彙リスト)")
+    print(f"   ユニーク形態素数: {len(token_freq):,}")
 
-        # モデルを読み込んでテスト
-        sp = spm.SentencePieceProcessor()
-        sp.load(f"{model_prefix}.model")
+    # 語彙を構築
+    special_tokens = ['<pad>', '<unk>', '<s>', '</s>', '<USER>', '<ASSISTANT>']
+    token_to_idx = {}
+    for i, token in enumerate(special_tokens):
+        token_to_idx[token] = i
 
-        print(f"\n📊 トークナイザー情報:")
-        print(f"   実際の語彙サイズ: {sp.get_piece_size()}")
-        print(f"   特殊トークン:")
-        print(f"   - <pad>: {sp.pad_id()}")
-        print(f"   - <unk>: {sp.unk_id()}")
-        print(f"   - <s>: {sp.bos_id()}")
-        print(f"   - </s>: {sp.eos_id()}")
+    for token, freq in token_freq.most_common():
+        if len(token_to_idx) >= vocab_size:
+            break
+        if freq >= min_freq and token not in token_to_idx:
+            token_to_idx[token] = len(token_to_idx)
 
-        # テスト
-        test_texts = [
-            "量子コンピュータについて教えて",
-            "ChatGPTとは何ですか？",
-            "ニューロQの特徴を説明してください",
-        ]
+    actual_vocab_size = len(token_to_idx)
 
-        print(f"\n🧪 トークナイズテスト:")
-        for text in test_texts:
-            tokens = sp.encode(text, out_type=str)
-            ids = sp.encode(text, out_type=int)
-            print(f"   入力: {text}")
-            print(f"   トークン: {tokens}")
-            print(f"   ID数: {len(ids)}")
-            print()
+    # JSON保存
+    vocab_file = f"{model_prefix}.json"
+    vocab_data = {
+        'tokenizer_type': 'fugashi',
+        'token_to_idx': token_to_idx,
+        'vocab_size': actual_vocab_size,
+        'actual_vocab_size': actual_vocab_size,
+    }
+    with open(vocab_file, 'w', encoding='utf-8') as f:
+        json.dump(vocab_data, f, ensure_ascii=False, indent=2)
 
-    finally:
-        # 一時ファイル削除
-        if os.path.exists(temp_file):
-            os.unlink(temp_file)
+    print(f"\n✅ 日本語トークナイザー学習完了！")
+    print(f"   生成ファイル:")
+    print(f"   - {vocab_file}  (語彙ファイル)")
+
+    print(f"\n📊 トークナイザー情報:")
+    print(f"   実際の語彙サイズ: {actual_vocab_size}")
+    print(f"   特殊トークン:")
+    print(f"   - <pad>: 0")
+    print(f"   - <unk>: 1")
+    print(f"   - <s>: 2")
+    print(f"   - </s>: 3")
+
+    # テスト
+    idx_to_token = {i: t for t, i in token_to_idx.items()}
+    test_texts = [
+        "量子コンピュータについて教えて",
+        "ChatGPTとは何ですか？",
+        "ニューロQの特徴を説明してください",
+    ]
+
+    print(f"\n🧪 トークナイズテスト:")
+    for text in test_texts:
+        words = tagger(text)
+        morphemes = [w.surface for w in words]
+        ids = [token_to_idx.get(m, 1) for m in morphemes]
+        print(f"   入力: {text}")
+        print(f"   形態素: {morphemes}")
+        print(f"   ID数: {len(ids)}")
+        print()
 
 
 def main():
     """メイン処理"""
     print("=" * 70)
-    print("🚀 NeuroQuantum SentencePiece トークナイザー学習")
+    print("🚀 NeuroQ 日本語トークナイザー学習（fugashi/MeCab）")
     print("=" * 70)
 
     # 1. コーパス取得
     texts = fetch_training_corpus(max_samples=10000)
 
     # 2. トークナイザー学習
-    train_sentencepiece_tokenizer(
+    train_japanese_tokenizer(
         texts=texts,
         model_prefix="neuroq_tokenizer",
         vocab_size=8000,
-        character_coverage=0.9995,
+        min_freq=2,
     )
 
     print("\n" + "=" * 70)
     print("✅ 完了！")
     print("=" * 70)
     print("\n次のステップ:")
-    print("1. neuroq_tokenizer.model を確認")
+    print("1. neuroq_tokenizer.json を確認")
     print("2. handler.py を更新して、このモデルを使用するように設定")
     print("3. モデルを再学習して、新しい語彙サイズで動作確認")
     print()

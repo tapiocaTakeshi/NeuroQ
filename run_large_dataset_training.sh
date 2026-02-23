@@ -4,7 +4,7 @@
 echo "🚀 Starting neuroQ Large Dataset Training..."
 
 # 依存インストール
-pip install datasets sentencepiece accelerate
+pip install datasets fugashi unidic-lite accelerate
 
 # データ準備
 python neuroq_large_datasets_loader.py

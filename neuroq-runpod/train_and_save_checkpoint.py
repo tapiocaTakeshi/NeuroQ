@@ -51,7 +51,7 @@ except ImportError as e:
     sys.exit(1)
 
 # 設定
-TOKENIZER_MODEL_PATH = "neuroq_tokenizer.model"
+TOKENIZER_MODEL_PATH = "neuroq_tokenizer.json"
 CHECKPOINT_DIR = "checkpoints"
 CHECKPOINT_PATH = os.path.join(CHECKPOINT_DIR, "neuroq_checkpoint.pt")
 
@@ -103,7 +103,7 @@ def main():
     if not os.path.exists(TOKENIZER_MODEL_PATH):
         logger.error(f"トークナイザーモデルが見つかりません: {TOKENIZER_MODEL_PATH}")
         print(f"❌ トークナイザーモデルが見つかりません: {TOKENIZER_MODEL_PATH}")
-        print("   先に train_sentencepiece_tokenizer.py を実行してください")
+        print("   先にfugashiトークナイザーファイルを準備してください")
         sys.exit(1)
     file_size = os.path.getsize(TOKENIZER_MODEL_PATH)
     logger.info(f"トークナイザーモデル: {TOKENIZER_MODEL_PATH}")
@@ -157,7 +157,7 @@ def main():
         num_layers=model_config['num_layers'],
         num_neurons=model_config['num_neurons'],
         max_vocab=model_config['max_vocab'],
-        use_sentencepiece=True
+        use_fugashi=True
     )
     
     # トークナイザーを明示的にロード

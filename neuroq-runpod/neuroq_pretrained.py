@@ -31,7 +31,7 @@ DEFAULT_CONFIG = {
 
 def get_tokenizer_path():
     """
-    学習済みSentencePieceトークナイザーのパスを取得
+    学習済みfugashiトークナイザーのパスを取得
 
     Returns:
         str: トークナイザーモデルファイルのパス
@@ -41,10 +41,10 @@ def get_tokenizer_path():
 
     # 候補パスをチェック
     candidate_paths = [
-        current_dir / 'NeuroQ' / 'neuroq_tokenizer.model',
-        current_dir / 'neuroq_tokenizer.model',
-        current_dir / 'NeuroQ' / 'neuroq_tokenizer_8k.model',
-        current_dir / 'neuroq_tokenizer_8k.model',
+        current_dir / 'NeuroQ' / 'neuroq_tokenizer.json',
+        current_dir / 'neuroq_tokenizer.json',
+        current_dir / 'NeuroQ' / 'neuroq_tokenizer_8k.json',
+        current_dir / 'neuroq_tokenizer_8k.json',
     ]
 
     for path in candidate_paths:
@@ -52,12 +52,12 @@ def get_tokenizer_path():
             return str(path)
 
     # 見つからない場合はデフォルトパスを返す
-    return str(current_dir / 'NeuroQ' / 'neuroq_tokenizer.model')
+    return str(current_dir / 'NeuroQ' / 'neuroq_tokenizer.json')
 
 
 def load_pretrained_tokenizer(tokenizer_path=None, verbose=True):
     """
-    学習済みSentencePieceトークナイザーをロード
+    学習済みfugashiトークナイザーをロード
 
     Args:
         tokenizer_path: トークナイザーファイルのパス（Noneの場合は自動検出）
@@ -83,10 +83,10 @@ def load_pretrained_tokenizer(tokenizer_path=None, verbose=True):
                 print(f"   以下のいずれかを実行してください:")
                 print(f"")
                 print(f"   1. トークナイザーを学習:")
-                print(f"      $ python train_sentencepiece_tokenizer.py")
+                print(f"      $ python train_fugashi_tokenizer.py")
                 print(f"")
                 print(f"   2. 既存のトークナイザーファイルを配置:")
-                print(f"      neuroq_tokenizer.model を {Path(__file__).parent} に配置")
+                print(f"      neuroq_tokenizer.json を {Path(__file__).parent} に配置")
                 print(f"")
             return None
 

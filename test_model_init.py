@@ -25,7 +25,7 @@ try:
         num_layers=3,
         num_neurons=100,
         max_vocab=8000,
-        use_sentencepiece=True
+        use_fugashi=True
     )
     print("✅ NeuroQuantumBrainAI instance created successfully")
     print(f"   - model.model = {model.model}")

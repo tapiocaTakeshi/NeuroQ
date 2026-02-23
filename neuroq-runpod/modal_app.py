@@ -51,7 +51,8 @@ image = (
     .pip_install(
         "torch>=2.0.0",
         "numpy>=1.24.0",
-        "sentencepiece>=0.1.99",
+        "fugashi>=1.3.0",
+        "unidic-lite>=1.0.8",
         "tiktoken>=0.5.0",
         "fastapi[standard]",
         "pydantic>=2.0.0",
@@ -341,14 +342,14 @@ class NeuroQInference:
                             except ImportError as e:
                                 print(f"   ⚠️ TikTokenTokenizerインポートエラー: {e}")
                         else:
-                            # SentencePieceトークナイザー (デフォルト/フォールバック)
-                            tokenizer_path = "/root/neuroq/neuroq_tokenizer.model"
+                            # fugashiトークナイザー (デフォルト/フォールバック)
+                            tokenizer_path = "/root/neuroq/neuroq_tokenizer.json"
                             if os.path.exists(tokenizer_path):
                                 self.tokenizer = self.NeuroQuantumTokenizer(
                                     vocab_size=vocab_size,
                                     model_file=tokenizer_path
                                 )
-                                print(f"   ✅ SentencePieceトークナイザー (vocab_size={vocab_size}) をロード")
+                                print(f"   ✅ fugashiトークナイザー (vocab_size={vocab_size}) をロード")
                         
                         total_params = sum(p.numel() for p in self.model.parameters())
                         print(f"✅ {config['name']} ロード完了 ({total_params:,}パラメータ)")
@@ -389,17 +390,17 @@ class NeuroQInference:
                         num_layers=config.get('num_layers', 3),
                         num_neurons=config.get('num_neurons', 100),
                         max_vocab=vocab_size,
-                        use_sentencepiece=False  # TikTokenを使用
+                        use_fugashi=False  # TikTokenを使用
                     )
                     
-                    # SentencePieceトークナイザーをロード
-                    tokenizer_path = "/root/neuroq/neuroq_tokenizer.model"
+                    # fugashiトークナイザーをロード
+                    tokenizer_path = "/root/neuroq/neuroq_tokenizer.json"
                     if os.path.exists(tokenizer_path):
                         self.model.tokenizer = self.NeuroQuantumTokenizer(
                             vocab_size=vocab_size,
                             model_file=tokenizer_path
                         )
-                        print(f"   ✅ SentencePieceトークナイザー (vocab_size={vocab_size}) をロード")
+                        print(f"   ✅ fugashiトークナイザー (vocab_size={vocab_size}) をロード")
                     else:
                         print(f"   ⚠️ トークナイザーモデルが見つかりません: {tokenizer_path}")
                     
@@ -768,7 +769,7 @@ class NeuroQInference:
             if hasattr(self.model, 'tokenizer') and self.model.tokenizer is not None:
                 tokenizer = self.model.tokenizer
             else:
-                tokenizer_path = "/root/neuroq/neuroq_tokenizer.model"
+                tokenizer_path = "/root/neuroq/neuroq_tokenizer.json"
                 tokenizer = self.NeuroQuantumTokenizer(vocab_size=model_vocab_size, model_file=tokenizer_path)
 
             # テキストをトークン化
@@ -867,7 +868,7 @@ class NeuroQInference:
             if hasattr(self.model, 'tokenizer') and self.model.tokenizer is not None:
                 tokenizer = self.model.tokenizer
             else:
-                tokenizer_path = "/root/neuroq/neuroq_tokenizer.model"
+                tokenizer_path = "/root/neuroq/neuroq_tokenizer.json"
                 tokenizer = self.NeuroQuantumTokenizer(vocab_size=vocab_size, model_file=tokenizer_path)
             
             # 入力ベクトルをテンソルに変換

@@ -3,12 +3,11 @@
 """
 NeuroQ 日本語トークナイザー学習スクリプト
 
-日本語に最適化された SentencePiece トークナイザーを学習します。
+fugashi（MeCab）を使用した日本語形態素解析トークナイザーを学習します。
 
 特徴:
-- 日本語テキストに最適化された設定
-- 高い文字カバレッジ（0.9995）で漢字をカバー
-- BPE (Byte Pair Encoding) による効率的なトークン化
+- MeCab形態素解析による高精度な日本語トークン化
+- 頻度ベースの語彙構築
 - USER/ASSISTANT 特殊トークンをサポート
 
 使用方法:
@@ -22,23 +21,25 @@ NeuroQ 日本語トークナイザー学習スクリプト
     python train_japanese_tokenizer.py --vocab-size 32000 --prefix neuroq_tokenizer_32k_ja
 
 必要なライブラリ:
-    pip install sentencepiece
+    pip install fugashi unidic-lite
 """
 
 import os
 import sys
+import json
 import argparse
 from pathlib import Path
 from typing import List, Optional
+from collections import Counter
 
-# SentencePiece
+# fugashi
 try:
-    import sentencepiece as spm
-    SENTENCEPIECE_AVAILABLE = True
+    import fugashi
+    FUGASHI_AVAILABLE = True
 except ImportError:
-    SENTENCEPIECE_AVAILABLE = False
-    print("❌ sentencepiece がインストールされていません！")
-    print("   pip install sentencepiece を実行してください。")
+    FUGASHI_AVAILABLE = False
+    print("❌ fugashi がインストールされていません！")
+    print("   pip install fugashi unidic-lite を実行してください。")
     sys.exit(1)
 
 
@@ -46,31 +47,28 @@ def train_japanese_tokenizer(
     input_file: str,
     model_prefix: str = "neuroq_tokenizer_ja",
     vocab_size: int = 8000,
-    character_coverage: float = 0.9995,
-    model_type: str = "bpe",
+    min_freq: int = 2,
     user_defined_symbols: Optional[List[str]] = None,
 ) -> str:
     """
-    日本語に最適化された SentencePiece トークナイザーを学習
+    fugashi（MeCab）を使用した日本語トークナイザーを学習
 
     Args:
         input_file: 学習データファイル
         model_prefix: モデルファイルのプレフィックス
         vocab_size: 語彙サイズ（推奨: 8000〜32000）
-        character_coverage: 文字カバレッジ（日本語: 0.9995推奨）
-        model_type: モデルタイプ（bpe or unigram）
+        min_freq: 最小頻度
         user_defined_symbols: ユーザー定義の特殊トークン
 
     Returns:
         生成されたモデルファイルのパス
     """
     print("=" * 70)
-    print("🔤 NeuroQ 日本語トークナイザー学習")
+    print("🔤 NeuroQ 日本語トークナイザー学習（fugashi/MeCab）")
     print("=" * 70)
     print(f"📂 入力ファイル: {input_file}")
     print(f"📊 語彙サイズ: {vocab_size:,}")
-    print(f"🔧 モデルタイプ: {model_type}")
-    print(f"📈 文字カバレッジ: {character_coverage}")
+    print(f"🔧 最小頻度: {min_freq}")
     print("-" * 70)
 
     # ファイルの存在確認
@@ -89,79 +87,68 @@ def train_japanese_tokenizer(
 
     print(f"🏷️  特殊トークン: {user_defined_symbols}")
 
-    # SentencePiece 学習
-    print("\n🚀 学習開始...")
+    # テキストを読み込み
+    print("\n📖 テキスト読み込み中...")
+    with open(input_file, 'r', encoding='utf-8') as f:
+        texts = [line.strip() for line in f if line.strip()]
+    print(f"   {len(texts):,} 行読み込み完了")
 
-    try:
-        spm.SentencePieceTrainer.train(
-            input=input_file,
-            model_prefix=model_prefix,
-            vocab_size=vocab_size,
-            character_coverage=character_coverage,
-            model_type=model_type,
-            # 特殊トークン設定
-            pad_id=0,
-            unk_id=1,
-            bos_id=2,
-            eos_id=3,
-            pad_piece='<pad>',
-            unk_piece='<unk>',
-            bos_piece='<s>',
-            eos_piece='</s>',
-            # ユーザー定義トークン
-            user_defined_symbols=user_defined_symbols,
-            # 日本語向け設定
-            max_sentence_length=4192,  # 長い文に対応
-            num_threads=os.cpu_count() or 4,  # 並列化
-            # 正規化設定（日本語向け）
-            normalization_rule_name='nmt_nfkc_cf',  # NFKC正規化 + Case folding
-            remove_extra_whitespaces=True,
-            add_dummy_prefix=True,  # 日本語では有効
-            # ログ設定
-            minloglevel=1,  # INFO レベル
-        )
-        print("✅ 学習完了！")
+    # fugashi Tagger初期化
+    print("\n🚀 形態素解析開始...")
+    tagger = fugashi.Tagger()
 
-    except Exception as e:
-        print(f"❌ エラー: {e}")
-        sys.exit(1)
+    # 形態素の頻度をカウント
+    token_freq = Counter()
+    for text in texts:
+        words = tagger(text)
+        token_freq.update(word.surface for word in words)
 
-    # モデルファイル確認
-    model_file = f"{model_prefix}.model"
-    vocab_file = f"{model_prefix}.vocab"
+    print(f"   ユニーク形態素数: {len(token_freq):,}")
 
-    if not os.path.exists(model_file):
-        print(f"\n❌ モデルファイル {model_file} が生成されませんでした")
-        return ""
+    # 語彙を構築
+    special_tokens = ['<pad>', '<unk>', '<s>', '</s>'] + user_defined_symbols
+    token_to_idx = {}
+    for i, token in enumerate(special_tokens):
+        token_to_idx[token] = i
 
-    model_size = os.path.getsize(model_file)
-    print(f"\n📦 モデルファイル: {model_file} ({model_size:,} バイト)")
+    # 頻度順にトークンを追加
+    for token, freq in token_freq.most_common():
+        if len(token_to_idx) >= vocab_size:
+            break
+        if freq >= min_freq and token not in token_to_idx:
+            token_to_idx[token] = len(token_to_idx)
 
-    if os.path.exists(vocab_file):
-        vocab_size_actual = sum(1 for _ in open(vocab_file, 'r', encoding='utf-8'))
-        print(f"📖 語彙ファイル: {vocab_file} ({vocab_size_actual:,} エントリ)")
+    actual_vocab_size = len(token_to_idx)
 
-    # モデルをテスト
-    print("\n🧪 モデルテスト中...")
-    sp = spm.SentencePieceProcessor()
-    sp.load(model_file)
+    # JSON形式で保存
+    vocab_file = f"{model_prefix}.json"
+    vocab_data = {
+        'tokenizer_type': 'fugashi',
+        'token_to_idx': token_to_idx,
+        'vocab_size': actual_vocab_size,
+        'actual_vocab_size': actual_vocab_size,
+    }
+    with open(vocab_file, 'w', encoding='utf-8') as f:
+        json.dump(vocab_data, f, ensure_ascii=False, indent=2)
 
-    actual_vocab_size = sp.get_piece_size()
-    print(f"   実際の語彙サイズ: {actual_vocab_size:,}")
-    print(f"   PAD ID: {sp.pad_id()}")
-    print(f"   UNK ID: {sp.unk_id()}")
-    print(f"   BOS ID: {sp.bos_id()}")
-    print(f"   EOS ID: {sp.eos_id()}")
+    print(f"\n📦 語彙ファイル: {vocab_file}")
+    print(f"📊 実際の語彙サイズ: {actual_vocab_size:,}")
+    print(f"   PAD ID: 0")
+    print(f"   UNK ID: 1")
+    print(f"   BOS ID: 2")
+    print(f"   EOS ID: 3")
 
     # 特殊トークンの確認
     print(f"\n🏷️  特殊トークンID:")
     for symbol in user_defined_symbols:
-        token_id = sp.piece_to_id(symbol)
+        token_id = token_to_idx.get(symbol, -1)
         print(f"   {symbol}: {token_id}")
 
     # サンプルテキストでテスト
     print("\n📝 サンプルテキストテスト:")
     print("-" * 70)
+
+    idx_to_token = {i: t for t, i in token_to_idx.items()}
 
     test_texts = [
         "量子コンピュータは革新的な技術です。",
@@ -175,36 +162,38 @@ def train_japanese_tokenizer(
 
     for text in test_texts:
         # エンコード
-        encoded = sp.encode(text, out_type=int)
+        words = tagger(text)
+        morphemes = [w.surface for w in words]
+        encoded = [token_to_idx.get(m, 1) for m in morphemes]  # 1 = UNK
+
         # デコード
-        decoded = sp.decode(encoded)
+        decoded = ''.join(idx_to_token.get(i, '<unk>') for i in encoded)
 
         print(f"\n原文: {text}")
         print(f"トークン数: {len(encoded)}")
         print(f"トークンID: {encoded[:15]}{'...' if len(encoded) > 15 else ''}")
         print(f"デコード: {decoded}")
-
-        # トークン分割を表示
-        pieces = sp.encode(text, out_type=str)
-        print(f"トークン: {pieces[:15]}{'...' if len(pieces) > 15 else ''}")
+        print(f"形態素: {morphemes[:15]}{'...' if len(morphemes) > 15 else ''}")
 
     # 圧縮率の計算
     print("\n📊 圧縮率分析:")
     total_chars = sum(len(t) for t in test_texts)
-    total_tokens = sum(len(sp.encode(t, out_type=int)) for t in test_texts)
-    compression_ratio = total_chars / total_tokens
+    total_tokens = 0
+    for t in test_texts:
+        words = tagger(t)
+        total_tokens += len(words)
+    compression_ratio = total_chars / total_tokens if total_tokens > 0 else 0
     print(f"   総文字数: {total_chars}")
     print(f"   総トークン数: {total_tokens}")
     print(f"   文字/トークン比: {compression_ratio:.2f}")
 
     print("\n" + "=" * 70)
     print("✅ 日本語トークナイザー学習完了！")
-    print(f"   モデルファイル: {model_file}")
     print(f"   語彙ファイル: {vocab_file}")
     print(f"   語彙サイズ: {actual_vocab_size:,}")
     print("=" * 70)
 
-    return model_file
+    return vocab_file
 
 
 def test_tokenizer(model_file: str) -> None:
@@ -218,8 +207,13 @@ def test_tokenizer(model_file: str) -> None:
     print(f"\n🧪 トークナイザー詳細テスト: {model_file}")
     print("=" * 70)
 
-    sp = spm.SentencePieceProcessor()
-    sp.load(model_file)
+    # 語彙を読み込み
+    with open(model_file, 'r', encoding='utf-8') as f:
+        data = json.load(f)
+    token_to_idx = data['token_to_idx']
+    idx_to_token = {int(i): t for t, i in token_to_idx.items()}
+
+    tagger = fugashi.Tagger()
 
     # 様々なテストケース
     test_cases = {
@@ -251,28 +245,22 @@ def test_tokenizer(model_file: str) -> None:
         print(f"\n📁 {category}:")
         print("-" * 50)
         for text in texts:
-            tokens = sp.encode(text, out_type=str)
-            ids = sp.encode(text, out_type=int)
-            decoded = sp.decode(ids)
+            words = tagger(text)
+            morphemes = [w.surface for w in words]
+            ids = [token_to_idx.get(m, 1) for m in morphemes]
+            decoded = ''.join(idx_to_token.get(i, '<unk>') for i in ids)
 
             print(f"入力: {text}")
-            print(f"トークン数: {len(tokens)}")
-            print(f"トークン: {tokens}")
+            print(f"トークン数: {len(morphemes)}")
+            print(f"形態素: {morphemes}")
             print(f"復元: {decoded}")
             print(f"完全復元: {'✅' if decoded == text else '⚠️ ' + repr(decoded)}")
             print()
 
-    # UNKトークンのテスト
-    print("\n🔍 UNKトークンテスト:")
-    unk_test = "🚀💻🎉"  # 絵文字
-    unk_tokens = sp.encode(unk_test, out_type=str)
-    print(f"入力 (絵文字): {unk_test}")
-    print(f"トークン: {unk_tokens}")
-
 
 def main():
     parser = argparse.ArgumentParser(
-        description='NeuroQ 日本語トークナイザー学習'
+        description='NeuroQ 日本語トークナイザー学習（fugashi/MeCab）'
     )
     parser.add_argument(
         '--input',
@@ -293,17 +281,10 @@ def main():
         help='語彙サイズ (デフォルト: 8000)'
     )
     parser.add_argument(
-        '--coverage',
-        type=float,
-        default=0.9995,
-        help='文字カバレッジ (デフォルト: 0.9995)'
-    )
-    parser.add_argument(
-        '--model-type',
-        type=str,
-        default='bpe',
-        choices=['bpe', 'unigram'],
-        help='モデルタイプ (デフォルト: bpe)'
+        '--min-freq',
+        type=int,
+        default=2,
+        help='最小頻度 (デフォルト: 2)'
     )
     parser.add_argument(
         '--test-only',
@@ -342,8 +323,7 @@ def main():
         input_file=args.input,
         model_prefix=args.prefix,
         vocab_size=args.vocab_size,
-        character_coverage=args.coverage,
-        model_type=args.model_type,
+        min_freq=args.min_freq,
     )
 
     # 詳細テスト

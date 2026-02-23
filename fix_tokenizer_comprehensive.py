@@ -5,7 +5,7 @@ NeuroQ トークナイザー問題の包括的修正スクリプト
 =================================================
 
 このスクリプトは以下を実行します:
-1. sentencepieceのインストール確認
+1. fugashiのインストール確認
 2. トークナイザーファイルの検証
 3. vocab_sizeの整合性チェック
 4. neuroquantum_layered.pyの修正されたバージョンを作成
@@ -16,23 +16,23 @@ import os
 import sys
 import subprocess
 
-def check_and_install_sentencepiece():
-    """sentencepieceをインストール"""
+def check_and_install_fugashi():
+    """fugashiをインストール"""
     print("=" * 70)
-    print("📦 Step 1: sentencepieceのインストール確認")
+    print("📦 Step 1: fugashiのインストール確認")
     print("=" * 70)
 
     try:
-        import sentencepiece as spm
-        print("✅ sentencepieceは既にインストールされています")
+        import fugashi
+        print("✅ fugashiは既にインストールされています")
         return True
     except ImportError:
-        print("❌ sentencepieceがインストールされていません")
+        print("❌ fugashiがインストールされていません")
         print("   インストールを開始します...")
 
         try:
-            subprocess.check_call([sys.executable, "-m", "pip", "install", "sentencepiece"])
-            print("✅ sentencepieceのインストールが完了しました")
+            subprocess.check_call([sys.executable, "-m", "pip", "install", "fugashi", "unidic-lite"])
+            print("✅ fugashiのインストールが完了しました")
             return True
         except Exception as e:
             print(f"❌ インストールに失敗しました: {e}")
@@ -45,25 +45,31 @@ def verify_tokenizer_files():
     print("=" * 70)
 
     try:
-        import sentencepiece as spm
+        import fugashi
     except ImportError:
-        print("❌ sentencepieceがインポートできません")
+        print("❌ fugashiがインポートできません")
         return None
 
     # トークナイザーファイルを探す
     tokenizer_paths = [
-        "/home/user/NeuroQ/neuroq-runpod/neuroq_tokenizer.model",
-        "/home/user/NeuroQ/neuroq_tokenizer_8k.model",
-        "/home/user/NeuroQ/neuroq_tokenizer.model",
+        "/home/user/NeuroQ/neuroq-runpod/neuroq_tokenizer.json",
+        "/home/user/NeuroQ/neuroq_tokenizer_8k.json",
+        "/home/user/NeuroQ/neuroq_tokenizer.json",
     ]
 
     results = {}
     for path in tokenizer_paths:
         if os.path.exists(path):
             try:
-                sp = spm.SentencePieceProcessor()
-                sp.load(path)
-                vocab_size = sp.get_piece_size()
+                import json
+                with open(path, 'r', encoding='utf-8') as f:
+                    data = json.load(f)
+                vocab_size = len(data.get('vocab', {}))
+
+                # fugashi Tagger で動作確認
+                tagger = fugashi.Tagger()
+                test_result = tagger("テスト")
+
                 results[path] = {
                     "exists": True,
                     "vocab_size": vocab_size,
@@ -106,13 +112,14 @@ NeuroQ vocab_size 整合性チェッカー
 import torch
 import os
 import sys
+import json
 
 # neuroquantum_layered をインポート
 sys.path.insert(0, os.path.dirname(__file__))
 
 try:
     from neuroquantum_layered import NeuroQuantumAI, NeuroQuantumTokenizer
-    import sentencepiece as spm
+    import fugashi
 
     print("=" * 70)
     print("🔍 NeuroQ vocab_size 整合性チェック")
@@ -123,10 +130,10 @@ try:
     print("-" * 70)
 
     tokenizer_paths = [
-        "neuroq_tokenizer.model",
-        "../neuroq_tokenizer.model",
-        "neuroq_tokenizer_8k.model",
-        "../neuroq_tokenizer_8k.model",
+        "neuroq_tokenizer.json",
+        "../neuroq_tokenizer.json",
+        "neuroq_tokenizer_8k.json",
+        "../neuroq_tokenizer_8k.json",
     ]
 
     tokenizer_vocab_size = None
@@ -135,9 +142,9 @@ try:
     for path in tokenizer_paths:
         if os.path.exists(path):
             try:
-                sp = spm.SentencePieceProcessor()
-                sp.load(path)
-                tokenizer_vocab_size = sp.get_piece_size()
+                with open(path, 'r', encoding='utf-8') as f:
+                    data = json.load(f)
+                tokenizer_vocab_size = len(data.get('vocab', {}))
                 tokenizer_path = path
                 print(f"   ✅ トークナイザーファイル: {path}")
                 print(f"   📊 語彙サイズ: {tokenizer_vocab_size:,}")
@@ -214,7 +221,7 @@ except Exception as e:
     return output_path
 
 def create_dockerfile_fix():
-    """Dockerfileにsentencepieceを追加する修正案を提示"""
+    """Dockerfileにfugashiを追加する修正案を提示"""
     print("\n" + "=" * 70)
     print("🐳 Step 4: Dockerfile修正案")
     print("=" * 70)
@@ -225,11 +232,11 @@ def create_dockerfile_fix():
         print(f"Dockerfileが見つかりました: {dockerfile_path}")
         print("\n📝 以下の行をRUN命令に追加してください:")
         print("-" * 70)
-        print("RUN pip install sentencepiece")
+        print("RUN pip install fugashi unidic-lite")
         print("-" * 70)
         print("\n完全な例:")
         print("RUN pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu118 \\")
-        print("    && pip install runpod sentencepiece")
+        print("    && pip install runpod fugashi unidic-lite")
     else:
         print(f"❌ Dockerfileが見つかりません: {dockerfile_path}")
 
@@ -241,7 +248,8 @@ def create_requirements_txt():
 
     requirements = """# NeuroQ Dependencies
 torch>=2.1.0
-sentencepiece>=0.1.99
+fugashi>=1.3.0
+unidic-lite>=1.0.8
 numpy>=1.24.0
 runpod>=1.3.0
 """
@@ -258,10 +266,10 @@ def main():
     print("🚀 NeuroQ トークナイザー問題 包括的修正")
     print("=" * 70)
 
-    # Step 1: sentencepieceインストール
-    if not check_and_install_sentencepiece():
-        print("\n❌ sentencepieceのインストールに失敗しました")
-        print("   手動でインストールしてください: pip install sentencepiece")
+    # Step 1: fugashiインストール
+    if not check_and_install_fugashi():
+        print("\n❌ fugashiのインストールに失敗しました")
+        print("   手動でインストールしてください: pip install fugashi unidic-lite")
         return
 
     # Step 2: トークナイザーファイル検証
@@ -282,7 +290,7 @@ def main():
     print("\n次のステップ:")
     print("1. 整合性チェックを実行:")
     print(f"   cd /home/user/NeuroQ/neuroq-runpod && python3 check_vocab_consistency.py")
-    print("\n2. Dockerfileを修正して sentencepiece を追加")
+    print("\n2. Dockerfileを修正して fugashi unidic-lite を追加")
     print("\n3. Dockerイメージを再ビルド")
     print("\n4. RunPodで動作確認")
 

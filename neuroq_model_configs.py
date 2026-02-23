@@ -33,7 +33,7 @@ if runpod_dir not in sys.path:
 NEUROQ_SMALL = {
     'name': 'NeuroQ-Small',
     'description': '軽量モデル (256次元)',
-    'vocab_size': 8000,        # SentencePiece BPE トークナイザー
+    'vocab_size': 8000,        # fugashi 日本語形態素解析トークナイザー
     'embed_dim': 256,
     'num_heads': 4,            # 固定
     'num_layers': 2,           # 固定
@@ -44,7 +44,7 @@ NEUROQ_SMALL = {
 NEUROQ_LARGE = {
     'name': 'NeuroQ-Large',
     'description': '標準モデル (384次元)',
-    'vocab_size': 8000,        # SentencePiece BPE トークナイザー
+    'vocab_size': 8000,        # fugashi 日本語形態素解析トークナイザー
     'embed_dim': 384,
     'num_heads': 4,            # 固定
     'num_layers': 2,           # 固定
