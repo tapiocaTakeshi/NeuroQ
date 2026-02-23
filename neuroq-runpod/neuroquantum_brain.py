@@ -1197,11 +1197,12 @@ class BrainTokenizer:
     def decode(self, tokens: List[int], skip_special: bool = True) -> str:
         """デコード"""
         if self.sp is not None:
+            sp_vocab_size = self.sp.GetPieceSize()
             if skip_special:
                 special_ids = {self.pad_id, self.unk_id, self.bos_id, self.eos_id}
-                filtered = [t for t in tokens if t not in special_ids]
+                filtered = [t for t in tokens if t not in special_ids and 0 <= t < sp_vocab_size]
             else:
-                filtered = list(tokens)
+                filtered = [t for t in tokens if 0 <= t < sp_vocab_size]
             return self.sp.DecodeIds(filtered)
         else:
             result = []
