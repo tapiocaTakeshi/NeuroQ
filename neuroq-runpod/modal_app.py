@@ -97,6 +97,7 @@ Follow these rules:
     timeout=86400,  # 1日
     scaledown_window=120,  # アイドル状態で2分後にコンテナを停止
     volumes={"/model_checkpoints": checkpoints_volume},
+    secrets=[modal.Secret.from_name("google_ai")],
 )
 @modal.concurrent(max_inputs=10)  # 同時リクエスト数
 class NeuroQInference:
