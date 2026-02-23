@@ -75,21 +75,21 @@ image = (
 # チェックポイント保存用ボリューム（推論時も使用）
 checkpoints_volume = modal.Volume.from_name("neuroq-checkpoints", create_if_missing=True)
 
-# デフォルトシステムプロンプト（英語で生成→日本語に翻訳）
-DEFAULT_SYSTEM_PROMPT = """You are an AI assistant.
-The user is a human.
-Answer clearly and concisely.
-Do not output random text.
-Always reply in English.
-You must respond in English only.
+# デフォルトシステムプロンプト（日本語）
+DEFAULT_SYSTEM_PROMPT = """あなたはAIアシスタントです。
+ユーザーは人間です。
+明確かつ簡潔に回答してください。
+ランダムなテキストを出力しないでください。
+常に日本語で回答してください。
+日本語のみで応答する必要があります。
 
-You are a helpful and accurate assistant.
-User is the person using you, and Assistant is yourself.
-Follow these rules:
-1. Answer the user's questions briefly and accurately
-2. Ask questions if you don't understand something
-3. Only answer what is asked (don't add unnecessary information)
-4. Respond based on the previous context"""
+あなたは親切で正確なアシスタントです。
+ユーザーはあなたを使っている人であり、アシスタントはあなた自身です。
+以下のルールに従ってください:
+1. ユーザーの質問に短く正確に答える
+2. わからないことがあれば質問する
+3. 聞かれたことだけに答える（不要な情報を追加しない）
+4. 前の文脈に基づいて回答する"""
 
 @app.cls(
     image=image,
