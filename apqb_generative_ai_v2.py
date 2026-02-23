@@ -991,38 +991,38 @@ def interactive_mode(use_oasst: bool = False):
                     temp = float(user_input.split()[1])
                     temperature = max(0.1, min(2.0, temp))
                     print(f"🌡️ 温度を {temperature} に設定しました")
-                except:
+                except (ValueError, IndexError):
                     print("❌ 使用法: /temp <0.1-2.0>")
-            
+
             elif user_input.startswith("/r "):
                 try:
                     r = float(user_input.split()[1])
                     dropout_r = max(-1.0, min(1.0, r))
                     print(f"⚛️ APQBドロップアウト r を {dropout_r} に設定しました")
-                except:
+                except (ValueError, IndexError):
                     print("❌ 使用法: /r <-1.0-1.0>")
-            
+
             elif user_input.startswith("/len"):
                 try:
                     length = int(user_input.split()[1])
                     max_length = max(10, min(1000, length))
                     print(f"📏 生成長さを {max_length} トークンに設定しました")
-                except:
+                except (ValueError, IndexError):
                     print("❌ 使用法: /len <10-1000>")
-            
+
             elif user_input.startswith("/topk"):
                 try:
                     k = int(user_input.split()[1])
                     top_k = max(1, min(100, k))
                     print(f"🎯 Top-K を {top_k} に設定しました")
-                except:
+                except (ValueError, IndexError):
                     print("❌ 使用法: /topk <1-100>")
-            
+
             elif user_input.startswith("/quantum"):
                 quantum_sampling = not quantum_sampling
                 status = "ON ⚛️" if quantum_sampling else "OFF 📊"
                 print(f"量子サンプリング: {status}")
-            
+
             elif user_input.startswith("/stats"):
                 stats = ai.get_stats()
                 print("\n📈 モデル統計:")
@@ -1031,13 +1031,13 @@ def interactive_mode(use_oasst: bool = False):
                         print(f"   {key}: {value:,}")
                     else:
                         print(f"   {key}: {value}")
-            
+
             elif user_input.startswith("/save"):
                 try:
                     path = user_input.split()[1]
                     ai.save(path)
-                except:
-                    print("❌ 使用法: /save <ファイルパス>")
+                except (IndexError, Exception) as e:
+                    print(f"❌ 使用法: /save <ファイルパス> ({e})")
             
             elif user_input.startswith("/load"):
                 try:

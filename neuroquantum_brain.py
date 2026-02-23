@@ -668,14 +668,22 @@ class NeuroQuantumBrain(nn.Module):
         # GPT標準: Final LayerNorm
         self.final_norm = nn.LayerNorm(embed_dim)
         
-        # GPT標準: Output Head (weight tying可能だが、ここでは独立)
+        # GPT標準: Output Head (weight tying: 埋め込みと出力ヘッドの重み共有)
         self.output_head = nn.Linear(embed_dim, vocab_size, bias=False)
-        
+
         # GPT標準: Embedding Dropout
         self.dropout = nn.Dropout(dropout)
-        
+
+        # Causal Mask をバッファとしてキャッシュ（毎回再生成を回避）
+        causal_mask = torch.tril(torch.ones(max_seq_len, max_seq_len))
+        self.register_buffer('causal_mask', causal_mask.unsqueeze(0).unsqueeze(0))
+
         # パラメータ初期化（GPT標準）
         self.apply(self._init_weights)
+
+        # Weight Tying: 埋め込みと出力ヘッドの重み共有
+        if self.text_embedding is not None:
+            self.output_head.weight = self.text_embedding.weight
     
     def _init_weights(self, module):
         """GPT標準の重み初期化"""
@@ -757,9 +765,9 @@ class NeuroQuantumBrain(nn.Module):
         # 埋め込みの合成 + Dropout
         h = self.dropout(text_embeds + pos_embeds)
         
-        # Causal Mask生成（maskがNoneの場合）
+        # Causal Mask（キャッシュ済みバッファから切り出し）
         if mask is None:
-            mask = torch.tril(torch.ones(seq, seq, device=x.device)).unsqueeze(0).unsqueeze(0)
+            mask = self.causal_mask[:, :, :seq, :seq]
         
         # ステップ2: テキストエンベディング → GPT型デコーダーのみのTransformer
         # N個のGPT Decoder Blocks（Pre-norm + Multi-Head Causal Self-Attention + FFN）
@@ -1345,25 +1353,25 @@ def fetch_huggingface_data(max_samples: int = 5000) -> List[str]:
                     count += 1
                     if count >= max_samples // 3:
                         break
-        except:
+        except Exception:
             pass
-        
+
         # 英語データ
         try:
             ds = load_dataset("wikitext", "wikitext-2-raw-v1", split="train")
             for item in ds[:max_samples // 3]:
                 if 'text' in item and len(item['text']) > 30:
                     texts.append(item['text'])
-        except:
+        except Exception:
             pass
-        
+
         # 日本語対話
         try:
             ds = load_dataset("kunishou/databricks-dolly-15k-ja", split="train")
             for item in ds[:max_samples // 3]:
                 if 'output' in item:
                     texts.append(item['output'])
-        except:
+        except Exception:
             pass
         
         print(f"   ✅ {len(texts):,} サンプル取得")
@@ -1597,7 +1605,7 @@ def chat_mode(ai: NeuroQuantumBrainAI):
                         temp_min = max(0.1, val - 0.2)
                         temp_max = min(1.5, val + 0.2)
                     print(f"   温度範囲を {temp_min:.2f}〜{temp_max:.2f} に設定")
-                except:
+                except (ValueError, IndexError):
                     print("   使用法: /temp <min> <max> または /temp <値>")
                 continue
             
@@ -1606,7 +1614,7 @@ def chat_mode(ai: NeuroQuantumBrainAI):
                     val = int(user_input.split()[1])
                     max_length = max(10, min(100, val))
                     print(f"   生成長さを {max_length} に設定")
-                except:
+                except (ValueError, IndexError):
                     print("   使用法: /len <10-100>")
                 continue
             

@@ -1747,7 +1747,7 @@ class NeuroQuantumAI:
                             print(f"   温度範囲を {temp_min:.2f} - {temp_max:.2f} に設定（θが動ける）")
                         else:
                             print("   使い方: /temp <最小> <最大> (例: /temp 0.4 0.8)")
-                    except:
+                    except (ValueError, IndexError):
                         print("   エラー: /temp <最小> <最大>")
                     continue
                 
@@ -1756,7 +1756,7 @@ class NeuroQuantumAI:
                         max_length = int(user_input.split()[1])
                         max_length = max(10, min(500, max_length))
                         print(f"   生成長さを {max_length} に設定")
-                    except:
+                    except (ValueError, IndexError):
                         print("   エラー: /len <数値>")
                     continue
                 
@@ -2325,7 +2325,7 @@ def main(num_neurons: int = 128):
         answer = input().strip().lower()
         if answer == 'y':
             ai.chat()
-    except:
+    except (KeyboardInterrupt, EOFError):
         pass
     
     print("\n✅ ニューロQ 完了！")

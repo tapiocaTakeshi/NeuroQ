@@ -415,7 +415,7 @@ def interactive_mode():
                     temp = float(user_input.split()[1])
                     temperature = max(0.1, min(2.0, temp))
                     print(f"🌡️ 温度を {temperature} に設定しました")
-                except:
+                except (ValueError, IndexError):
                     print("❌ 使用法: /temp <0.1-2.0>")
             
             elif user_input.startswith("/r"):
@@ -423,7 +423,7 @@ def interactive_mode():
                     r = float(user_input.split()[1])
                     base_r = max(-1.0, min(1.0, r))
                     print(f"⚛️ 基準相関係数を {base_r} に設定しました")
-                except:
+                except (ValueError, IndexError):
                     print("❌ 使用法: /r <-1.0-1.0>")
             
             elif user_input.startswith("/train"):
