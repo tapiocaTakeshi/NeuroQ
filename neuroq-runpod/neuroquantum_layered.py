@@ -1522,11 +1522,12 @@ class NeuroQuantumTokenizer:
 
         if self.sp is not None:
             # 特殊トークンをフィルタリング
+            sp_vocab_size = self.sp.GetPieceSize()
             if skip_special:
                 special_ids = {self.pad_id, self.unk_id, self.bos_id, self.eos_id}
-                filtered_ids = [t for t in token_ids if t not in special_ids]
+                filtered_ids = [t for t in token_ids if t not in special_ids and 0 <= t < sp_vocab_size]
             else:
-                filtered_ids = list(token_ids)
+                filtered_ids = [t for t in token_ids if 0 <= t < sp_vocab_size]
             result = self.sp.DecodeIds(filtered_ids)
         else:
             # フォールバック：文字単位
