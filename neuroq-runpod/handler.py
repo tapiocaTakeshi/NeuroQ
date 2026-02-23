@@ -84,8 +84,8 @@ except ImportError as e:
     TranslationPipeline = None
     print(f"⚠️ translation_pipeline.py のインポートに失敗: {e}")
 
-# トークナイザー語彙ファイルのパス
-TOKENIZER_MODEL_PATH = "neuroq_tokenizer.json"
+# トークナイザーモデルファイルのパス（SentencePiece .model形式）
+TOKENIZER_MODEL_PATH = "neuroq_tokenizer.model"
 
 # チェックポイントパス（モデルサイズ別）
 # 全モデルを/model_checkpointsから参照
@@ -1261,14 +1261,14 @@ def handler(job):
 
                 # トークナイザー初期化
                 tokenizer = None
-                tokenizer_type = 'fugashi'
+                tokenizer_type = 'sentencepiece'
                 custom_tokenizer_path = None
 
                 # データセット専用トークナイザー
                 if dataset_tokenizer_path is not None:
                     print(f"🔤 データセット専用トークナイザーを使用: {dataset_tokenizer_path}")
                     tokenizer = NeuroQuantumTokenizer(vocab_size=8000, model_file=dataset_tokenizer_path)
-                    tokenizer_type = f'fugashi_dataset'
+                    tokenizer_type = f'sentencepiece_dataset'
                     custom_tokenizer_path = dataset_tokenizer_path
 
                 # カスタムトークナイザー学習
@@ -1301,13 +1301,13 @@ def handler(job):
                         print(f"✅ カスタムトークナイザーを読み込み: {custom_tokenizer_path}")
                     else:
                         print(f"⚠️ カスタムトークナイザーが見つかりません: {custom_tokenizer_path}")
-                        print(f"   fugashi を使用します")
+                        print(f"   SentencePiece を使用します")
 
                 # デフォルト: SentencePiece
                 if tokenizer is None:
                     tokenizer = NeuroQuantumTokenizer(vocab_size=config.get('vocab_size', 8000))
                     tokenizer.build_vocab(texts, model_prefix="neuroq_tokenizer")
-                    tokenizer_type = 'fugashi'
+                    tokenizer_type = 'sentencepiece'
 
                 # カスタムトークナイザー使用時は vocab_size を更新
                 if tokenizer_type == 'custom_bpe':

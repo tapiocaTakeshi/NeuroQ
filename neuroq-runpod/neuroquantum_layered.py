@@ -33,13 +33,13 @@ import re
 from typing import List, Dict, Optional, Tuple
 import warnings
 
-# fugashi（日本語形態素解析トークナイザー用）
+# sentencepiece（日本語サブワードトークナイザー用）
 try:
-    import fugashi
-    FUGASHI_AVAILABLE = True
+    import sentencepiece as spm
+    SENTENCEPIECE_AVAILABLE = True
 except ImportError:
-    FUGASHI_AVAILABLE = False
-    warnings.warn("fugashiライブラリがインストールされていません。pip install fugashi unidic-lite を実行してください。")
+    SENTENCEPIECE_AVAILABLE = False
+    warnings.warn("sentencepieceライブラリがインストールされていません。pip install sentencepiece を実行してください。")
 
 # Transformersライブラリ（アテンション用）
 try:
@@ -1196,29 +1196,29 @@ class NeuroQuantum(nn.Module):
 
 
 # ========================================
-# Part 7: トークナイザー（fugashi日本語形態素解析使用）
+# Part 7: トークナイザー（SentencePiece日本語サブワード使用）
 # ========================================
 
 class NeuroQuantumTokenizer:
     """
-    fugashi（MeCab）日本語形態素解析トークナイザー
+    SentencePiece 日本語サブワードトークナイザー
 
-    - 日本語形態素解析による高精度なトークン化
+    - SentencePieceによる高精度なサブワードトークン化（BPE/Unigram）
     - 語彙サイズを指定して学習可能（8000-32000推奨）
-    - モデルの保存・読み込みが可能（JSON形式）
-    - フォールバック: 文字単位トークナイザー（fugashi未インストール時）
+    - モデルの保存・読み込みが可能（.model形式）
+    - フォールバック: 文字単位トークナイザー（SentencePiece未インストール時）
     """
 
     def __init__(self, vocab_size: int = 16000, model_file: str = None):
         """
         Args:
             vocab_size: 語彙サイズ（デフォルト: 16000）
-            model_file: 既存の語彙ファイルパス（.json）（Noneの場合は新規学習）
+            model_file: 既存のSentencePieceモデルファイルパス（.model）（Noneの場合は新規学習）
         """
         self.vocab_size = vocab_size
         self.actual_vocab_size = None
         self.model_file = model_file
-        self.tagger = None
+        self.sp = None  # SentencePieceProcessor
 
         # 特殊トークン
         self.pad_token = '<pad>'
@@ -1226,95 +1226,103 @@ class NeuroQuantumTokenizer:
         self.bos_token = '<s>'
         self.eos_token = '</s>'
 
-        # 特殊トークンID
+        # 特殊トークンID（SentencePieceのデフォルト: unk=0, bos=1, eos=2, pad=-1）
+        # NeuroQ統一: pad=0, unk=1, bos=2, eos=3
         self.pad_id = 0
         self.unk_id = 1
         self.bos_id = 2
         self.eos_id = 3
 
-        # 語彙マッピング
+        # フォールバック用の語彙マッピング
         self.token_to_idx: Dict[str, int] = {}
         self.idx_to_token: Dict[int, str] = {}
-
-        # fugashiの初期化
-        if FUGASHI_AVAILABLE:
-            try:
-                self.tagger = fugashi.Tagger()
-            except Exception as e:
-                warnings.warn(f"fugashi Taggerの初期化に失敗: {e}")
-                self.tagger = None
 
         # 既存モデルの読み込み
         if model_file and os.path.exists(model_file):
             try:
-                self._load_vocab(model_file)
-                print(f"   ✅ 日本語トークナイザー読み込み: {model_file} (語彙サイズ: {self.actual_vocab_size})")
+                self._load_model(model_file)
+                print(f"   ✅ SentencePieceトークナイザー読み込み: {model_file} (語彙サイズ: {self.actual_vocab_size})")
             except Exception as e:
-                warnings.warn(f"トークナイザーモデルの読み込みに失敗: {e}。新規学習します。")
-                self._init_vocab()
+                warnings.warn(f"SentencePieceモデルの読み込みに失敗: {e}。フォールバックを使用します。")
+                self._init_fallback_vocab()
         else:
-            self._init_vocab()
+            self._init_fallback_vocab()
 
-    def _init_vocab(self):
-        """語彙を特殊トークンで初期化"""
+    def _load_model(self, path: str):
+        """SentencePieceモデルを読み込み"""
+        if not SENTENCEPIECE_AVAILABLE:
+            raise ImportError("sentencepieceがインストールされていません")
+
+        self.sp = spm.SentencePieceProcessor()
+        self.sp.Load(path)
+        self.actual_vocab_size = self.sp.GetPieceSize()
+        self.vocab_size = self.actual_vocab_size
+        self.model_file = path
+
+    def _init_fallback_vocab(self):
+        """フォールバック用の語彙を特殊トークンで初期化"""
         special_tokens = [self.pad_token, self.unk_token, self.bos_token, self.eos_token]
         self.token_to_idx = {token: i for i, token in enumerate(special_tokens)}
         self.idx_to_token = {i: token for token, i in self.token_to_idx.items()}
         self.actual_vocab_size = len(self.token_to_idx)
 
-    def _tokenize(self, text: str) -> List[str]:
-        """fugashiで形態素解析してトークンリストを返す"""
-        if self.tagger is not None:
-            words = self.tagger(text)
-            return [word.surface for word in words]
-        else:
-            return list(text)
-
     def build_vocab(self, texts: List[str], min_freq: int = 2,
                     character_coverage: float = 0.9995, model_prefix: str = "neuroq_tokenizer"):
         """
-        fugashiで形態素解析して語彙を構築
+        SentencePieceモデルを学習して語彙を構築
 
         Args:
             texts: 学習テキストのリスト
-            min_freq: 最小頻度
-            character_coverage: 未使用（互換性のため保持）
+            min_freq: 未使用（互換性のため保持）
+            character_coverage: 文字カバレッジ（日本語は0.9995推奨）
             model_prefix: 保存時のファイルプレフィックス
         """
-        if not FUGASHI_AVAILABLE:
-            warnings.warn("fugashiが利用できません。フォールバックトークナイザーを使用します。")
+        if not SENTENCEPIECE_AVAILABLE:
+            warnings.warn("sentencepieceが利用できません。フォールバックトークナイザーを使用します。")
             self._build_vocab_fallback(texts, min_freq)
             return self
 
-        print(f"   🔤 fugashi（MeCab）で語彙構築中... (目標語彙サイズ: {self.vocab_size})")
+        print(f"   🔤 SentencePiece で語彙構築中... (目標語彙サイズ: {self.vocab_size})")
 
-        # 形態素の頻度をカウント
-        token_freq = Counter()
-        for text in texts:
-            morphemes = self._tokenize(text)
-            token_freq.update(morphemes)
+        import tempfile
 
-        # 特殊トークンで初期化
-        self._init_vocab()
+        # 学習テキストを一時ファイルに書き出し
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.txt', delete=False, encoding='utf-8') as f:
+            for text in texts:
+                text = text.strip()
+                if text:
+                    f.write(text + '\n')
+            tmp_corpus_path = f.name
 
-        # 頻度順にトークンを追加
-        for token, freq in token_freq.most_common():
-            if len(self.token_to_idx) >= self.vocab_size:
-                break
-            if freq >= min_freq and token not in self.token_to_idx:
-                idx = len(self.token_to_idx)
-                self.token_to_idx[token] = idx
-                self.idx_to_token[idx] = token
+        try:
+            # SentencePieceモデルを学習
+            spm.SentencePieceTrainer.Train(
+                input=tmp_corpus_path,
+                model_prefix=model_prefix,
+                vocab_size=self.vocab_size,
+                model_type='unigram',
+                character_coverage=character_coverage,
+                pad_id=self.pad_id,
+                unk_id=self.unk_id,
+                bos_id=self.bos_id,
+                eos_id=self.eos_id,
+                pad_piece=self.pad_token,
+                unk_piece=self.unk_token,
+                bos_piece=self.bos_token,
+                eos_piece=self.eos_token,
+                user_defined_symbols=['<USER>', '<ASSISTANT>', '<SYSTEM>'],
+                train_extremely_large_corpus=False,
+            )
 
-        self.actual_vocab_size = len(self.token_to_idx)
-        self.vocab_size = self.actual_vocab_size
+            # 学習したモデルを読み込み
+            model_path = model_prefix + '.model'
+            self._load_model(model_path)
 
-        # 語彙をJSONファイルに保存
-        vocab_file = model_prefix + '.json'
-        self._save_vocab(vocab_file)
-        self.model_file = vocab_file
+            print(f"   ✅ SentencePiece語彙構築完了 (語彙サイズ: {self.actual_vocab_size})")
 
-        print(f"   ✅ 日本語語彙構築完了 (語彙サイズ: {self.actual_vocab_size})")
+        finally:
+            # 一時ファイルを削除
+            os.unlink(tmp_corpus_path)
 
         return self
 
@@ -1325,7 +1333,7 @@ class NeuroQuantumTokenizer:
         for text in texts:
             char_freq.update(text)
 
-        self._init_vocab()
+        self._init_fallback_vocab()
 
         for char, freq in char_freq.most_common():
             if len(self.token_to_idx) >= self.vocab_size:
@@ -1354,21 +1362,27 @@ class NeuroQuantumTokenizer:
         import logging
         logger = logging.getLogger(__name__)
 
-        morphemes = self._tokenize(text)
-
-        tokens = []
-        if add_special:
-            tokens.append(self.bos_id)
-        for morpheme in morphemes:
-            tokens.append(self.token_to_idx.get(morpheme, self.unk_id))
-        if add_special:
-            tokens.append(self.eos_id)
+        if self.sp is not None:
+            # SentencePieceでエンコード
+            if add_special:
+                tokens = [self.bos_id] + self.sp.EncodeAsIds(text) + [self.eos_id]
+            else:
+                tokens = self.sp.EncodeAsIds(text)
+        else:
+            # フォールバック：文字単位
+            chars = list(text)
+            tokens = []
+            if add_special:
+                tokens.append(self.bos_id)
+            for ch in chars:
+                tokens.append(self.token_to_idx.get(ch, self.unk_id))
+            if add_special:
+                tokens.append(self.eos_id)
 
         if verbose:
             logger.debug(f"[Encode] 入力テキスト: '{text[:50]}...'" if len(text) > 50 else f"[Encode] 入力テキスト: '{text}'")
             logger.debug(f"[Encode] トークン数: {len(tokens)}")
             logger.debug(f"[Encode] トークンID: {tokens[:20]}{'...' if len(tokens) > 20 else ''}")
-            logger.debug(f"[Encode] 形態素: {morphemes[:20]}{'...' if len(morphemes) > 20 else ''}")
 
         return tokens
 
@@ -1387,15 +1401,25 @@ class NeuroQuantumTokenizer:
         import logging
         logger = logging.getLogger(__name__)
 
-        tokens = []
-        special_ids = {self.pad_id, self.unk_id, self.bos_id, self.eos_id}
-        for t in token_ids:
-            if skip_special and t in special_ids:
-                continue
-            token = self.idx_to_token.get(t, self.unk_token)
-            if token not in [self.pad_token, self.unk_token, self.bos_token, self.eos_token]:
-                tokens.append(token)
-        result = ''.join(tokens)
+        if self.sp is not None:
+            # 特殊トークンをフィルタリング
+            if skip_special:
+                special_ids = {self.pad_id, self.unk_id, self.bos_id, self.eos_id}
+                filtered_ids = [t for t in token_ids if t not in special_ids]
+            else:
+                filtered_ids = list(token_ids)
+            result = self.sp.DecodeIds(filtered_ids)
+        else:
+            # フォールバック：文字単位
+            tokens = []
+            special_ids = {self.pad_id, self.unk_id, self.bos_id, self.eos_id}
+            for t in token_ids:
+                if skip_special and t in special_ids:
+                    continue
+                token = self.idx_to_token.get(t, self.unk_token)
+                if token not in [self.pad_token, self.unk_token, self.bos_token, self.eos_token]:
+                    tokens.append(token)
+            result = ''.join(tokens)
 
         if verbose:
             logger.debug(f"[Decode] 入力トークン数: {len(token_ids)}")
@@ -1423,7 +1447,10 @@ class NeuroQuantumTokenizer:
             'compression_ratio': len(text) / len(tokens) if tokens else 0,
         }
 
-        info['tokens'] = [self.idx_to_token.get(t, self.unk_token) for t in tokens]
+        if self.sp is not None:
+            info['tokens'] = self.sp.EncodeAsPieces(text)
+        else:
+            info['tokens'] = [self.idx_to_token.get(t, self.unk_token) for t in tokens]
         info['unk_count'] = sum(1 for t in tokens if t == self.unk_id)
         info['unk_rate'] = info['unk_count'] / len(tokens) if tokens else 0
 
@@ -1451,42 +1478,57 @@ class NeuroQuantumTokenizer:
             print(f"  [{i:3d}] ID={tid:5d} -> '{token}'")
         print("=" * 60)
 
-    def _save_vocab(self, path: str):
-        """語彙をJSONファイルに保存"""
-        data = {
-            'tokenizer_type': 'fugashi',
-            'token_to_idx': self.token_to_idx,
-            'vocab_size': self.vocab_size,
-            'actual_vocab_size': self.actual_vocab_size,
-        }
-        with open(path, 'w', encoding='utf-8') as f:
-            json.dump(data, f, ensure_ascii=False, indent=2)
-
-    def _load_vocab(self, path: str):
-        """語彙をJSONファイルから読み込み"""
-        with open(path, 'r', encoding='utf-8') as f:
-            data = json.load(f)
-        self.token_to_idx = data['token_to_idx']
-        self.idx_to_token = {int(i): token for token, i in self.token_to_idx.items()}
-        self.vocab_size = data.get('vocab_size', len(self.token_to_idx))
-        self.actual_vocab_size = data.get('actual_vocab_size', len(self.token_to_idx))
-        self.model_file = path
-
     def save(self, path: str):
-        """保存"""
-        json_path = path if path.endswith('.json') else path + '.json'
-        self._save_vocab(json_path)
+        """
+        モデルを保存
+
+        SentencePieceモデルの場合は.modelファイルをコピー。
+        フォールバックの場合はJSON形式で保存。
+        """
+        if self.sp is not None and self.model_file:
+            # SentencePieceモデルファイルをコピー
+            import shutil
+            target = path if path.endswith('.model') else path + '.model'
+            if os.path.abspath(self.model_file) != os.path.abspath(target):
+                shutil.copy2(self.model_file, target)
+        else:
+            # フォールバック：JSON保存
+            json_path = path if path.endswith('.json') else path + '.json'
+            data = {
+                'tokenizer_type': 'sentencepiece_fallback',
+                'token_to_idx': self.token_to_idx,
+                'vocab_size': self.vocab_size,
+                'actual_vocab_size': self.actual_vocab_size,
+            }
+            with open(json_path, 'w', encoding='utf-8') as f:
+                json.dump(data, f, ensure_ascii=False, indent=2)
 
     def load(self, path: str):
         """読み込み"""
-        json_file_path = path + '.json' if not path.endswith('.json') else path
-
-        if os.path.exists(json_file_path):
-            self._load_vocab(json_file_path)
+        # .model ファイルを試す
+        model_path = path if path.endswith('.model') else path + '.model'
+        if os.path.exists(model_path) and SENTENCEPIECE_AVAILABLE:
+            self._load_model(model_path)
             return self
 
-        if not path.endswith('.json') and os.path.exists(path):
-            self._load_vocab(path)
+        # .model なしのパスも試す（拡張子なしで .model がある場合）
+        if not path.endswith('.model') and os.path.exists(path):
+            try:
+                self._load_model(path)
+                return self
+            except Exception:
+                pass
+
+        # JSON フォールバック
+        json_path = path + '.json' if not path.endswith('.json') else path
+        if os.path.exists(json_path):
+            with open(json_path, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+            self.token_to_idx = data['token_to_idx']
+            self.idx_to_token = {int(i): token for token, i in self.token_to_idx.items()}
+            self.vocab_size = data.get('vocab_size', len(self.token_to_idx))
+            self.actual_vocab_size = data.get('actual_vocab_size', len(self.token_to_idx))
+            self.model_file = json_path
             return self
 
         raise FileNotFoundError(f"トークナイザーモデルが見つかりません: {path}")

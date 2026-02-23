@@ -51,8 +51,7 @@ image = (
     .pip_install(
         "torch>=2.0.0",
         "numpy>=1.24.0",
-        "fugashi>=1.3.0",
-        "unidic-lite>=1.0.8",
+        "sentencepiece>=0.1.99",
         "tiktoken>=0.5.0",
         "fastapi[standard]",
         "pydantic>=2.0.0",
