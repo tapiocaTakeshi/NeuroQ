@@ -6,7 +6,7 @@ NeuroQ チャットインターフェース
 出力はマークダウン形式で表示されます。
 
 トークナイザー:
-  - sentencepiece (デフォルト): SentencePieceトークナイザー（8k語彙）
+  - fugashi (デフォルト): fugashiトークナイザー（8k語彙）
   - tiktoken: OpenAI GPT-4/GPT-3.5と同じトークン化（オプション）
 
 モデル:
@@ -99,7 +99,7 @@ def remap_state_dict_keys(state_dict: dict, model_state_dict: dict) -> dict:
 
 # トークナイザーのインポート（両方サポート）
 TIKTOKEN_AVAILABLE = False
-SENTENCEPIECE_AVAILABLE = False
+FUGASHI_AVAILABLE = False
 NLLB_AVAILABLE = False
 DEEPL_AVAILABLE = False
 
@@ -111,7 +111,7 @@ except ImportError:
 
 try:
     from neuroquantum_layered import NeuroQuantumTokenizer
-    SENTENCEPIECE_AVAILABLE = True
+    FUGASHI_AVAILABLE = True
 except ImportError:
     pass
 
@@ -129,13 +129,13 @@ except ImportError:
     pass
 
 # 設定
-TOKENIZER_MODEL_PATH = "neuroq_tokenizer.model"
-CHECKPOINT_PATH_SP = "checkpoints/neuroq_checkpoint.pt"  # SentencePiece用（日本語）
+TOKENIZER_MODEL_PATH = "neuroq_tokenizer.json"
+CHECKPOINT_PATH_SP = "checkpoints/neuroq_checkpoint.pt"  # fugashi用（日本語）
 CHECKPOINT_PATH_TK = "checkpoints/neuroq_tiktoken_english_checkpoint.pt"  # TikToken用（英語・Micro）
 CHECKPOINT_PATH_SMALL = "checkpoints/neuroq_small_checkpoint.pt"  # Small
 CHECKPOINT_PATH_LARGE = "checkpoints/neuroq_large_checkpoint.pt"  # Large
-DEFAULT_TOKENIZER = "sentencepiece"  # デフォルトはSentencePiece
-DEFAULT_TRANSLATE = False  # 翻訳モード（SentencePieceは日本語対応なのでデフォルトオフ）
+DEFAULT_TOKENIZER = "fugashi"  # デフォルトはfugashi
+DEFAULT_TRANSLATE = False  # 翻訳モード（fugashiは日本語対応なのでデフォルトオフ）
 DEFAULT_TRANSLATOR = "nllb"  # 翻訳エンジン: "nllb" or "deepl"
 
 
@@ -318,9 +318,9 @@ def print_header(translate_mode: bool = False, translator_engine: str = "nllb"):
 def main():
     # コマンドライン引数のパース
     parser = argparse.ArgumentParser(description='NeuroQ チャットインターフェース')
-    parser.add_argument('--tokenizer', '-t', choices=['tiktoken', 'sentencepiece', 'sp'],
+    parser.add_argument('--tokenizer', '-t', choices=['tiktoken', 'fugashi', 'sp'],
                         default=DEFAULT_TOKENIZER,
-                        help='使用するトークナイザー (default: SentencePiece)')
+                        help='使用するトークナイザー (default: fugashi)')
     parser.add_argument('--encoding', '-e', default='o200k_base',
                         help='tiktokenのエンコーディング (default: o200k_base)')
     parser.add_argument('--translate', action='store_true',
@@ -350,25 +350,25 @@ def main():
     # トークナイザーを選択してロード
     tokenizer_type = args.tokenizer
     if tokenizer_type == 'sp':
-        tokenizer_type = 'sentencepiece'
-    
+        tokenizer_type = 'fugashi'
+
     print(f"📚 トークナイザーをロード中...")
-    
+
     if tokenizer_type == 'tiktoken':
-        # TikTokenが指定された場合でもSentencePieceを使用（推奨）
-        print("⚠️ TikTokenからSentencePieceに切り替えます（推奨設定）")
-        tokenizer_type = 'sentencepiece'
-    
-    if tokenizer_type == 'sentencepiece':
-        if not SENTENCEPIECE_AVAILABLE:
-            print("❌ SentencePieceが利用できません。")
+        # TikTokenが指定された場合でもfugashiを使用（推奨）
+        print("⚠️ TikTokenからfugashiに切り替えます（推奨設定）")
+        tokenizer_type = 'fugashi'
+
+    if tokenizer_type == 'fugashi':
+        if not FUGASHI_AVAILABLE:
+            print("❌ fugashiが利用できません。")
             sys.exit(1)
         if not os.path.exists(TOKENIZER_MODEL_PATH):
             print(f"❌ トークナイザーモデルが見つかりません: {TOKENIZER_MODEL_PATH}")
             sys.exit(1)
         tokenizer = NeuroQuantumTokenizer(vocab_size=8000, model_file=TOKENIZER_MODEL_PATH)
         vocab_size = tokenizer.vocab_size
-        tokenizer_info = f"SentencePiece ({TOKENIZER_MODEL_PATH})"
+        tokenizer_info = f"fugashi ({TOKENIZER_MODEL_PATH})"
         # モデルサイズに応じたチェックポイント
         if args.model_size == 'small':
             checkpoint_path = CHECKPOINT_PATH_SMALL
@@ -395,7 +395,7 @@ def main():
             config = {}
         
         # モデル設定を取得（チェックポイントの設定を優先）
-        model_vocab_size = config.get('vocab_size', 8000)  # SentencePieceのデフォルト
+        model_vocab_size = config.get('vocab_size', 8000)  # fugashiのデフォルト
         embed_dim = config.get('embed_dim', 128)
         num_heads = config.get('num_heads', 4)
         num_layers = config.get('num_layers', 3)

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-SentencePiece + OASST1英語データによるNeuroQモデル学習スクリプト
+fugashi + OASST1英語データによるNeuroQモデル学習スクリプト
 
 OASST1 (Open Assistant) データセットで対話モデルを学習します。
 英語データでモデルを学習し、英語で思考するAIを作成します。
@@ -34,7 +34,7 @@ if current_dir not in sys.path:
     sys.path.insert(0, current_dir)
 
 print("=" * 70)
-print("SentencePiece + OASST1英語データによる NeuroQ モデル学習")
+print("fugashi + OASST1英語データによる NeuroQ モデル学習")
 print("=" * 70)
 
 # インポート
@@ -69,11 +69,11 @@ except ImportError:
     MODEL_CONFIGS_AVAILABLE = False
 
 # 設定
-TOKENIZER_MODEL_PATH = "neuroq_tokenizer.model"
-VOCAB_SIZE = 8000  # SentencePieceの語彙サイズ
-CHECKPOINT_PATH = "checkpoints/neuroq_sentencepiece_english_checkpoint.pt"
+TOKENIZER_MODEL_PATH = "neuroq_tokenizer.json"
+VOCAB_SIZE = 8000  # fugashiの語彙サイズ
+CHECKPOINT_PATH = "checkpoints/neuroq_fugashi_english_checkpoint.pt"
 
-# モデル設定（SentencePieceの語彙サイズに対応）
+# モデル設定（fugashiの語彙サイズに対応）
 MODEL_CONFIG = {
     'vocab_size': VOCAB_SIZE,
     'embed_dim': 128,
@@ -200,10 +200,10 @@ def train_with_oasst1(epochs=None, model_size='micro'):
     print("Step 1: トークナイザー初期化")
     print("=" * 50)
 
-    # SentencePieceトークナイザーを初期化
+    # fugashiトークナイザーを初期化
     if not os.path.exists(TOKENIZER_MODEL_PATH):
         print(f"トークナイザーモデルが見つかりません: {TOKENIZER_MODEL_PATH}")
-        print("train_sentencepiece_tokenizer.py を先に実行してください")
+        print("fugashiトークナイザーファイルを先に準備してください")
         sys.exit(1)
 
     tokenizer = NeuroQuantumTokenizer(vocab_size=VOCAB_SIZE, model_file=TOKENIZER_MODEL_PATH)
@@ -257,7 +257,7 @@ def train_with_oasst1(epochs=None, model_size='micro'):
         model_config = get_model_config(model_size)
         checkpoint_path = get_checkpoint_path(model_size)
 
-        # vocab_sizeをSentencePieceに合わせる
+        # vocab_sizeをfugashiに合わせる
         model_config['vocab_size'] = VOCAB_SIZE
 
         print(f"\nモデル設定 ({model_config['name']}):")
@@ -417,7 +417,7 @@ def train_with_oasst1(epochs=None, model_size='micro'):
         'model_state_dict': model.state_dict(),
         'config': used_model_config,
         'tokenizer': {
-            'type': 'sentencepiece',
+            'type': 'fugashi',
             'model_path': TOKENIZER_MODEL_PATH,
             'vocab_size': tokenizer.vocab_size,
         },
@@ -487,14 +487,14 @@ def train_with_oasst1(epochs=None, model_size='micro'):
     print(f"""
 次のステップ:
 1. チェックポイントを確認: {checkpoint_path}
-2. チャットで使用: python chat.py --model-size {model_size} --tokenizer sentencepiece --translate
+2. チャットで使用: python chat.py --model-size {model_size} --tokenizer fugashi --translate
    （翻訳モードで日本語<->英語変換）
 """)
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
-        description='SentencePiece + OASST1英語データによるNeuroQモデル学習'
+        description='fugashi + OASST1英語データによるNeuroQモデル学習'
     )
     parser.add_argument(
         '--model-size', '-m',

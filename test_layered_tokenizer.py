@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-NeuroQuantum Layered Tokenizer のSentencePiece対応テスト
+NeuroQuantum Layered Tokenizer のfugashi対応テスト
 """
 
 import sys
@@ -11,13 +11,13 @@ from neuroquantum_layered import NeuroQuantumTokenizer
 
 def test_tokenizer():
     print("=" * 70)
-    print("🔤 NeuroQuantumTokenizer SentencePiece テスト")
+    print("🔤 NeuroQuantumTokenizer fugashi テスト")
     print("=" * 70)
 
-    # 既存のSentencePieceモデルを読み込み
+    # 既存のfugashiモデルを読み込み
     tokenizer = NeuroQuantumTokenizer(
         vocab_size=8000,
-        model_file="/home/user/NeuroQuantum/neuroq_tokenizer_8k.model"
+        model_file="/home/user/NeuroQuantum/neuroq_tokenizer_8k.json"
     )
 
     print(f"\n✅ トークナイザー読み込み完了")
@@ -49,7 +49,7 @@ def test_tokenizer():
         print(f"デコード: {decoded}")
 
     print("\n" + "=" * 70)
-    print("✅ テスト完了！vocab_size=8000のSentencePieceトークナイザーが正常に動作しています。")
+    print("✅ テスト完了！vocab_size=8000のfugashiトークナイザーが正常に動作しています。")
     print("=" * 70)
 
 if __name__ == '__main__':

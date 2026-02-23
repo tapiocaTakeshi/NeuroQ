@@ -22,7 +22,7 @@ model = NeuroQuantumBrainAI(
     num_layers=3,
     num_neurons=100,
     max_vocab=8000,
-    use_sentencepiece=True
+    use_fugashi=True
 )
 
 # Load tokenizer

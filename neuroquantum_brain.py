@@ -47,13 +47,13 @@ import re
 import warnings
 warnings.filterwarnings('ignore')
 
-# SentencePiece（トークナイザー用）
+# fugashi（トークナイザー用）
 try:
-    import sentencepiece as spm
-    SENTENCEPIECE_AVAILABLE = True
+    import fugashi
+    FUGASHI_AVAILABLE = True
 except ImportError:
-    SENTENCEPIECE_AVAILABLE = False
-    warnings.warn("sentencepieceライブラリがインストールされていません。pip install sentencepiece を実行してください。")
+    FUGASHI_AVAILABLE = False
+    warnings.warn("fugashiライブラリがインストールされていません。pip install fugashi unidic-lite を実行してください。")
 
 # Transformersライブラリ（アテンション用）
 try:
@@ -881,186 +881,204 @@ class NeuroQuantumBrain(nn.Module):
 
 
 # ========================================
-# トークナイザー（transformersライブラリ使用）
+# トークナイザー（fugashi使用）
 # ========================================
 
 class BrainTokenizer:
     """
-    SentencePieceトークナイザーを使用
-    
+    fugashiトークナイザーを使用
+
+    - fugashi (MeCab wrapper) で形態素解析し語彙を構築
     - 語彙サイズを指定して学習可能（8000-32000推奨）
-    - BPEアルゴリズムを使用（日本語に適している）
-    - モデルの保存・読み込みが可能
-    - フォールバック: 簡易トークナイザー（SentencePiece未インストール時）
+    - 日本語の形態素解析に適している
+    - モデルの保存・読み込みが可能（JSON形式）
+    - フォールバック: 簡易トークナイザー（fugashi未インストール時）
     """
-    
+
     def __init__(self, vocab_size: int = 16000, model_file: str = None):
         """
         Args:
             vocab_size: 語彙サイズ（デフォルト: 16000）
-            model_file: 既存のSentencePieceモデルファイルパス（Noneの場合は新規学習）
+            model_file: 既存のfugashi語彙ファイルパス（JSON形式、Noneの場合は新規学習）
         """
         self.vocab_size = vocab_size
         self.actual_vocab_size = None
         self.model_file = model_file
-        self.sp_model = None
-        
+        self.tagger = None
+
         # 特殊トークン
         self.pad_token = '<pad>'
         self.unk_token = '<unk>'
         self.bos_token = '<s>'
         self.eos_token = '</s>'
-        
-        # SentencePieceを使用
-        if SENTENCEPIECE_AVAILABLE:
-            if model_file and os.path.exists(model_file):
-                # 既存モデルを読み込み
+
+        # fugashiを使用
+        if FUGASHI_AVAILABLE:
+            try:
+                self.tagger = fugashi.Tagger()
+            except Exception as e:
+                warnings.warn(f"fugashi Taggerの初期化に失敗: {e}。フォールバックを使用します。")
+                self.tagger = None
+
+            if self.tagger is not None and model_file and os.path.exists(model_file):
+                # 既存モデル（JSON語彙）を読み込み
                 try:
-                    self.sp_model = spm.SentencePieceProcessor()
-                    self.sp_model.load(model_file)
-                    self.actual_vocab_size = self.sp_model.get_piece_size()
+                    import json
+                    with open(model_file, 'r', encoding='utf-8') as f:
+                        vocab_data = json.load(f)
+                    self.token2idx = vocab_data['token2idx']
+                    self.idx2token = {int(k): v for k, v in vocab_data['idx2token'].items()}
+                    self.actual_vocab_size = len(self.token2idx)
                     self.vocab_size = self.actual_vocab_size
                     # 特殊トークンIDを取得
-                    self.pad_id = self.sp_model.pad_id()
-                    self.unk_id = self.sp_model.unk_id()
-                    self.bos_id = self.sp_model.bos_id()
-                    self.eos_id = self.sp_model.eos_id()
-                    print(f"   ✅ SentencePieceモデル読み込み: {model_file} (語彙サイズ: {self.actual_vocab_size})")
+                    self.pad_id = self.token2idx.get(self.pad_token, 0)
+                    self.unk_id = self.token2idx.get(self.unk_token, 1)
+                    self.bos_id = self.token2idx.get(self.bos_token, 2)
+                    self.eos_id = self.token2idx.get(self.eos_token, 3)
+                    print(f"   ✅ fugashi語彙モデル読み込み: {model_file} (語彙サイズ: {self.actual_vocab_size})")
+                    return
                 except Exception as e:
-                    warnings.warn(f"SentencePieceモデルの読み込みに失敗: {e}。新規学習します。")
-                    self.sp_model = None
+                    warnings.warn(f"fugashi語彙モデルの読み込みに失敗: {e}。新規学習します。")
         else:
-            # SentencePiece未インストール
-            self.sp_model = None
-        
-        # SentencePieceが使えない場合はフォールバック
-        if self.sp_model is None:
-            self._init_fallback()
-    
+            # fugashi未インストール
+            self.tagger = None
+
+        # fugashiが使えない場合はフォールバック
+        self._init_fallback()
+
     def _init_fallback(self):
         """フォールバック用の簡易トークナイザー初期化"""
-        self.token2idx = {'<PAD>': 0, '<UNK>': 1, '<BOS>': 2, '<EOS>': 3}
-        self.idx2token = {0: '<PAD>', 1: '<UNK>', 2: '<BOS>', 3: '<EOS>'}
+        self.token2idx = {'<pad>': 0, '<unk>': 1, '<s>': 2, '</s>': 3}
+        self.idx2token = {0: '<pad>', 1: '<unk>', 2: '<s>', 3: '</s>'}
         # vocab_sizeは設定されている値を保持（上書きしない）
         if not hasattr(self, 'vocab_size') or self.vocab_size is None:
             self.vocab_size = 4
         self.actual_vocab_size = None  # fit()で設定される
-        
+
         # 特殊トークンID
         self.pad_id = 0
         self.unk_id = 1
         self.bos_id = 2
         self.eos_id = 3
-    
-    def fit(self, texts: List[str], character_coverage: float = 0.9995, model_prefix: str = "spm_model_brain"):
+
+    def fit(self, texts: List[str], character_coverage: float = 0.9995, model_prefix: str = "fugashi_vocab_brain"):
         """
-        SentencePieceで語彙を学習
-        
+        fugashiで形態素解析し語彙を構築
+
         Args:
             texts: 学習テキストのリスト
-            character_coverage: 文字カバレッジ（0.9995が推奨、日本語の場合は0.9995-0.99995）
+            character_coverage: 文字カバレッジ（互換性のため残しているが、fugashiでは未使用）
             model_prefix: モデルファイルのプレフィックス
         """
-        if not SENTENCEPIECE_AVAILABLE:
-            warnings.warn("SentencePieceが利用できません。フォールバックトークナイザーを使用します。")
+        if not FUGASHI_AVAILABLE or self.tagger is None:
+            warnings.warn("fugashiが利用できません。フォールバックトークナイザーを使用します。")
             self._fit_fallback(texts)
             return
-        
+
         # vocab_sizeが4以下（特殊トークンのみ）の場合は、デフォルト値を使用
         actual_vocab_size = max(self.vocab_size, 16000) if self.vocab_size <= 4 else self.vocab_size
-        print(f"   🔤 SentencePieceで語彙学習中... (目標語彙サイズ: {actual_vocab_size})")
-        
-        # 一時ファイルにテキストを保存
-        import tempfile
-        with tempfile.NamedTemporaryFile(mode='w', suffix='.txt', delete=False, encoding='utf-8') as f:
-            temp_file = f.name
-            for text in texts:
-                f.write(text + '\n')
-        
+        print(f"   🔤 fugashiで語彙構築中... (目標語彙サイズ: {actual_vocab_size})")
+
         try:
-            # SentencePiece学習
-            spm.SentencePieceTrainer.train(
-                input=temp_file,
-                model_prefix=model_prefix,
-                vocab_size=actual_vocab_size,
-                character_coverage=character_coverage,
-                model_type='bpe',  # BPEアルゴリズム
-                pad_id=0,
-                unk_id=1,
-                bos_id=2,
-                eos_id=3,
-                pad_piece=self.pad_token,
-                unk_piece=self.unk_token,
-                bos_piece=self.bos_token,
-                eos_piece=self.eos_token,
-            )
-            
-            # モデルを読み込み
-            model_file_path = model_prefix + '.model'
-            self.sp_model = spm.SentencePieceProcessor()
-            self.sp_model.load(model_file_path)
-            self.actual_vocab_size = self.sp_model.get_piece_size()
+            # 形態素解析して語彙を構築
+            morpheme_counts = Counter()
+            for text in texts:
+                words = self.tagger(text)
+                for word in words:
+                    surface = word.surface
+                    if surface.strip():
+                        morpheme_counts[surface] += 1
+
+            # 特殊トークンで初期化
+            self.token2idx = {
+                self.pad_token: 0,
+                self.unk_token: 1,
+                self.bos_token: 2,
+                self.eos_token: 3,
+            }
+            self.idx2token = {0: self.pad_token, 1: self.unk_token, 2: self.bos_token, 3: self.eos_token}
+
+            # 頻度順に語彙を追加
+            for morpheme, _ in morpheme_counts.most_common(actual_vocab_size - 4):
+                if morpheme not in self.token2idx:
+                    idx = len(self.token2idx)
+                    self.token2idx[morpheme] = idx
+                    self.idx2token[idx] = morpheme
+
+            self.actual_vocab_size = len(self.token2idx)
             self.vocab_size = self.actual_vocab_size
+
+            # 特殊トークンIDを設定
+            self.pad_id = 0
+            self.unk_id = 1
+            self.bos_id = 2
+            self.eos_id = 3
+
+            # JSON形式で保存
+            import json
+            model_file_path = model_prefix + '.json'
+            vocab_data = {
+                'token2idx': self.token2idx,
+                'idx2token': {str(k): v for k, v in self.idx2token.items()},
+            }
+            with open(model_file_path, 'w', encoding='utf-8') as f:
+                json.dump(vocab_data, f, ensure_ascii=False, indent=2)
             self.model_file = model_file_path
-            # vocab_sizeを更新
-            if hasattr(self, 'vocab_size') and self.vocab_size <= 4:
-                self.vocab_size = self.actual_vocab_size
-            
-            # 特殊トークンIDを取得
-            self.pad_id = self.sp_model.pad_id()
-            self.unk_id = self.sp_model.unk_id()
-            self.bos_id = self.sp_model.bos_id()
-            self.eos_id = self.sp_model.eos_id()
-            
-            print(f"   ✅ SentencePiece語彙学習完了 (語彙サイズ: {self.actual_vocab_size})")
-            
+
+            print(f"   ✅ fugashi語彙構築完了 (語彙サイズ: {self.actual_vocab_size})")
+
         except Exception as e:
-            warnings.warn(f"SentencePiece学習に失敗: {e}。フォールバックを使用します。")
+            warnings.warn(f"fugashi語彙構築に失敗: {e}。フォールバックを使用します。")
             self._fit_fallback(texts)
-        finally:
-            # 一時ファイルを削除
-            if os.path.exists(temp_file):
-                os.unlink(temp_file)
-            # モデルファイル以外の一時ファイルを削除
-            for ext in ['.vocab']:
-                temp_file_ext = model_prefix + ext
-                if os.path.exists(temp_file_ext):
-                    os.unlink(temp_file_ext)
-    
+
     def _fit_fallback(self, texts: List[str]):
         """フォールバック：簡易語彙構築"""
         print(f"   🔤 フォールバック語彙構築中...")
         char_counts = Counter()
         for text in texts:
             char_counts.update(list(text))
-        
+
         # vocab_sizeが4以下（特殊トークンのみ）の場合は、デフォルト値を使用
         target_vocab_size = max(self.vocab_size, 16000) if self.vocab_size <= 4 else self.vocab_size
-        
+
         for char, _ in char_counts.most_common(target_vocab_size - 4):
             if char not in self.token2idx:
                 idx = len(self.token2idx)
                 self.token2idx[char] = idx
                 self.idx2token[idx] = char
-        
+
         self.vocab_size = len(self.token2idx)
         self.actual_vocab_size = self.vocab_size
         print(f"   ✅ 語彙サイズ: {self.vocab_size}")
-    
+
     def encode(self, text: str, add_special: bool = False) -> List[int]:
         """エンコード"""
-        if self.sp_model is not None:
-            # SentencePiece使用
+        if self.tagger is not None and hasattr(self, 'token2idx') and len(self.token2idx) > 4:
+            # fugashi使用
+            tokens = []
             if add_special:
-                return self.sp_model.encode(text, out_type=int, add_bos=True, add_eos=True)
-            else:
-                return self.sp_model.encode(text, out_type=int, add_bos=False, add_eos=False)
+                tokens.append(self.bos_id)
+
+            words = self.tagger(text)
+            for word in words:
+                surface = word.surface
+                if surface in self.token2idx:
+                    tokens.append(self.token2idx[surface])
+                else:
+                    # 未知語は文字単位で分割
+                    for ch in surface:
+                        tokens.append(self.token2idx.get(ch, self.unk_id))
+
+            if add_special:
+                tokens.append(self.eos_id)
+
+            return tokens
         else:
             # フォールバック：最長マッチ方式
             tokens = []
             if add_special:
                 tokens.append(self.bos_id)
-            
+
             i = 0
             text_len = len(text)
             while i < text_len:
@@ -1072,35 +1090,26 @@ class BrainTokenizer:
                         i += length
                         matched = True
                         break
-                
+
                 if not matched:
                     tokens.append(self.token2idx.get(text[i], self.unk_id))
                     i += 1
-            
+
             if add_special:
                 tokens.append(self.eos_id)
-            
+
             return tokens
-    
+
     def decode(self, tokens: List[int], skip_special: bool = True) -> str:
         """デコード"""
-        if self.sp_model is not None:
-            # SentencePiece使用
-            if skip_special:
-                # 特殊トークンをスキップ
-                special_ids = {self.pad_id, self.eos_id, self.bos_id, self.unk_id}
-                tokens = [t for t in tokens if t not in special_ids]
-            return self.sp_model.decode(tokens)
-        else:
-            # フォールバック
-            result = []
-            special_ids = {self.pad_id, self.unk_id, self.bos_id, self.eos_id}
-            for t in tokens:
-                if skip_special and t in special_ids:
-                    continue
-                token = self.idx2token.get(t, '')
-                result.append(token)
-            return ''.join(result)
+        result = []
+        special_ids = {self.pad_id, self.unk_id, self.bos_id, self.eos_id}
+        for t in tokens:
+            if skip_special and t in special_ids:
+                continue
+            token = self.idx2token.get(t, '')
+            result.append(token)
+        return ''.join(result)
 
 
 # ========================================
@@ -1139,7 +1148,7 @@ class NeuroQuantumBrainAI:
         self.openai_api_key = openai_api_key or os.getenv("OPENAI_API_KEY")
         self.openai_model = openai_model
         
-        # SentencePieceトークナイザー（学習時に構築される）
+        # fugashiトークナイザー（学習時に構築される）
         self.tokenizer = None  # train()メソッドで構築される
         self.model = None
         
@@ -1159,10 +1168,10 @@ class NeuroQuantumBrainAI:
         """学習"""
         print("\n🎓 学習開始...")
         
-        # トークナイザー構築（SentencePiece使用）
+        # トークナイザー構築（fugashi使用）
         print("\n🔤 トークナイザー構築...")
-        
-        # SentencePieceで語彙を学習
+
+        # fugashiで語彙を学習
         self.tokenizer = BrainTokenizer(vocab_size=self.max_vocab)
         self.tokenizer.fit(texts)
         

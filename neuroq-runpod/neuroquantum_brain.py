@@ -1160,13 +1160,13 @@ class NeuroQuantumBrainAI:
     
     def __init__(self, embed_dim: int = 128, num_heads: int = 4,
                  num_layers: int = 3, num_neurons: int = 75,
-                 max_vocab: int = 50000, use_sentencepiece: bool = True):
+                 max_vocab: int = 50000, use_fugashi: bool = True):
         self.embed_dim = embed_dim
         self.num_heads = num_heads
         self.num_layers = num_layers
         self.num_neurons = num_neurons
         self.max_vocab = max_vocab
-        self.use_sentencepiece = use_sentencepiece and NEUROQUANTUM_TOKENIZER_AVAILABLE
+        self.use_fugashi = use_fugashi and NEUROQUANTUM_TOKENIZER_AVAILABLE
         
         self.tokenizer = None  # train()で初期化
         self.model = None
@@ -1212,17 +1212,17 @@ class NeuroQuantumBrainAI:
         # トークナイザー初期化
         print("\n🔤 トークナイザー構築...")
         
-        if self.use_sentencepiece:
-            # 学習済みのSentencePieceモデルを探す
+        if self.use_fugashi:
+            # 学習済みのfugashi語彙モデルを探す
             tokenizer_model_paths = [
-                "neuroq_tokenizer.model",
-                "neuroq_tokenizer_8k.model",
-                "../neuroq_tokenizer.model",
-                "../neuroq_tokenizer_8k.model",
-                os.path.join(os.path.dirname(__file__), "neuroq_tokenizer.model"),
-                os.path.join(os.path.dirname(__file__), "neuroq_tokenizer_8k.model"),
+                "neuroq_tokenizer.json",
+                "neuroq_tokenizer_8k.json",
+                "../neuroq_tokenizer.json",
+                "../neuroq_tokenizer_8k.json",
+                os.path.join(os.path.dirname(__file__), "neuroq_tokenizer.json"),
+                os.path.join(os.path.dirname(__file__), "neuroq_tokenizer_8k.json"),
             ]
-            
+
             existing_model = None
             for path in tokenizer_model_paths:
                 if os.path.exists(path):
@@ -1232,18 +1232,18 @@ class NeuroQuantumBrainAI:
                     break
                 elif verbose:
                     logger.debug(f"トークナイザーモデル検索: {path} -> 見つからない")
-            
+
             if existing_model:
-                print(f"   既存のSentencePieceモデルを使用: {existing_model}")
+                print(f"   既存のfugashi語彙モデルを使用: {existing_model}")
                 self.tokenizer = NeuroQuantumTokenizer(vocab_size=8000, model_file=existing_model)
                 if verbose:
-                    logger.info(f"SentencePieceモデルをロード: {existing_model}")
+                    logger.info(f"fugashi語彙モデルをロード: {existing_model}")
             else:
-                print("   ⚠️ 学習済みSentencePieceモデルが見つかりません。BrainTokenizerを使用します。")
+                print("   ⚠️ 学習済みfugashi語彙モデルが見つかりません。BrainTokenizerを使用します。")
                 self.tokenizer = BrainTokenizer(self.max_vocab)
                 self.tokenizer.fit(texts)
                 if verbose:
-                    logger.warning("SentencePieceモデルが見つからないため、BrainTokenizerを使用")
+                    logger.warning("fugashi語彙モデルが見つからないため、BrainTokenizerを使用")
         else:
             # BrainTokenizerを使用
             self.tokenizer = BrainTokenizer(self.max_vocab)
@@ -1289,8 +1289,8 @@ class NeuroQuantumBrainAI:
                 logger.debug(f"  -> トークン数: {len(tokens)}, UNK数: {unk_in_text}")
                 if idx < 3:
                     logger.debug(f"  -> トークンID (先頭10): {tokens[:10]}")
-                    if hasattr(self.tokenizer, 'sp_model') and self.tokenizer.sp_model:
-                        tokens_str = [self.tokenizer.sp_model.id_to_piece(t) for t in tokens[:10]]
+                    if hasattr(self.tokenizer, 'idx2token') and self.tokenizer.idx2token:
+                        tokens_str = [self.tokenizer.idx2token.get(t, '<?>') for t in tokens[:10]]
                         logger.debug(f"  -> トークン文字列: {tokens_str}")
         
         print(f"   総トークン数: {len(all_tokens)}")
@@ -1456,7 +1456,7 @@ class NeuroQuantumBrainAI:
         dialogue_prompt = f"<USER>{prompt}<ASSISTANT>"
         
         # NeuroQuantumTokenizer と BrainTokenizer の両方に対応
-        if self.use_sentencepiece and isinstance(self.tokenizer, NeuroQuantumTokenizer):
+        if self.use_fugashi and isinstance(self.tokenizer, NeuroQuantumTokenizer):
             tokens = self.tokenizer.encode(dialogue_prompt, add_special=False)
         else:
             tokens = self.tokenizer.encode(dialogue_prompt)
@@ -1476,7 +1476,7 @@ class NeuroQuantumBrainAI:
         
         # デコード
         generated_list = generated.cpu().tolist()
-        if self.use_sentencepiece and isinstance(self.tokenizer, NeuroQuantumTokenizer):
+        if self.use_fugashi and isinstance(self.tokenizer, NeuroQuantumTokenizer):
             full_text = self.tokenizer.decode(generated_list, skip_special=True)
         else:
             full_text = self.tokenizer.decode(generated_list)

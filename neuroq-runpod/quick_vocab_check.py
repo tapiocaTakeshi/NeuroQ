@@ -9,7 +9,7 @@ import os
 import sys
 
 try:
-    import sentencepiece as spm
+    import json
 
     print("=" * 70)
     print("🔍 NeuroQ vocab_size 簡易チェック")
@@ -17,10 +17,10 @@ try:
 
     # トークナイザーファイルを探す
     tokenizer_paths = [
-        "neuroq_tokenizer.model",
-        "../neuroq_tokenizer.model",
-        "neuroq_tokenizer_8k.model",
-        "../neuroq_tokenizer_8k.model",
+        "neuroq_tokenizer.json",
+        "../neuroq_tokenizer.json",
+        "neuroq_tokenizer_8k.json",
+        "../neuroq_tokenizer_8k.json",
     ]
 
     print("\n📊 トークナイザーファイル:")
@@ -30,17 +30,18 @@ try:
     for path in tokenizer_paths:
         if os.path.exists(path):
             try:
-                sp = spm.SentencePieceProcessor()
-                sp.load(path)
-                vocab_size = sp.get_piece_size()
+                with open(path, 'r', encoding='utf-8') as f:
+                    vocab_data = json.load(f)
+                vocab = vocab_data.get('vocab', vocab_data)
+                vocab_size = len(vocab)
                 found_tokenizers.append((path, vocab_size))
                 print(f"✅ {path}")
                 print(f"   語彙サイズ: {vocab_size:,}")
-                print(f"   特殊トークン:")
-                print(f"   - <pad>: {sp.pad_id()}")
-                print(f"   - <unk>: {sp.unk_id()}")
-                print(f"   - <s>: {sp.bos_id()}")
-                print(f"   - </s>: {sp.eos_id()}")
+                special_tokens = vocab_data.get('special_tokens', {})
+                if special_tokens:
+                    print(f"   特殊トークン:")
+                    for name, tid in special_tokens.items():
+                        print(f"   - {name}: {tid}")
                 print()
             except Exception as e:
                 print(f"❌ {path}: {e}")
@@ -49,29 +50,20 @@ try:
         print("❌ 有効なトークナイザーが見つかりません")
         sys.exit(1)
 
-    # テストエンコード
-    print("\n🧪 トークナイズテスト:")
+    # テスト情報表示
+    print("\n🧪 語彙ファイル情報:")
     print("-" * 70)
 
     test_path, test_vocab_size = found_tokenizers[0]
-    sp = spm.SentencePieceProcessor()
-    sp.load(test_path)
+    with open(test_path, 'r', encoding='utf-8') as f:
+        vocab_data = json.load(f)
+    vocab = vocab_data.get('vocab', vocab_data)
 
-    test_texts = [
-        "量子コンピュータについて教えて",
-        "人工知能が未来を変える",
-        "こんにちは、今日も良い天気ですね",
-    ]
-
-    for text in test_texts:
-        tokens = sp.encode(text, out_type=str)
-        ids = sp.encode(text, out_type=int)
-        decoded = sp.decode(ids)
-
-        print(f"\n入力: {text}")
-        print(f"トークン: {tokens[:10]}{'...' if len(tokens) > 10 else ''}")
-        print(f"ID数: {len(ids)}")
-        print(f"デコード: {decoded}")
+    # 語彙の先頭を表示
+    vocab_items = list(vocab.items()) if isinstance(vocab, dict) else list(enumerate(vocab))
+    print(f"\n語彙の先頭10件:")
+    for key, val in vocab_items[:10]:
+        print(f"   {key}: {val}")
 
     print("\n" + "=" * 70)
     print("✅ チェック完了")

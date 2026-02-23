@@ -14,7 +14,7 @@ sys.path.insert(0, os.path.dirname(__file__))
 
 try:
     from neuroquantum_layered import NeuroQuantumAI, NeuroQuantumTokenizer
-    import sentencepiece as spm
+    import json
 
     print("=" * 70)
     print("🔍 NeuroQ vocab_size 整合性チェック")
@@ -25,10 +25,10 @@ try:
     print("-" * 70)
 
     tokenizer_paths = [
-        "neuroq_tokenizer.model",
-        "../neuroq_tokenizer.model",
-        "neuroq_tokenizer_8k.model",
-        "../neuroq_tokenizer_8k.model",
+        "neuroq_tokenizer.json",
+        "../neuroq_tokenizer.json",
+        "neuroq_tokenizer_8k.json",
+        "../neuroq_tokenizer_8k.json",
     ]
 
     tokenizer_vocab_size = None
@@ -37,9 +37,9 @@ try:
     for path in tokenizer_paths:
         if os.path.exists(path):
             try:
-                sp = spm.SentencePieceProcessor()
-                sp.load(path)
-                tokenizer_vocab_size = sp.get_piece_size()
+                with open(path, 'r', encoding='utf-8') as f:
+                    vocab_data = json.load(f)
+                tokenizer_vocab_size = len(vocab_data.get('vocab', vocab_data))
                 tokenizer_path = path
                 print(f"   ✅ トークナイザーファイル: {path}")
                 print(f"   📊 語彙サイズ: {tokenizer_vocab_size:,}")

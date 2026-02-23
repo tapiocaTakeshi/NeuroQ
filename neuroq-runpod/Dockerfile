@@ -54,11 +54,9 @@ COPY pretrain_openai.py /app/
 # 事前学習済みモデルモジュール（同じディレクトリに配置）
 COPY neuroq_pretrained.py /app/
 
-# トークナイザー（4kと8kの両方）
-COPY neuroq_tokenizer.model /app/
-COPY neuroq_tokenizer.vocab /app/
-COPY neuroq_tokenizer_8k.model /app/
-COPY neuroq_tokenizer_8k.vocab /app/
+# 日本語トークナイザー語彙ファイル
+COPY neuroq_tokenizer.json /app/
+COPY neuroq_tokenizer_8k.json /app/
 
 # TikToken関連ファイル（英語チェックポイント用）
 COPY tiktoken_tokenizer.py /app/

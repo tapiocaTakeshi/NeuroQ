@@ -7,7 +7,7 @@ import json
 import requests
 from pathlib import Path
 from typing import Iterator, List, Dict, Any
-import sentencepiece as spm
+import fugashi
 from torch.utils.data import Dataset, IterableDataset
 import torch
 from datasets import load_dataset  # HuggingFace datasets
