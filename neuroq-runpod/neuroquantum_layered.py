@@ -1322,7 +1322,7 @@ class NeuroQuantumTokenizer:
     """
     SentencePiece 日本語サブワードトークナイザー
 
-    - SentencePieceによる高精度なサブワードトークン化（BPE）
+    - SentencePieceによる高精度なサブワードトークン化（Unigram）
     - 語彙サイズを指定して学習可能（8000-32000推奨）
     - モデルの保存・読み込みが可能（.model形式）
     - フォールバック: 文字単位トークナイザー（SentencePiece未インストール時）
@@ -1419,7 +1419,7 @@ class NeuroQuantumTokenizer:
                 input=tmp_corpus_path,
                 model_prefix=model_prefix,
                 vocab_size=self.vocab_size,
-                model_type='bpe',
+                model_type='unigram',
                 character_coverage=character_coverage,
                 pad_id=self.pad_id,
                 unk_id=self.unk_id,
