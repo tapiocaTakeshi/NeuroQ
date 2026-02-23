@@ -60,6 +60,13 @@ except ImportError:
     OPENAI_AVAILABLE = False
     warnings.warn("OpenAI APIが利用できません。openai>=1.0.0をインストールしてください。")
 
+# Google Generative AI（オプション - テキストエンベディング用）
+try:
+    import google.generativeai as genai
+    GOOGLE_GENAI_AVAILABLE = True
+except ImportError:
+    GOOGLE_GENAI_AVAILABLE = False
+
 # Translation Pipeline（オプション）
 try:
     from translation_pipeline import (
@@ -567,40 +574,139 @@ class OpenAIEmbeddingWrapper:
         return np.array(all_embeddings)
 
 
+class GoogleEmbeddingWrapper:
+    """
+    Google Text Embedding API ラッパー
+
+    Google Generative AI (Gemini) のテキストエンベディングAPIを使用
+    """
+
+    def __init__(self, api_key: Optional[str] = None, model: str = "models/text-embedding-004", task_type: str = "RETRIEVAL_DOCUMENT"):
+        """
+        Args:
+            api_key: Google API キー（Noneの場合はGOOGLE_API_KEY環境変数を使用）
+            model: エンベディングモデル名
+                - "models/text-embedding-004": 768次元（デフォルト、最新）
+                - "models/embedding-001": 768次元
+            task_type: タスクタイプ
+                - "RETRIEVAL_DOCUMENT": ドキュメント検索用（デフォルト）
+                - "RETRIEVAL_QUERY": クエリ検索用
+                - "SEMANTIC_SIMILARITY": 意味的類似度
+                - "CLASSIFICATION": 分類用
+        """
+        if not GOOGLE_GENAI_AVAILABLE:
+            raise ImportError("google-generativeai がインストールされていません。pip install google-generativeai を実行してください。")
+
+        self.api_key = api_key or os.getenv("GOOGLE_API_KEY")
+        if not self.api_key:
+            raise ValueError("Google APIキーが必要です。GOOGLE_API_KEY環境変数を設定するか、api_key引数を指定してください。")
+
+        genai.configure(api_key=self.api_key)
+        self.model = model
+        self.task_type = task_type
+        self.embed_dim = 768  # Google text-embedding-004 のデフォルト次元
+
+    def get_embeddings(self, texts: List[str], batch_size: int = 100) -> np.ndarray:
+        """
+        テキストのリストからエンベディングを取得
+
+        Args:
+            texts: テキストのリスト
+            batch_size: バッチサイズ
+
+        Returns:
+            (N, embed_dim) エンベディング配列
+        """
+        all_embeddings = []
+
+        for i in range(0, len(texts), batch_size):
+            batch = texts[i:i + batch_size]
+
+            try:
+                result = genai.embed_content(
+                    model=self.model,
+                    content=batch,
+                    task_type=self.task_type,
+                )
+                # result['embedding'] はバッチの場合リストのリスト
+                if isinstance(result['embedding'][0], list):
+                    all_embeddings.extend(result['embedding'])
+                else:
+                    all_embeddings.append(result['embedding'])
+            except Exception as e:
+                raise RuntimeError(f"Google Embedding APIエラー: {e}")
+
+        embeddings = np.array(all_embeddings)
+        if len(embeddings.shape) == 1:
+            embeddings = embeddings.reshape(1, -1)
+        self.embed_dim = embeddings.shape[-1]
+        return embeddings
+
+
 class NeuroQuantumEmbedding(nn.Module):
     """
     ニューロQ 埋め込み層
-    
+
     Token → テキストエンベディング + 位置エンコーディング
-    
-    OpenAI Embedding APIを使用するオプションあり
+
+    OpenAI/Google Embedding APIを使用するオプションあり
     """
-    
+
     def __init__(
-        self, 
+        self,
         config: NeuroQuantumConfig,
         use_openai_embedding: bool = False,
         openai_api_key: Optional[str] = None,
         openai_model: str = "text-embedding-3-large",
+        use_google_embedding: bool = False,
+        google_api_key: Optional[str] = None,
+        google_model: str = "models/text-embedding-004",
         tokenizer = None  # トークン化済みテキストを復元するためのトークナイザー
     ):
         super().__init__()
-        
+
         self.use_openai_embedding = use_openai_embedding
+        self.use_google_embedding = use_google_embedding
+        self.use_external_embedding = use_openai_embedding or use_google_embedding
         self.config = config
         self.tokenizer = tokenizer
-        
-        if use_openai_embedding:
+
+        self.openai_wrapper = None
+        self.google_wrapper = None
+        self.projection = None
+
+        if use_google_embedding:
+            if not GOOGLE_GENAI_AVAILABLE:
+                warnings.warn("Google Generative AI APIが利用できません。従来の埋め込みを使用します。")
+                self.use_google_embedding = False
+                self.use_external_embedding = use_openai_embedding
+
+            if self.use_google_embedding:
+                self.google_wrapper = GoogleEmbeddingWrapper(
+                    api_key=google_api_key,
+                    model=google_model
+                )
+                actual_embed_dim = self.google_wrapper.embed_dim
+                if actual_embed_dim != config.embed_dim:
+                    warnings.warn(
+                        f"Google Embedding次元({actual_embed_dim})が設定次元({config.embed_dim})と異なります。"
+                        f"射影層を追加します。"
+                    )
+                    self.projection = nn.Linear(actual_embed_dim, config.embed_dim)
+                else:
+                    self.projection = nn.Identity()
+
+        if use_openai_embedding and not self.use_google_embedding:
             if not OPENAI_AVAILABLE:
                 warnings.warn("OpenAI APIが利用できません。従来の埋め込みを使用します。")
                 self.use_openai_embedding = False
-            
+                self.use_external_embedding = False
+
             if self.use_openai_embedding:
                 self.openai_wrapper = OpenAIEmbeddingWrapper(
                     api_key=openai_api_key,
                     model=openai_model
                 )
-                # OpenAIのエンベディング次元に合わせる
                 actual_embed_dim = self.openai_wrapper.embed_dim
                 if actual_embed_dim != config.embed_dim:
                     warnings.warn(
@@ -610,20 +716,17 @@ class NeuroQuantumEmbedding(nn.Module):
                     self.projection = nn.Linear(actual_embed_dim, config.embed_dim)
                 else:
                     self.projection = nn.Identity()
-        else:
-            self.openai_wrapper = None
-            self.projection = None
-        
-        if not self.use_openai_embedding:
+
+        if not self.use_external_embedding:
             # 従来のテキストエンベディング
             self.text_embedding = nn.Embedding(config.vocab_size, config.embed_dim)
-        
-        # 位置埋め込み（学習可能）- OpenAI使用時も必要
+
+        # 位置埋め込み（学習可能）- 外部Embedding使用時も必要
         self.position_embedding = nn.Embedding(config.max_seq_len, config.embed_dim)
-        
+
         # ドロップアウト
         self.dropout = nn.Dropout(config.dropout)
-        
+
         # 埋め込み次元
         self.embed_dim = config.embed_dim
     
@@ -644,7 +747,10 @@ class NeuroQuantumEmbedding(nn.Module):
             token_ids = token_ids[:, :self.config.max_seq_len]
             seq_len = self.config.max_seq_len
 
-        if self.use_openai_embedding and self.openai_wrapper is not None:
+        # 外部エンベディング（Google or OpenAI）を使用するかチェック
+        external_wrapper = self.google_wrapper or self.openai_wrapper
+
+        if self.use_external_embedding and external_wrapper is not None:
             if texts is None:
                 if self.tokenizer is not None:
                     # トークンIDからテキストを復元
@@ -655,27 +761,27 @@ class NeuroQuantumEmbedding(nn.Module):
                         texts.append(text)
                 else:
                     raise ValueError(
-                        "OpenAI Embedding使用時は、texts引数またはtokenizerが必要です。"
+                        "外部Embedding使用時は、texts引数またはtokenizerが必要です。"
                     )
-            
-            # OpenAI APIからエンベディングを取得
-            # 注意: OpenAI APIは文全体のエンベディングを返すため、
+
+            # APIからエンベディングを取得
+            # 注意: APIは文全体のエンベディングを返すため、
             # トークン単位ではなく文単位で処理
             embeddings_list = []
             for text in texts:
-                embedding = self.openai_wrapper.get_embeddings([text])[0]
+                embedding = external_wrapper.get_embeddings([text])[0]
                 embeddings_list.append(embedding)
-            
+
             # テンソルに変換
             text_embeds = torch.tensor(
-                np.array(embeddings_list), 
-                device=token_ids.device, 
+                np.array(embeddings_list),
+                device=token_ids.device,
                 dtype=torch.float32
             )
-            
+
             # 次元が異なる場合は射影
             text_embeds = self.projection(text_embeds)
-            
+
             # シーケンス長に合わせて拡張（文全体のエンベディングを各トークンに適用）
             if text_embeds.dim() == 2:
                 text_embeds = text_embeds.unsqueeze(1).expand(-1, seq_len, -1)
@@ -778,36 +884,44 @@ class NeuroQuantum(nn.Module):
     """
     
     def __init__(
-        self, 
+        self,
         config: NeuroQuantumConfig,
         use_openai_embedding: bool = False,
         openai_api_key: Optional[str] = None,
         openai_model: str = "text-embedding-3-large",
+        use_google_embedding: bool = False,
+        google_api_key: Optional[str] = None,
+        google_model: str = "models/text-embedding-004",
         tokenizer = None
     ):
         super().__init__()
         self.config = config
         self.use_openai_embedding = use_openai_embedding
-        
+        self.use_google_embedding = use_google_embedding
+        use_external = use_openai_embedding or use_google_embedding
+
         # ========================================
         # [1] トークン埋め込み層 (Token Embedding)
         # [2] 位置埋め込み層 (Position Embedding)
         # ========================================
-        if use_openai_embedding:
+        if use_external:
             self.embedding = NeuroQuantumEmbedding(
                 config=config,
-                use_openai_embedding=True,
+                use_openai_embedding=use_openai_embedding,
                 openai_api_key=openai_api_key,
                 openai_model=openai_model,
+                use_google_embedding=use_google_embedding,
+                google_api_key=google_api_key,
+                google_model=google_model,
                 tokenizer=tokenizer
             )
-            self.token_embedding = None  # OpenAI Embedding使用時は不要
+            self.token_embedding = None  # 外部Embedding使用時は不要
             self.position_embedding = self.embedding.position_embedding
         else:
             self.token_embedding = nn.Embedding(config.vocab_size, config.embed_dim)
             self.position_embedding = nn.Embedding(config.max_seq_len, config.embed_dim)
             self.embedding = None
-        
+
         # 後方互換性のためのエイリアス
         self.text_embedding = self.token_embedding
         
@@ -888,11 +1002,12 @@ class NeuroQuantum(nn.Module):
         # ========================================
         # [1] トークン埋め込み層 + [2] 位置埋め込み層
         # ========================================
-        if self.use_openai_embedding and self.embedding is not None:
+        use_external = (self.use_openai_embedding or self.use_google_embedding) and self.embedding is not None
+        if use_external:
             hidden_states = self.embedding(token_ids, texts=None)
             if verbose:
                 logger.info("-" * 50)
-                logger.info(f"[1-2] OpenAI Embedding")
+                logger.info(f"[1-2] 外部Embedding（Google/OpenAI）")
                 logger.info(f"  - 出力: {hidden_states.shape}")
                 logger.info(f"  - 統計: mean={hidden_states.mean().item():.4f}, std={hidden_states.std().item():.4f}")
         else:
@@ -1025,10 +1140,12 @@ class NeuroQuantum(nn.Module):
         }
         
         # [1-2] 埋め込み層
-        if self.use_openai_embedding and self.embedding is not None:
+        use_external_emb = (self.use_openai_embedding or self.use_google_embedding) and self.embedding is not None
+        if use_external_emb:
             hidden_states = self.embedding(token_ids, texts=None)
+            emb_type = 'google' if self.use_google_embedding else 'openai'
             details['embedding'] = {
-                'type': 'openai',
+                'type': emb_type,
                 'output': hidden_states.detach().clone(),
                 'shape': hidden_states.shape,
                 'mean': hidden_states.mean().item(),
@@ -1129,7 +1246,9 @@ class NeuroQuantum(nn.Module):
         print()
         print("  [入力] トークン化されたテキスト")
         print("         ↓")
-        if self.use_openai_embedding:
+        if self.use_google_embedding:
+            print(f"  [1-2] Google Text Embedding ({self.config.embed_dim}次元)")
+        elif self.use_openai_embedding:
             print(f"  [1-2] OpenAI Embedding ({self.config.embed_dim}次元)")
         else:
             print(f"  [1] トークン埋め込み層 (vocab_size={self.config.vocab_size} → embed_dim={self.config.embed_dim})")
@@ -1541,24 +1660,31 @@ class NeuroQuantumTokenizer:
 class NeuroQuantumAI:
     """
     ニューロQ AI
-    
+
     QBNN-LLM による生成AI
-    
+
     ニューロン数（hidden_dim）を指定可能
-    
+
     OpenAI Embedding使用例:
-        # OpenAI Embeddingを使用する場合
         ai = NeuroQuantumAI(
-            embed_dim=3072,  # text-embedding-3-largeの次元
+            embed_dim=3072,
             use_openai_embedding=True,
-            openai_api_key="sk-...",  # または環境変数OPENAI_API_KEY
+            openai_api_key="sk-...",
             openai_model="text-embedding-3-large"
         )
-        
+
+    Google Text Embedding使用例:
+        ai = NeuroQuantumAI(
+            embed_dim=768,  # text-embedding-004の次元
+            use_google_embedding=True,
+            google_api_key="AIza...",  # または環境変数GOOGLE_API_KEY
+            google_model="models/text-embedding-004"
+        )
+
         # 従来の埋め込みを使用する場合（デフォルト）
         ai = NeuroQuantumAI(embed_dim=48)
     """
-    
+
     def __init__(
         self,
         embed_dim: int = 48,
@@ -1571,6 +1697,9 @@ class NeuroQuantumAI:
         use_openai_embedding: bool = False,  # OpenAI Embeddingを使用するか
         openai_api_key: Optional[str] = None,  # OpenAI APIキー
         openai_model: str = "text-embedding-3-large",  # OpenAI Embeddingモデル
+        use_google_embedding: bool = False,  # Google Text Embeddingを使用するか
+        google_api_key: Optional[str] = None,  # Google APIキー
+        google_model: str = "models/text-embedding-004",  # Google Embeddingモデル
     ):
         # デバイス選択: MPS (Apple Silicon) > CUDA > CPU
         if torch.backends.mps.is_available():
@@ -1582,7 +1711,7 @@ class NeuroQuantumAI:
         else:
             self.device = torch.device("cpu")
             print("💻 CPU を使用")
-        
+
         self.embed_dim = embed_dim
         self.hidden_dim = hidden_dim
         self.num_heads = num_heads
@@ -1593,7 +1722,10 @@ class NeuroQuantumAI:
         self.use_openai_embedding = use_openai_embedding
         self.openai_api_key = openai_api_key or os.getenv("OPENAI_API_KEY")
         self.openai_model = openai_model
-        
+        self.use_google_embedding = use_google_embedding
+        self.google_api_key = google_api_key or os.getenv("GOOGLE_API_KEY")
+        self.google_model = google_model
+
         self.tokenizer: Optional[NeuroQuantumTokenizer] = None
         self.model: Optional[NeuroQuantum] = None
         self.config: Optional[NeuroQuantumConfig] = None
@@ -1648,10 +1780,15 @@ class NeuroQuantumAI:
         # モデル構築
         print("\n🧠 ニューロQモデル構築...")
         
-        # OpenAI Embedding使用時は埋め込み次元を調整
-        if self.use_openai_embedding:
+        # 外部Embedding使用時は埋め込み次元を調整
+        if self.use_google_embedding:
+            # Google Text Embeddingの次元（768）
+            actual_embed_dim = 768
+            if self.embed_dim != actual_embed_dim:
+                print(f"   Google Embedding次元({actual_embed_dim})に合わせて調整")
+                self.embed_dim = actual_embed_dim
+        elif self.use_openai_embedding:
             # OpenAI Embeddingの次元を使用
-            # モデルごとのデフォルト次元
             if "ada-002" in self.openai_model:
                 actual_embed_dim = 1536
             elif "embedding-3-large" in self.openai_model:
@@ -1663,7 +1800,7 @@ class NeuroQuantumAI:
             if self.embed_dim != actual_embed_dim:
                 print(f"   OpenAI Embedding次元({actual_embed_dim})に合わせて調整")
                 self.embed_dim = actual_embed_dim
-        
+
         self.config = NeuroQuantumConfig(
             vocab_size=self.tokenizer.actual_vocab_size,
             embed_dim=self.embed_dim,
@@ -1674,17 +1811,22 @@ class NeuroQuantumAI:
             dropout=self.dropout,
             lambda_entangle=self.lambda_entangle,
         )
-        
+
         self.model = NeuroQuantum(
             config=self.config,
             use_openai_embedding=self.use_openai_embedding,
             openai_api_key=self.openai_api_key,
             openai_model=self.openai_model,
+            use_google_embedding=self.use_google_embedding,
+            google_api_key=self.google_api_key,
+            google_model=self.google_model,
             tokenizer=self.tokenizer
         ).to(self.device)
-        
+
         print(f"\n📊 モデル構成:")
-        if self.use_openai_embedding:
+        if self.use_google_embedding:
+            print(f"   埋め込み: Google Text Embedding ({self.google_model})")
+        elif self.use_openai_embedding:
             print(f"   埋め込み: OpenAI Embedding ({self.openai_model})")
         else:
             print(f"   埋め込み: 従来のEmbedding層")

@@ -56,6 +56,7 @@ image = (
         "fastapi[standard]",
         "pydantic>=2.0.0",
         "openai>=1.0.0",
+        "google-generativeai>=0.3.0",
         "datasets>=2.14.0",
         "huggingface_hub>=0.20.0",
         "duckduckgo-search>=6.0.0",  # Web RAG用
