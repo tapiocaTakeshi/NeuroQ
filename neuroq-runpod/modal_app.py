@@ -1461,8 +1461,7 @@ def train_model(
     print("=" * 70)
 
     # モジュール読込
-    from neuroquantum_layered import NeuroQuantum, NeuroQuantumConfig
-    from tiktoken_tokenizer import TikTokenTokenizer
+    from neuroquantum_layered import NeuroQuantum, NeuroQuantumConfig, NeuroQuantumTokenizer
     from model_configs import get_model_config
     
     config = get_model_config(model_size)
@@ -1471,7 +1470,10 @@ def train_model(
     batch_size = batch_size or (4 if model_size == "micro" else 2)
     seq_length = config.get('max_seq_len', 512)
     
-    tokenizer = TikTokenTokenizer(encoding_name="o200k_base")
+    # tokenizer = TikTokenTokenizer(encoding_name="o200k_base")
+    tokenizer_path = "/root/neuroq/neuroq_tokenizer_oasst1_ja.model"
+    tokenizer = NeuroQuantumTokenizer(vocab_size=config['vocab_size'], model_file=tokenizer_path)
+    print(f"✅ SentencePieceトークナイザー ({tokenizer_path}) をロード")
     
     # データ準備
     print("\n📥 データロード中...")
