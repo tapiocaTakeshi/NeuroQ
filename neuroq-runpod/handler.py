@@ -18,6 +18,8 @@ import sys
 import subprocess
 import threading
 import time
+import json
+import uuid
 from pathlib import Path
 from daily_time_limiter import DailyTimeLimiter
 
@@ -111,6 +113,26 @@ model = None  # NeuroQuantum または NeuroQuantumBrainAI インスタンス
 model_config = None  # 現在のモデル設定
 current_model_size = 'micro'  # 現在のモデルサイズ
 is_initialized = False
+
+# 学習用データ蓄積ファイル
+ACCUMULATED_DATA_FILE = os.path.join(os.path.dirname(__file__), "data", "accumulated_train_data.json")
+
+def load_accumulated_data():
+    if os.path.exists(ACCUMULATED_DATA_FILE):
+        try:
+            with open(ACCUMULATED_DATA_FILE, 'r', encoding='utf-8') as f:
+                return json.load(f)
+        except Exception as e:
+            print(f"⚠️ 蓄積データの読み込みエラー: {e}")
+    return []
+
+def save_accumulated_data(data):
+    os.makedirs(os.path.dirname(ACCUMULATED_DATA_FILE), exist_ok=True)
+    try:
+        with open(ACCUMULATED_DATA_FILE, 'w', encoding='utf-8') as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+    except Exception as e:
+        print(f"⚠️ 蓄積データの保存エラー: {e}")
 
 # 日次時間制限（デフォルト: 1日 = 86400秒）
 daily_limiter = DailyTimeLimiter(daily_limit_seconds=86400)
@@ -1095,7 +1117,35 @@ def handler(job):
         batch_size = job_input.get("batch_size", 8)
         lr = job_input.get("lr", 0.0005)
         seq_length = job_input.get("seq_length", 64)
-        texts = job_input.get("texts", None)
+        
+        texts_input = job_input.get("texts", None)
+        data_ids = job_input.get("data_ids", None)
+        
+        # 蓄積済みデータを取得
+        accumulated_data = load_accumulated_data()
+        
+        # もしリクエストに texts が含まれていたら、蓄積データに追加
+        texts = None
+        if texts_input is not None:
+            added_count = 0
+            if data_ids and len(data_ids) == len(texts_input):
+                for text, d_id in zip(texts_input, data_ids):
+                    if not any(d.get("id") == d_id for d in accumulated_data):
+                        accumulated_data.append({"id": d_id, "text": text})
+                        added_count += 1
+            else:
+                for text in texts_input:
+                    accumulated_data.append({"id": str(uuid.uuid4()), "text": text})
+                    added_count += 1
+            
+            if added_count > 0:
+                save_accumulated_data(accumulated_data)
+                print(f"📦 新規学習データを {added_count} 件蓄積しました。")
+            
+            # 学習に使用する texts を蓄積された全てのテキストで上書きする
+            texts = [d["text"] for d in accumulated_data]
+            print(f"📚 全蓄積データ {len(texts)} 件で学習を実行します。")
+            
         train_tokenizer_flag = job_input.get("train_tokenizer", False)
         tokenizer_vocab_size = job_input.get("tokenizer_vocab_size", 32000)
         use_custom_tokenizer = job_input.get("use_custom_tokenizer", False)
@@ -1551,6 +1601,29 @@ def handler(job):
                 }
     
     # ========================================
+    # GET_TRAINED_DATA_IDS（学習済みデータID一覧取得）
+    # ========================================
+    if action == "get_trained_data_ids":
+        accumulated_data = load_accumulated_data()
+        data_ids = [d.get("id") for d in accumulated_data if "id" in d]
+        return {
+            "status": "success",
+            "message": "Successfully retrieved accumulated training data IDs",
+            "count": len(data_ids),
+            "data_ids": data_ids
+        }
+
+    # ========================================
+    # RESET_TRAIN_DATA（蓄積された学習データの削除）
+    # ========================================
+    if action == "reset_train_data":
+        save_accumulated_data([])
+        return {
+            "status": "success",
+            "message": "Accumulated training data has been reset successfully."
+        }
+
+    # ========================================
     # CLEAR_SESSION（会話履歴クリア）
     # ========================================
     if action == "clear_session":
@@ -1629,7 +1702,9 @@ def handler(job):
             "set_system_prompt",  # システムプロンプト設定
             "get_system_prompt",  # システムプロンプト取得
             "time_limit_status",  # 日次時間制限ステータス確認
-            "set_time_limit"      # 日次時間制限設定
+            "set_time_limit",     # 日次時間制限設定
+            "get_trained_data_ids",# 蓄積された学習データのID取得
+            "reset_train_data"    # 蓄積データの削除
         ],
         "datasets": get_datasets_list() if DATASET_CONFIGS_AVAILABLE else [{"id": "kunishou/oasst1-89k-ja", "config": None, "key": "oasst1_ja", "name": "OASST1 Japanese", "description": "kunishou/oasst1-89k-ja 日本語会話データセット"}],
         "translation_note": "generate アクションで use_translation=true を指定すると、日本語入力→英語生成→日本語出力の翻訳パイプラインを使用できます"
@@ -1639,11 +1714,12 @@ def handler(job):
 # ========================================
 # 起動（何もしない = 高速起動）
 # ========================================
-print("=" * 60)
-print("✅ NeuroQ Handler Ready")
-print("   - Health check: instant response")
-print("   - Model loading: lazy (on first request)")
-print("=" * 60)
-
-# RunPod起動
-runpod.serverless.start({"handler": handler})
+if __name__ == "__main__":
+    print("=" * 60)
+    print("✅ NeuroQ Handler Ready")
+    print("   - Health check: instant response")
+    print("   - Model loading: lazy (on first request)")
+    print("=" * 60)
+    
+    # RunPod起動
+    runpod.serverless.start({"handler": handler})
