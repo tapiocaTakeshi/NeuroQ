@@ -653,11 +653,13 @@ def generate_text(prompt: str, max_length: int = 50,
             temp_min = temperature * 0.8
             temp_max = temperature * 1.2
 
-        # デフォルト値（会話生成に最適化 - より保守的）
+        # デフォルト値（会話生成に最適化 - 小型モデル向けに保守的）
+        # 小型モデルでは温度を低めに設定し、top_pも絞ることで
+        # ランダムな多言語混在や文法崩壊を防ぐ
         if temp_min is None:
-            temp_min = 0.4  # 会話向けにより保守的な温度
+            temp_min = 0.3  # 小型モデル向けにさらに保守的な温度
         if temp_max is None:
-            temp_max = 0.7  # 0.8 → 0.7 に下げて暴走を防ぐ
+            temp_max = 0.6  # 暴走防止のため低めに設定
 
         # 会話履歴を含むプロンプトを構築
         # NeuroQuantumBrainAI.generate() は内部で <USER>...<ASSISTANT> フォーマットを処理する
@@ -688,7 +690,7 @@ def generate_text(prompt: str, max_length: int = 50,
                 temperature_min=temp_min,
                 temperature_max=temp_max,
                 top_k=40,
-                top_p=0.9,
+                top_p=0.85,  # 0.9→0.85: 小型モデルでの多言語混在・ノイズ抑制
             )
 
         # 英語の生成結果を保存（翻訳使用時）

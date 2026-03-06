@@ -50,9 +50,9 @@ def load_oasst_data(dataset_id="OpenAssistant/oasst1", max_samples=10000):
         logger.error(f"❌ {dataset_id} のロードに失敗: {e}")
         return []
 
-    # 英語と日本語のメッセージを抽出
-    messages = [msg for msg in dataset if msg.get('lang') in ['en', 'ja']]
-    logger.info(f"   {dataset_id} (en/ja) メッセージ数: {len(messages):,}")
+    # 日本語のみのメッセージを抽出（多言語混在は小型モデルでは学習が困難）
+    messages = [msg for msg in dataset if msg.get('lang') == 'ja']
+    logger.info(f"   {dataset_id} (ja only) メッセージ数: {len(messages):,}")
 
     # 簡易的な会話ペアの構築
     messages_by_id = {msg['message_id']: msg for msg in messages}
