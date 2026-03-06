@@ -146,6 +146,10 @@ pretrain_process = None
 pretrain_status = "idle"  # idle, running, completed, error
 pretrain_log_file = "training_openai.log"
 
+# インクリメンタル学習: 累積した学習データとデータセット履歴
+incremental_training_texts = []  # 累積された学習テキスト
+learned_datasets_history = []    # 学習済みデータセットの履歴 [{dataset_id, name, num_samples, timestamp}, ...]
+
 # 会話履歴管理
 conversation_sessions = {}  # session_id -> list of {role, content}
 
@@ -734,6 +738,7 @@ def handler(job):
     global conversation_sessions, session_system_prompts
     global pretrain_process, pretrain_status
     global daily_limiter
+    global incremental_training_texts, learned_datasets_history
 
     job_input = job.get("input", {})
     action = job_input.get("action", "generate")
@@ -1288,6 +1293,42 @@ def handler(job):
                              f" dataset_configs.py をインストールしてください。",
                 }
 
+        # ========================================
+        # インクリメンタル学習: データを累積
+        # ========================================
+        new_texts_count = len(texts) if texts else 0
+
+        if texts is not None:
+            incremental_training_texts.extend(texts)
+            # 学習履歴を記録
+            import datetime
+            dataset_name = "カスタムデータ"
+            if dataset_id and DATASET_CONFIGS_AVAILABLE:
+                try:
+                    dataset_name = get_dataset_config(dataset_id).get('name', dataset_id)
+                except Exception:
+                    dataset_name = dataset_id
+            elif dataset_id:
+                dataset_name = dataset_id
+            history_entry = {
+                "dataset_id": dataset_id if dataset_id else "custom",
+                "name": dataset_name,
+                "num_samples": new_texts_count,
+                "timestamp": datetime.datetime.now().isoformat(),
+            }
+            learned_datasets_history.append(history_entry)
+            print(f"📥 インクリメンタル学習: {new_texts_count}サンプル追加 (累積: {len(incremental_training_texts)}サンプル)")
+
+        # 累積データで学習（新規データだけでなく全データ）
+        texts = incremental_training_texts.copy()
+
+        if not texts:
+            daily_limiter.end_request(time.time() - train_request_start)
+            return {
+                "status": "error",
+                "error": "No training texts available. Please provide texts or dataset_id."
+            }
+
         # モデルサイズに応じて設定を調整
         if model_size == 'small':
             batch_size = job_input.get("batch_size", 4)
@@ -1495,6 +1536,9 @@ def handler(job):
                     "best_loss": best_loss,
                     "checkpoint_path": checkpoint_path,
                     "num_samples": len(texts),
+                    "new_samples_added": new_texts_count,
+                    "total_accumulated_samples": len(incremental_training_texts),
+                    "learned_datasets_count": len(learned_datasets_history),
                     "tokenizer_type": tokenizer_type,
                 }
 
@@ -1579,7 +1623,10 @@ def handler(job):
                         "message": f"Training completed ({epochs} epochs)",
                         "model_size": "micro",
                         "checkpoint_path": checkpoint_path,
-                        "num_samples": len(texts)
+                        "num_samples": len(texts),
+                        "new_samples_added": new_texts_count,
+                        "total_accumulated_samples": len(incremental_training_texts),
+                        "learned_datasets_count": len(learned_datasets_history),
                     }
                     if dataset_id:
                         result["dataset_id"] = dataset_id
@@ -1590,7 +1637,9 @@ def handler(job):
                     return {
                         "status": "warning",
                         "message": "Training completed but checkpoint save failed",
-                        "num_samples": len(texts)
+                        "num_samples": len(texts),
+                        "new_samples_added": new_texts_count,
+                        "total_accumulated_samples": len(incremental_training_texts),
                     }
 
             except Exception as e:
@@ -1603,26 +1652,38 @@ def handler(job):
                 }
     
     # ========================================
-    # GET_TRAINED_DATA_IDS（学習済みデータID一覧取得）
+    # LEARNED_DATASETS（学習済みデータセット一覧）
     # ========================================
-    if action == "get_trained_data_ids":
-        accumulated_data = load_accumulated_data()
-        data_ids = [d.get("id") for d in accumulated_data if "id" in d]
+    if action == "learned_datasets":
         return {
             "status": "success",
-            "message": "Successfully retrieved accumulated training data IDs",
-            "count": len(data_ids),
-            "data_ids": data_ids
+            "total_accumulated_samples": len(incremental_training_texts),
+            "learned_datasets_count": len(learned_datasets_history),
+            "learned_datasets": learned_datasets_history,
         }
 
     # ========================================
-    # RESET_TRAIN_DATA（蓄積された学習データの削除）
+    # RESET_LEARNING（学習データリセット）
     # ========================================
-    if action == "reset_train_data":
-        save_accumulated_data([])
+    if action == "reset_learning":
+        previous_count = len(incremental_training_texts)
+        previous_datasets = len(learned_datasets_history)
+        incremental_training_texts.clear()
+        learned_datasets_history.clear()
+
+        # モデルも再初期化するかどうか（オプション）
+        reset_model = job_input.get("reset_model", False)
+        if reset_model:
+            model = None
+            is_initialized = False
+            current_model_size = 'micro'
+
         return {
             "status": "success",
-            "message": "Accumulated training data has been reset successfully."
+            "message": "学習データをリセットしました",
+            "cleared_samples": previous_count,
+            "cleared_datasets": previous_datasets,
+            "model_reset": reset_model,
         }
 
     # ========================================
@@ -1696,8 +1757,10 @@ def handler(job):
         "available_actions": [
             "health",             # ヘルスチェック
             "status",             # ステータス確認
-            "train",              # 学習（dataset_idでデータセット指定可能）
+            "train",              # 学習（dataset_idでデータセット指定可能、インクリメンタル）
             "generate",           # 推論（use_translation=trueで翻訳パイプライン使用）
+            "learned_datasets",   # 学習済みデータセット一覧
+            "reset_learning",     # 学習データリセット
             "pretrain_openai",    # OpenAIデータセット事前学習
             "pretrain_status",    # 事前学習ステータス
             "clear_session",      # 会話履歴クリア

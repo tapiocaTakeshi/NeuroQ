@@ -243,7 +243,66 @@
     }
   },
 
-  "9. データセットID指定でトレーニング": {
+  "9. 学習済みデータセット一覧": {
+    "説明": "インクリメンタル学習で累積されたデータセットの種類と履歴を確認",
+    "リクエスト": {
+      "input": {
+        "action": "learned_datasets"
+      }
+    },
+    "レスポンス例": {
+      "status": "success",
+      "total_accumulated_samples": 1500,
+      "learned_datasets_count": 3,
+      "learned_datasets": [
+        {
+          "dataset_id": "oasst1_ja",
+          "name": "OASST1 Japanese Conversations",
+          "num_samples": 500,
+          "timestamp": "2026-03-06T10:00:00"
+        },
+        {
+          "dataset_id": "custom",
+          "name": "カスタムデータ",
+          "num_samples": 100,
+          "timestamp": "2026-03-06T11:00:00"
+        },
+        {
+          "dataset_id": "high_quality",
+          "name": "High Quality Conversations",
+          "num_samples": 900,
+          "timestamp": "2026-03-06T12:00:00"
+        }
+      ]
+    }
+  },
+
+  "10. 学習データリセット": {
+    "説明": "インクリメンタル学習で累積されたデータをすべてクリアする。reset_model=trueでモデルも再初期化可能",
+    "リクエスト（データのみリセット）": {
+      "input": {
+        "action": "reset_learning"
+      }
+    },
+    "リクエスト（モデルもリセット）": {
+      "input": {
+        "action": "reset_learning",
+        "reset_model": true
+      }
+    },
+    "パラメータ説明": {
+      "reset_model": "trueにするとモデルも再初期化される（デフォルト: false）"
+    },
+    "レスポンス例": {
+      "status": "success",
+      "message": "学習データをリセットしました",
+      "cleared_samples": 1500,
+      "cleared_datasets": 3,
+      "model_reset": false
+    }
+  },
+
+  "11. データセットID指定でトレーニング": {
     "説明": "dataset_idを指定してデータセットの設定（デフォルトパラメータ含む）を自動適用して学習",
     "リクエスト（oasst1_ja）": {
       "input": {
@@ -279,7 +338,7 @@
     "action": {
       "型": "string",
       "必須": true,
-      "選択肢": ["health", "generate", "train", "time_limit_status", "set_time_limit"],
+      "選択肢": ["health", "generate", "train", "learned_datasets", "reset_learning", "time_limit_status", "set_time_limit"],
       "説明": "実行するアクション"
     },
     "mode": {
