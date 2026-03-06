@@ -116,6 +116,8 @@ is_initialized = False
 
 # 学習用データ蓄積ファイル
 ACCUMULATED_DATA_FILE = os.path.join(os.path.dirname(__file__), "data", "accumulated_train_data.json")
+# 学習済みデータセット履歴ファイル
+LEARNED_DATASETS_FILE = os.path.join(os.path.dirname(__file__), "data", "learned_datasets_history.json")
 
 def load_accumulated_data():
     if os.path.exists(ACCUMULATED_DATA_FILE):
@@ -134,6 +136,23 @@ def save_accumulated_data(data):
     except Exception as e:
         print(f"⚠️ 蓄積データの保存エラー: {e}")
 
+def load_learned_datasets_history():
+    if os.path.exists(LEARNED_DATASETS_FILE):
+        try:
+            with open(LEARNED_DATASETS_FILE, 'r', encoding='utf-8') as f:
+                return json.load(f)
+        except Exception as e:
+            print(f"⚠️ 学習履歴の読み込みエラー: {e}")
+    return []
+
+def save_learned_datasets_history(history):
+    os.makedirs(os.path.dirname(LEARNED_DATASETS_FILE), exist_ok=True)
+    try:
+        with open(LEARNED_DATASETS_FILE, 'w', encoding='utf-8') as f:
+            json.dump(history, f, ensure_ascii=False, indent=2)
+    except Exception as e:
+        print(f"⚠️ 学習履歴の保存エラー: {e}")
+
 # 日次時間制限（デフォルト: 1日 = 86400秒）
 daily_limiter = DailyTimeLimiter(daily_limit_seconds=86400)
 
@@ -146,9 +165,12 @@ pretrain_process = None
 pretrain_status = "idle"  # idle, running, completed, error
 pretrain_log_file = "training_openai.log"
 
-# インクリメンタル学習: 累積した学習データとデータセット履歴
-incremental_training_texts = []  # 累積された学習テキスト
-learned_datasets_history = []    # 学習済みデータセットの履歴 [{dataset_id, name, num_samples, timestamp}, ...]
+# インクリメンタル学習: 累積した学習データとデータセット履歴（ファイルから復元）
+_accumulated = load_accumulated_data()
+incremental_training_texts = [d["text"] for d in _accumulated] if _accumulated else []
+learned_datasets_history = load_learned_datasets_history()
+if incremental_training_texts:
+    print(f"📥 蓄積済み学習データを復元: {len(incremental_training_texts)}サンプル, {len(learned_datasets_history)}データセット")
 
 # 会話履歴管理
 conversation_sessions = {}  # session_id -> list of {role, content}
@@ -1130,11 +1152,11 @@ def handler(job):
         
         # 蓄積済みデータを取得
         accumulated_data = load_accumulated_data()
-        
+
         # もしリクエストに texts が含まれていたら、蓄積データに追加
         texts = None
+        added_count = 0
         if texts_input is not None:
-            added_count = 0
             if data_ids and len(data_ids) == len(texts_input):
                 for text, d_id in zip(texts_input, data_ids):
                     if not any(d.get("id") == d_id for d in accumulated_data):
@@ -1144,14 +1166,10 @@ def handler(job):
                 for text in texts_input:
                     accumulated_data.append({"id": str(uuid.uuid4()), "text": text})
                     added_count += 1
-            
+
             if added_count > 0:
                 save_accumulated_data(accumulated_data)
-                print(f"📦 新規学習データを {added_count} 件蓄積しました。")
-            
-            # 学習に使用する texts を蓄積された全てのテキストで上書きする
-            texts = [d["text"] for d in accumulated_data]
-            print(f"📚 全蓄積データ {len(texts)} 件で学習を実行します。")
+                print(f"📦 新規カスタム学習データを {added_count} 件蓄積しました。")
             
         train_tokenizer_flag = job_input.get("train_tokenizer", False)
         tokenizer_vocab_size = job_input.get("tokenizer_vocab_size", 32000)
@@ -1201,8 +1219,17 @@ def handler(job):
                     "dataset_id": dataset_id
                 }
 
-            # テキストデータを読み込み
-            texts = load_dataset_texts(dataset_id)
+            # テキストデータを読み込み → 蓄積データに追加
+            dataset_texts = load_dataset_texts(dataset_id)
+            if dataset_texts:
+                ds_added = 0
+                for text in dataset_texts:
+                    accumulated_data.append({"id": str(uuid.uuid4()), "text": text, "source": dataset_id})
+                    ds_added += 1
+                if ds_added > 0:
+                    save_accumulated_data(accumulated_data)
+                    added_count += ds_added
+                    print(f"📦 データセット '{dataset_id}' から {ds_added} 件を蓄積データに追加しました。")
             if dataset_tokenizer_path:
                 print(f"🔤 トークナイザー: {dataset_tokenizer_path}")
 
@@ -1269,14 +1296,23 @@ def handler(job):
                 with open(data_file, 'r', encoding='utf-8') as f:
                     content = f.read()
 
-                texts = []
+                legacy_texts = []
                 blocks = content.split('\n\n')
                 for block in blocks:
                     block = block.strip()
                     if block and 'User:' in block and 'Assistant:' in block:
-                        texts.append(block)
+                        legacy_texts.append(block)
 
-                print(f"   {len(texts)} 個の会話を読み込みました")
+                # 蓄積データに追加
+                ds_added = 0
+                for text in legacy_texts:
+                    accumulated_data.append({"id": str(uuid.uuid4()), "text": text, "source": "oasst1_ja"})
+                    ds_added += 1
+                if ds_added > 0:
+                    save_accumulated_data(accumulated_data)
+                    added_count += ds_added
+
+                print(f"   {len(legacy_texts)} 個の会話を読み込み、蓄積データに追加しました")
                 print(f"🔤 トークナイザー: {dataset_tokenizer_path}")
 
                 if job_input.get("epochs") is None:
@@ -1294,14 +1330,16 @@ def handler(job):
                 }
 
         # ========================================
-        # インクリメンタル学習: データを累積
+        # インクリメンタル学習: データを累積（ファイル永続化）
         # ========================================
-        new_texts_count = len(texts) if texts else 0
+        import datetime
 
-        if texts is not None:
-            incremental_training_texts.extend(texts)
-            # 学習履歴を記録
-            import datetime
+        # 蓄積データからテキスト一覧を再構築（追加済みのものも含む）
+        all_accumulated_texts = [d["text"] for d in accumulated_data]
+        incremental_training_texts = all_accumulated_texts
+
+        # 学習履歴を記録（追加があった場合のみ）
+        if added_count > 0:
             dataset_name = "カスタムデータ"
             if dataset_id and DATASET_CONFIGS_AVAILABLE:
                 try:
@@ -1313,11 +1351,12 @@ def handler(job):
             history_entry = {
                 "dataset_id": dataset_id if dataset_id else "custom",
                 "name": dataset_name,
-                "num_samples": new_texts_count,
+                "num_samples": added_count,
                 "timestamp": datetime.datetime.now().isoformat(),
             }
             learned_datasets_history.append(history_entry)
-            print(f"📥 インクリメンタル学習: {new_texts_count}サンプル追加 (累積: {len(incremental_training_texts)}サンプル)")
+            save_learned_datasets_history(learned_datasets_history)
+            print(f"📥 インクリメンタル学習: {added_count}サンプル追加 (累積: {len(incremental_training_texts)}サンプル)")
 
         # 累積データで学習（新規データだけでなく全データ）
         texts = incremental_training_texts.copy()
@@ -1536,7 +1575,7 @@ def handler(job):
                     "best_loss": best_loss,
                     "checkpoint_path": checkpoint_path,
                     "num_samples": len(texts),
-                    "new_samples_added": new_texts_count,
+                    "new_samples_added": added_count,
                     "total_accumulated_samples": len(incremental_training_texts),
                     "learned_datasets_count": len(learned_datasets_history),
                     "tokenizer_type": tokenizer_type,
@@ -1624,7 +1663,7 @@ def handler(job):
                         "model_size": "micro",
                         "checkpoint_path": checkpoint_path,
                         "num_samples": len(texts),
-                        "new_samples_added": new_texts_count,
+                        "new_samples_added": added_count,
                         "total_accumulated_samples": len(incremental_training_texts),
                         "learned_datasets_count": len(learned_datasets_history),
                     }
@@ -1638,7 +1677,7 @@ def handler(job):
                         "status": "warning",
                         "message": "Training completed but checkpoint save failed",
                         "num_samples": len(texts),
-                        "new_samples_added": new_texts_count,
+                        "new_samples_added": added_count,
                         "total_accumulated_samples": len(incremental_training_texts),
                     }
 
@@ -1655,10 +1694,28 @@ def handler(job):
     # LEARNED_DATASETS（学習済みデータセット一覧）
     # ========================================
     if action == "learned_datasets":
+        # データセット種類ごとの集計
+        dataset_type_summary = {}
+        for entry in learned_datasets_history:
+            ds_id = entry.get("dataset_id", "unknown")
+            if ds_id not in dataset_type_summary:
+                dataset_type_summary[ds_id] = {
+                    "dataset_id": ds_id,
+                    "name": entry.get("name", ds_id),
+                    "total_samples": 0,
+                    "add_count": 0,
+                    "first_added": entry.get("timestamp"),
+                    "last_added": entry.get("timestamp"),
+                }
+            dataset_type_summary[ds_id]["total_samples"] += entry.get("num_samples", 0)
+            dataset_type_summary[ds_id]["add_count"] += 1
+            dataset_type_summary[ds_id]["last_added"] = entry.get("timestamp")
+
         return {
             "status": "success",
             "total_accumulated_samples": len(incremental_training_texts),
             "learned_datasets_count": len(learned_datasets_history),
+            "dataset_types": list(dataset_type_summary.values()),
             "learned_datasets": learned_datasets_history,
         }
 
@@ -1668,8 +1725,14 @@ def handler(job):
     if action == "reset_learning":
         previous_count = len(incremental_training_texts)
         previous_datasets = len(learned_datasets_history)
+
+        # メモリ上のデータをクリア
         incremental_training_texts.clear()
         learned_datasets_history.clear()
+
+        # ファイルの永続データもクリア
+        save_accumulated_data([])
+        save_learned_datasets_history([])
 
         # モデルも再初期化するかどうか（オプション）
         reset_model = job_input.get("reset_model", False)
@@ -1680,7 +1743,7 @@ def handler(job):
 
         return {
             "status": "success",
-            "message": "学習データをリセットしました",
+            "message": "学習データをリセットしました（メモリ・ファイル両方クリア済み）",
             "cleared_samples": previous_count,
             "cleared_datasets": previous_datasets,
             "model_reset": reset_model,
