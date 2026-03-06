@@ -885,19 +885,35 @@ class NeuroQuantumTokenizer:
     - SentencePieceによる高精度なサブワードトークン化（Unigram）
     - 語彙サイズを指定して学習可能（8000-32000推奨）
     - モデルの保存・読み込みが可能（.model形式）
+    - NFKC正規化による日本語テキスト前処理（全角/半角統一）
     - フォールバック: 文字単位トークナイザー（SentencePiece未インストール時）
     """
 
-    def __init__(self, vocab_size: int = 16000, model_file: str = None):
+    # トークナイザーモデルの自動検索パス（優先順）
+    _MODEL_SEARCH_NAMES = [
+        'neuroq_tokenizer.model',
+        'neuroq_tokenizer_8k.model',
+        'neuroq_tokenizer_ja.model',
+        'neuroq_tokenizer_oasst1_ja.model',
+    ]
+
+    def __init__(self, vocab_size: int = 8000, model_file: str = None,
+                 normalize_text: bool = True):
         """
         Args:
-            vocab_size: 語彙サイズ（デフォルト: 16000）
-            model_file: 既存のSentencePieceモデルファイルパス（.model）（Noneの場合は新規学習）
+            vocab_size: 語彙サイズ（デフォルト: 8000）
+            model_file: 既存のSentencePieceモデルファイルパス（.model）
+                        Noneの場合は既知のパスから自動検索
+            normalize_text: NFKC正規化を有効にするか（デフォルト: True）
         """
+        import logging
+        self._logger = logging.getLogger(__name__)
+
         self.vocab_size = vocab_size
         self.actual_vocab_size = None
         self.model_file = model_file
         self.sp = None  # SentencePieceProcessor
+        self.normalize_text = normalize_text
 
         # 特殊トークン
         self.pad_token = '<pad>'
@@ -916,16 +932,47 @@ class NeuroQuantumTokenizer:
         self.token_to_idx: Dict[str, int] = {}
         self.idx_to_token: Dict[int, str] = {}
 
-        # 既存モデルの読み込み
-        if model_file and os.path.exists(model_file):
+        # 既存モデルの読み込み（指定パス or 自動検索）
+        resolved_file = model_file
+        if resolved_file and os.path.exists(resolved_file):
+            pass  # 指定されたファイルをそのまま使用
+        elif resolved_file is None:
+            resolved_file = self._auto_find_model()
+
+        if resolved_file and os.path.exists(resolved_file):
             try:
-                self._load_model(model_file)
-                print(f"   ✅ SentencePieceトークナイザー読み込み: {model_file} (語彙サイズ: {self.actual_vocab_size})")
+                self._load_model(resolved_file)
+                print(f"   ✅ SentencePieceトークナイザー読み込み: {resolved_file} (語彙サイズ: {self.actual_vocab_size})")
             except Exception as e:
                 warnings.warn(f"SentencePieceモデルの読み込みに失敗: {e}。フォールバックを使用します。")
                 self._init_fallback_vocab()
         else:
             self._init_fallback_vocab()
+
+    def _auto_find_model(self) -> Optional[str]:
+        """既知のパスからSentencePieceモデルファイルを自動検索"""
+        search_dirs = [
+            os.getcwd(),
+            os.path.dirname(os.path.abspath(__file__)),
+            os.path.join(os.path.dirname(os.path.abspath(__file__)), 'neuroq-runpod'),
+        ]
+        for d in search_dirs:
+            for name in self._MODEL_SEARCH_NAMES:
+                candidate = os.path.join(d, name)
+                if os.path.exists(candidate):
+                    return candidate
+        return None
+
+    def _normalize(self, text: str) -> str:
+        """日本語テキストのNFKC正規化と前処理"""
+        if not self.normalize_text:
+            return text
+        import unicodedata
+        # NFKC正規化: 全角英数→半角、半角カナ→全角カナ、互換文字の統一
+        text = unicodedata.normalize('NFKC', text)
+        # 連続する空白を1つに
+        text = re.sub(r'[ \t]+', ' ', text)
+        return text
 
     def _load_model(self, path: str):
         """SentencePieceモデルを読み込み"""
@@ -965,10 +1012,10 @@ class NeuroQuantumTokenizer:
 
         import tempfile
 
-        # 学習テキストを一時ファイルに書き出し
+        # 学習テキストを一時ファイルに書き出し（NFKC正規化を適用）
         with tempfile.NamedTemporaryFile(mode='w', suffix='.txt', delete=False, encoding='utf-8') as f:
             for text in texts:
-                text = text.strip()
+                text = self._normalize(text.strip())
                 if text:
                     f.write(text + '\n')
             tmp_corpus_path = f.name
@@ -1010,7 +1057,7 @@ class NeuroQuantumTokenizer:
         print(f"   🔤 フォールバック語彙構築中...")
         char_freq = Counter()
         for text in texts:
-            char_freq.update(text)
+            char_freq.update(self._normalize(text))
 
         self._init_fallback_vocab()
 
@@ -1038,8 +1085,8 @@ class NeuroQuantumTokenizer:
         Returns:
             トークンIDのリスト
         """
-        import logging
-        logger = logging.getLogger(__name__)
+        # NFKC正規化を適用
+        text = self._normalize(text)
 
         if self.sp is not None:
             # SentencePieceでエンコード
@@ -1059,11 +1106,24 @@ class NeuroQuantumTokenizer:
                 tokens.append(self.eos_id)
 
         if verbose:
-            logger.debug(f"[Encode] 入力テキスト: '{text[:50]}...'" if len(text) > 50 else f"[Encode] 入力テキスト: '{text}'")
-            logger.debug(f"[Encode] トークン数: {len(tokens)}")
-            logger.debug(f"[Encode] トークンID: {tokens[:20]}{'...' if len(tokens) > 20 else ''}")
+            self._logger.debug(f"[Encode] 入力テキスト: '{text[:50]}...'" if len(text) > 50 else f"[Encode] 入力テキスト: '{text}'")
+            self._logger.debug(f"[Encode] トークン数: {len(tokens)}")
+            self._logger.debug(f"[Encode] トークンID: {tokens[:20]}{'...' if len(tokens) > 20 else ''}")
 
         return tokens
+
+    def encode_batch(self, texts: List[str], add_special: bool = True) -> List[List[int]]:
+        """
+        複数テキストを一括エンコード
+
+        Args:
+            texts: 入力テキストのリスト
+            add_special: 特殊トークン（BOS/EOS）を追加するか
+
+        Returns:
+            トークンIDリストのリスト
+        """
+        return [self.encode(t, add_special=add_special) for t in texts]
 
     def decode(self, token_ids: List[int], skip_special: bool = True, verbose: bool = False) -> str:
         """
@@ -1077,9 +1137,6 @@ class NeuroQuantumTokenizer:
         Returns:
             デコードされたテキスト
         """
-        import logging
-        logger = logging.getLogger(__name__)
-
         if self.sp is not None:
             # 特殊トークンをフィルタリング
             sp_vocab_size = self.sp.GetPieceSize()
@@ -1102,10 +1159,23 @@ class NeuroQuantumTokenizer:
             result = ''.join(tokens)
 
         if verbose:
-            logger.debug(f"[Decode] 入力トークン数: {len(token_ids)}")
-            logger.debug(f"[Decode] 出力テキスト: '{result[:100]}...'" if len(result) > 100 else f"[Decode] 出力テキスト: '{result}'")
+            self._logger.debug(f"[Decode] 入力トークン数: {len(token_ids)}")
+            self._logger.debug(f"[Decode] 出力テキスト: '{result[:100]}...'" if len(result) > 100 else f"[Decode] 出力テキスト: '{result}'")
 
         return result
+
+    def decode_batch(self, token_ids_list: List[List[int]], skip_special: bool = True) -> List[str]:
+        """
+        複数のトークンIDリストを一括デコード
+
+        Args:
+            token_ids_list: トークンIDリストのリスト
+            skip_special: 特殊トークンをスキップするか
+
+        Returns:
+            デコードされたテキストのリスト
+        """
+        return [self.decode(ids, skip_special=skip_special) for ids in token_ids_list]
 
     def get_tokenization_info(self, text: str) -> Dict:
         """
