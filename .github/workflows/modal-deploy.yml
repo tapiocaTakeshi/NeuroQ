@@ -7,16 +7,16 @@ on:
       - main
       - master
     paths:
-      - 'neuroq-runpod/modal_app.py'
-      - '.github/workflows/modal-deploy.yml'
+      - "lib/modal_app.py"
+      - ".github/workflows/modal-deploy.yml"
 
   # 手動トリガー
   workflow_dispatch:
     inputs:
       environment:
-        description: 'Deployment environment'
+        description: "Deployment environment"
         required: false
-        default: 'production'
+        default: "production"
         type: choice
         options:
           - production
@@ -31,12 +31,12 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
-          lfs: true  # Git LFS ファイルも取得
+          lfs: true # Git LFS ファイルも取得
 
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.11'
+          python-version: "3.11"
 
       - name: Install Modal CLI
         run: |
@@ -50,7 +50,7 @@ jobs:
           modal token set --token-id "$MODAL_TOKEN_ID" --token-secret "$MODAL_TOKEN_SECRET"
 
       - name: Deploy to Modal
-        working-directory: neuroq-runpod
+        working-directory: lib
         run: |
           modal deploy modal_app.py
 

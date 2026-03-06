@@ -25,11 +25,11 @@
 
 ### 基本関係式
 
-| パラメータ | 角度 θ | 相関係数 r | 温度 T | 量子状態 |
-|-----------|--------|-----------|--------|----------|
-| θ = 0 | 0 | r = 1 | T = 0 | \|0⟩ (完全な正の相関) |
-| θ = π/4 | π/4 | r = 0 | T = 1 | (\|0⟩ + \|1⟩)/√2 (無相関・最大ゆらぎ) |
-| θ = π/2 | π/2 | r = -1 | T = 0 | \|1⟩ (完全な負の相関) |
+| パラメータ | 角度 θ | 相関係数 r | 温度 T | 量子状態                              |
+| ---------- | ------ | ---------- | ------ | ------------------------------------- |
+| θ = 0      | 0      | r = 1      | T = 0  | \|0⟩ (完全な正の相関)                 |
+| θ = π/4    | π/4    | r = 0      | T = 1  | (\|0⟩ + \|1⟩)/√2 (無相関・最大ゆらぎ) |
+| θ = π/2    | π/2    | r = -1     | T = 0  | \|1⟩ (完全な負の相関)                 |
 
 ### 相関係数から角度への変換
 
@@ -120,7 +120,7 @@ ls -lh neuroq_pretrained.pt
 ヘルパースクリプトを使用すると、Git LFSファイルのチェックを自動的に行ってからビルドします：
 
 ```bash
-cd neuroq-runpod
+cd lib
 ./build.sh
 ```
 
@@ -129,14 +129,14 @@ cd neuroq-runpod
 **方法1: ローカルのファイルを使用**（事前に `git lfs pull` が必要）
 
 ```bash
-cd neuroq-runpod
+cd lib
 docker build -t neuroq:latest .
 ```
 
 **方法2: リポジトリURLを指定**（Git LFSファイルを自動取得）
 
 ```bash
-cd neuroq-runpod
+cd lib
 docker build \
   --build-arg GIT_REPO_URL=https://github.com/yourusername/NeuroQ.git \
   --build-arg GIT_BRANCH=main \
@@ -276,7 +276,7 @@ all_correlations = multi_body.get_all_correlations()
 
 ### RunPod Serverless
 
-- `neuroq-runpod/` - RunPod Serverless用の実装
+- `lib/` - RunPod Serverless用の実装
   - `handler.py` - RunPod Serverless Handler
   - `train_and_generate.py` - 学習→生成スクリプト
   - `train_request_examples_improved.json` - 改善されたリクエスト例
