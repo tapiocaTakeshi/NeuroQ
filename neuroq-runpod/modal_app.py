@@ -333,8 +333,24 @@ class NeuroQInference:
 
                         self.model.eval()
                         
-                        # トークナイザーを初期化
-                        if tokenizer_info.get('type') == 'tiktoken':
+                        # トークナイザーを初期化（SentencePiece優先）
+                        tokenizer_path = "/root/neuroq/neuroq_tokenizer_oasst1_ja.model"
+                        if tokenizer_info.get('type') == 'sentencepiece' or os.path.exists(tokenizer_path):
+                            try:
+                                sp_path = tokenizer_info.get('model_file', tokenizer_path)
+                                if not os.path.exists(sp_path):
+                                    sp_path = tokenizer_path
+                                self.tokenizer = self.NeuroQuantumTokenizer(
+                                    vocab_size=vocab_size,
+                                    model_file=sp_path
+                                )
+                                print(f"   ✅ SentencePieceトークナイザー ({sp_path}) をロード")
+                            except Exception as e:
+                                print(f"   ⚠️ SentencePieceロードエラー: {e}、TikTokenにフォールバック")
+                                from tiktoken_tokenizer import TikTokenTokenizer
+                                self.tokenizer = TikTokenTokenizer(encoding_name='o200k_base')
+                                print(f"   ✅ TikTokenトークナイザー (o200k_base) をロード")
+                        elif tokenizer_info.get('type') == 'tiktoken':
                             try:
                                 from tiktoken_tokenizer import TikTokenTokenizer
                                 encoding_name = tokenizer_info.get('encoding', 'o200k_base')
@@ -343,14 +359,13 @@ class NeuroQInference:
                             except ImportError as e:
                                 print(f"   ⚠️ TikTokenTokenizerインポートエラー: {e}")
                         else:
-                            # fugashiトークナイザー (デフォルト/フォールバック)
-                            tokenizer_path = "/root/neuroq/neuroq_tokenizer_oasst1_ja.model"
+                            # フォールバック: fugashiトークナイザー
                             if os.path.exists(tokenizer_path):
                                 self.tokenizer = self.NeuroQuantumTokenizer(
                                     vocab_size=vocab_size,
                                     model_file=tokenizer_path
                                 )
-                                print(f"   ✅ fugashiトークナイザー (vocab_size={vocab_size}) をロード")
+                                print(f"   ✅ SentencePieceトークナイザー (vocab_size={vocab_size}) をロード")
                         
                         total_params = sum(p.numel() for p in self.model.parameters())
                         print(f"✅ {config['name']} ロード完了 ({total_params:,}パラメータ)")
@@ -1638,11 +1653,11 @@ def train_model(
             'config': config,
             'model_size': model_size,
             'tokenizer': {
-                'type': 'tiktoken',
-                'encoding': 'o200k_base'
+                'type': 'sentencepiece',
+                'model_file': '/root/neuroq/neuroq_tokenizer_oasst1_ja.model'
             }
         }
-        
+
         # 定点テスト
         print("📝 定点テスト生成 (Sampling Temp=0.7):")
         # OASST形式のプロンプトでモデルを誘導
@@ -1704,8 +1719,8 @@ def train_model(
         'config': config,
         'model_size': model_size,
         'tokenizer': {
-            'type': 'tiktoken',
-            'encoding': 'o200k_base'
+            'type': 'sentencepiece',
+            'model_file': '/root/neuroq/neuroq_tokenizer_oasst1_ja.model'
         }
     }
     torch.save(final_save_data, final_path)

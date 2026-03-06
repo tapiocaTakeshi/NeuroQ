@@ -2,10 +2,9 @@
 """
 NeuroQ モデル設定ファイル（neuroq-runpod用）
 
-OpenAI text-embedding-3 の次元数に対応したモデル設定
+NeuroQ モデル設定
 
-text-embedding-3-small: 1536次元
-text-embedding-3-large: 3072次元
+トークナイザー: SentencePiece (neuroq_tokenizer_oasst1_ja.model, vocab_size=8000)
 
 使用例:
     from model_configs import NEUROQ_SMALL, NEUROQ_LARGE, create_model, get_model_config
@@ -34,7 +33,7 @@ if current_dir not in sys.path:
 NEUROQ_MICRO = {
     'name': 'NeuroQ-Micro',
     'description': '軽量高速モデル（開発・テスト用）',
-    'vocab_size': 200019,      # o200k_base
+    'vocab_size': 8000,        # SentencePiece (neuroq_tokenizer_oasst1_ja.model)
     'embed_dim': 128,
     'num_heads': 4,
     'num_layers': 6,
@@ -46,7 +45,7 @@ NEUROQ_MICRO = {
 NEUROQ_SMALL = {
     'name': 'NeuroQ-Small',
     'description': '軽量モデル (256次元)',
-    'vocab_size': 200019,      # o200k_base
+    'vocab_size': 8000,        # SentencePiece (neuroq_tokenizer_oasst1_ja.model)
     'embed_dim': 256,
     'num_heads': 8,
     'num_layers': 12,
@@ -58,7 +57,7 @@ NEUROQ_SMALL = {
 NEUROQ_LARGE = {
     'name': 'NeuroQ-Large',
     'description': '標準モデル (384次元)',
-    'vocab_size': 200019,      # o200k_base
+    'vocab_size': 8000,        # SentencePiece (neuroq_tokenizer_oasst1_ja.model)
     'embed_dim': 384,
     'num_heads': 8,
     'num_layers': 18,
