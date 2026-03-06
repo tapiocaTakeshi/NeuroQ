@@ -30,11 +30,23 @@ if current_dir not in sys.path:
 # NeuroQ モデル設定
 # ===============================
 
+# ===============================
+# 推奨トークナイザー設定
+# ===============================
+# 小型モデル（<200Mパラメータ）では vocab_size=200k は大きすぎます。
+# embedding層だけでパラメータの大部分を消費してしまいます。
+# 例: vocab_size=200019, embed_dim=128 → embedding だけで 25.6M パラメータ
+#
+# 推奨: SentencePiece (unigram) with vocab_size=8000〜16000
+# これにより embedding パラメータが大幅に削減され、
+# モデルの学習容量を文法・意味の学習に使えます。
+RECOMMENDED_VOCAB_SIZE = 16000  # SentencePiece unigram 推奨サイズ
+
 # 既存の小さいモデル（高速・軽量）
 NEUROQ_MICRO = {
     'name': 'NeuroQ-Micro',
     'description': '軽量高速モデル（開発・テスト用）',
-    'vocab_size': 200019,      # o200k_base
+    'vocab_size': 16000,       # SentencePiece unigram 推奨（旧: 200019 o200k_base）
     'embed_dim': 128,
     'num_heads': 4,
     'num_layers': 6,
@@ -46,7 +58,7 @@ NEUROQ_MICRO = {
 NEUROQ_SMALL = {
     'name': 'NeuroQ-Small',
     'description': '軽量モデル (256次元)',
-    'vocab_size': 200019,      # o200k_base
+    'vocab_size': 16000,       # SentencePiece unigram 推奨（旧: 200019 o200k_base）
     'embed_dim': 256,
     'num_heads': 8,
     'num_layers': 12,
@@ -58,7 +70,7 @@ NEUROQ_SMALL = {
 NEUROQ_LARGE = {
     'name': 'NeuroQ-Large',
     'description': '標準モデル (384次元)',
-    'vocab_size': 200019,      # o200k_base
+    'vocab_size': 16000,       # SentencePiece unigram 推奨（旧: 200019 o200k_base）
     'embed_dim': 384,
     'num_heads': 8,
     'num_layers': 18,
