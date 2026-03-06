@@ -1,0 +1,13 @@
+{
+  "input": {
+    "action": "generate",
+    "mode": "layered",
+    "prompt": "量子コンピュータについて教えて",
+    "max_length": 150,
+    "temp_min": 0.35,
+    "temp_max": 0.7,
+    "top_k": 40,
+    "top_p": 0.9,
+    "pretrain": true
+  }
+}
