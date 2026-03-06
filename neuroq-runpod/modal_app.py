@@ -1157,7 +1157,8 @@ def fastapi_app():
                 "embeddings": "POST /embeddings",
                 "decode_embeddings": "POST /decode_embeddings",
                 "train": "POST /train",
-                "train_status": "GET /train/status/{call_id}"
+                "train_status": "GET /train/status/{call_id}",
+                "learned_datasets": "GET /learned_datasets"
             },
             "generate_params": {
                 "prompt": "ユーザー入力（必須）",
@@ -1351,7 +1352,23 @@ def fastapi_app():
                 "status": "error",
                 "error": str(e)
             }
-    
+
+    @web_app.get("/learned_datasets")
+    async def learned_datasets():
+        """学習済みデータセット一覧を返す"""
+        import json
+        learned_path = "/model_checkpoints/learned_datasets.json"
+        try:
+            checkpoints_volume.reload()
+            if os.path.exists(learned_path):
+                with open(learned_path, "r") as f:
+                    data = json.load(f)
+                return {"learned_datasets": data}
+            else:
+                return {"learned_datasets": []}
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=str(e))
+
     return web_app
 
 
@@ -1692,6 +1709,31 @@ def train_model(
         }
     }
     torch.save(final_save_data, final_path)
+
+    # 学習済みデータセット情報をJSONに記録
+    import json
+    from datetime import datetime, timezone, timedelta
+    learned_path = "/model_checkpoints/learned_datasets.json"
+    try:
+        if os.path.exists(learned_path):
+            with open(learned_path, "r") as f:
+                learned = json.load(f)
+        else:
+            learned = []
+
+        ds_info = datasets_with_config or [{"id": d} for d in (dataset_ids or [])]
+        learned.append({
+            "model_size": model_size,
+            "datasets": ds_info,
+            "epochs": epochs,
+            "best_val_loss": float(best_val_loss),
+            "trained_at": datetime.now(timezone(timedelta(hours=9))).isoformat(),
+        })
+        with open(learned_path, "w") as f:
+            json.dump(learned, f, ensure_ascii=False, indent=2)
+    except Exception as e:
+        print(f"⚠️ learned_datasets.json 保存失敗: {e}")
+
     checkpoints_volume.commit()
     return {"status": "success", "best_val_loss": best_val_loss}
 
