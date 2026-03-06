@@ -404,11 +404,53 @@ def find_tokenizer_file(dataset_config: dict) -> str:
     return None
 
 
+def _is_japanese_text(text: str, threshold: float = 0.3) -> bool:
+    """
+    テキストが日本語かどうかを判定する
+
+    日本語文字（ひらがな、カタカナ、漢字）の割合が threshold 以上なら日本語と判定。
+    小型モデルでは多言語混在を避けるため、日本語のみにフィルタリングすることが重要。
+
+    Args:
+        text: 判定対象のテキスト
+        threshold: 日本語文字の最低割合（デフォルト: 0.3 = 30%）
+
+    Returns:
+        日本語テキストならTrue
+    """
+    if not text:
+        return False
+
+    japanese_count = 0
+    total_chars = 0
+
+    for char in text:
+        if char.isspace():
+            continue
+        total_chars += 1
+        # ひらがな: U+3040-U+309F
+        # カタカナ: U+30A0-U+30FF
+        # CJK統合漢字: U+4E00-U+9FFF
+        # CJK統合漢字拡張A: U+3400-U+4DBF
+        cp = ord(char)
+        if (0x3040 <= cp <= 0x309F or  # ひらがな
+            0x30A0 <= cp <= 0x30FF or  # カタカナ
+            0x4E00 <= cp <= 0x9FFF or  # CJK統合漢字
+            0x3400 <= cp <= 0x4DBF):   # CJK統合漢字拡張A
+            japanese_count += 1
+
+    if total_chars == 0:
+        return False
+
+    return (japanese_count / total_chars) >= threshold
+
+
 def _load_from_huggingface(dataset_config: dict) -> list:
     """
     HuggingFace Hub からデータセットをダウンロードしてテキストリストを返す
 
     load_dataset(id, config) パターンで読み込む。
+    言語設定が 'ja' の場合、日本語テキストのみをフィルタリングする。
 
     Args:
         dataset_config: データセット設定辞書
@@ -428,6 +470,7 @@ def _load_from_huggingface(dataset_config: dict) -> list:
     hf_config = dataset_config['config']
     text_field = dataset_config.get('hf_text_field', 'text')
     max_samples = dataset_config.get('hf_max_samples')
+    target_language = dataset_config.get('language', 'ja')
 
     print(f"🌐 HuggingFace からデータセットをロード中...")
     print(f"   load_dataset('{hf_id}', '{hf_config}')" if hf_config
@@ -448,9 +491,16 @@ def _load_from_huggingface(dataset_config: dict) -> list:
 
     # テキストフィールドを抽出
     texts = []
+    filtered_count = 0
     for i, item in enumerate(ds):
-        if max_samples and i >= max_samples:
+        if max_samples and len(texts) >= max_samples:
             break
+
+        # lang フィールドがある場合はそれでフィルタリング
+        if 'lang' in item and target_language == 'ja':
+            if item['lang'] != 'ja':
+                filtered_count += 1
+                continue
 
         if text_field and text_field in item:
             text = item[text_field]
@@ -473,9 +523,16 @@ def _load_from_huggingface(dataset_config: dict) -> list:
                 continue
 
         if isinstance(text, str) and text.strip():
+            # 日本語データセットの場合、テキスト内容でも日本語判定を行う
+            if target_language == 'ja' and 'lang' not in item:
+                if not _is_japanese_text(text):
+                    filtered_count += 1
+                    continue
             texts.append(text.strip())
 
     print(f"   {len(texts)} 個のテキストを読み込みました")
+    if filtered_count > 0:
+        print(f"   ⚠️ {filtered_count} 個の非日本語テキストを除外しました")
     return texts
 
 
